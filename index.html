@@ -122,7 +122,7 @@
     min-width: 0;
   }
   .pick[aria-pressed="true"] { border-color: var(--cyan); box-shadow: 0 0 0 1px var(--cyan), 0 0 22px rgba(37,217,255,0.25); }
-  .pick .portrait { width: 100%; height: 120px; display: block; }
+  .pick .portrait { width: 100%; height: 96px; display: block; }
   .pick .nm { font-family: var(--display); font-weight: 700; font-size: 15px; text-transform: uppercase; letter-spacing: 0.05em; }
   .pick .af { font-size: 11px; color: var(--muted); }
   .pick dl { margin: 6px 0 0; display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; font-size: 11px; }
@@ -143,6 +143,14 @@
   #codeInput { font: 900 40px var(--display); letter-spacing: 0.3em; text-align: center; text-transform: uppercase; padding: 10px; border-radius: 12px; border: 1px solid var(--cyan); background: rgba(10,8,30,0.9); color: var(--ball); width: 100%; box-sizing: border-box; }
   .end-score { font-family: var(--display); font-size: 44px; font-weight: 900; color: var(--ball); font-variant-numeric: tabular-nums; }
   .btns { display: flex; gap: 10px; flex-wrap: wrap; }
+  .opts { display: grid; grid-template-columns: auto 1fr; gap: 8px 12px; align-items: center; }
+  .opts .seg button { padding-top: 8px; padding-bottom: 8px; }
+  @media (max-height: 760px) {
+    .sheet { gap: 12px; }
+    #menu .lede, .pick dl { display: none; }
+    .pick .portrait { height: 76px; }
+  }
+  .btn.link { background: none; border-color: transparent; color: var(--cyan); text-decoration: underline; text-underline-offset: 4px; }
   @media (prefers-reduced-motion: reduce) { #msg.pop { animation: none; } }
 </style>
 </head>
@@ -166,7 +174,7 @@
 <div class="overlay" id="menu">
   <div class="sheet">
     <div class="title"><span>Cyberpunk</span><b>Tennis</b></div>
-    <p class="lede">One set on a rooftop parking lot under the night sky. First to six games, tiebreak at 6–6.</p>
+    <p class="lede">One set on a rooftop parking lot under the night sky. Tiebreak at 6–6.</p>
     <div class="label">Choose your player</div>
     <div class="picks">
       <button class="pick" data-char="octopus" aria-pressed="true">
@@ -182,22 +190,37 @@
         <dl><dt>Style</dt><dd>Aggressive</dd><dt>Best wing</dt><dd>Topspin forehand</dd><dt>Feet</dt><dd>Quickest</dd></dl>
       </button>
     </div>
-    <div class="label">Automove</div>
+    <button class="btn primary" id="play">Play vs CPU</button>
+    <div class="label">Play a friend online</div>
     <div class="seg">
-      <button data-auto="on" aria-pressed="true">On</button>
-      <button data-auto="off" aria-pressed="false">Off</button>
+      <button id="hostBtn">Create room</button>
+      <button id="joinBtn">Join room</button>
     </div>
-    <div class="label">Ball speed</div>
-    <div class="seg">
-      <button data-speed="0.65" aria-pressed="false">Chill</button>
-      <button data-speed="0.8" aria-pressed="true">Club</button>
-      <button data-speed="1" aria-pressed="false">Pro</button>
+    <div class="opts">
+      <div class="label">Automove</div>
+      <div class="seg">
+        <button data-auto="on" aria-pressed="true">On</button>
+        <button data-auto="off" aria-pressed="false">Off</button>
+      </div>
+      <div class="label">Ball speed</div>
+      <div class="seg">
+        <button data-speed="0.65" aria-pressed="false">Chill</button>
+        <button data-speed="0.8" aria-pressed="true">Club</button>
+        <button data-speed="1" aria-pressed="false">Pro</button>
+      </div>
+      <div class="label">Music</div>
+      <div class="seg">
+        <button data-music="on" aria-pressed="true">On</button>
+        <button data-music="off" aria-pressed="false">Off</button>
+      </div>
     </div>
-    <div class="label">Music</div>
-    <div class="seg">
-      <button data-music="on" aria-pressed="true">On</button>
-      <button data-music="off" aria-pressed="false">Off</button>
-    </div>
+    <button class="btn link" id="howBtn">How to play</button>
+  </div>
+</div>
+
+<div class="overlay" id="help" hidden>
+  <div class="sheet">
+    <div class="title"><b>How to play</b></div>
     <ul class="how">
       <li><b>Tap</b><span>Run to that spot. With automove on, your player chases the ball for you and a tap overrides it until the next shot. On your serve, tap to toss.</span></li>
       <li><b>Swipe</b><span>Hit. The swipe's direction is where the ball goes, and its length is how deep: a short swipe drops it short. A downward slice swipe aims the other way: top-left to bottom-right goes left.</span></li>
@@ -206,12 +229,7 @@
       <li><b>Timing</b><span>Swipe as the ring closes. Late forehands drift right, late backhands drift left.</span></li>
       <li><b>Stamina</b><span>Running and repeated power shots tire you. The striped part of the bar is gone for the set.</span></li>
     </ul>
-    <button class="btn primary" id="play">Play vs CPU</button>
-    <div class="label">Play a friend online</div>
-    <div class="seg">
-      <button id="hostBtn">Create room</button>
-      <button id="joinBtn">Join room</button>
-    </div>
+    <button class="btn primary" id="helpClose">Got it</button>
   </div>
 </div>
 

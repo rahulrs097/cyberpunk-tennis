@@ -502,6 +502,8 @@
     $('pauseBtn').addEventListener('click', () => setPaused(true));
     $('resume').addEventListener('click', () => setPaused(false));
     $('quit').addEventListener('click', () => { leaveFullscreen(); showMenu(); });
+    $('howBtn').addEventListener('click', () => { $('help').hidden = false; });
+    $('helpClose').addEventListener('click', () => { $('help').hidden = true; });
     $('hostBtn').addEventListener('click', hostRoom);
     $('joinBtn').addEventListener('click', () => { leaveOnline(true); lobby('Enter the 4-letter code your friend sees.', '', true); $('codeInput').value = ''; $('codeInput').focus(); });
     $('lobbyGo').addEventListener('click', () => {
