@@ -12,6 +12,8 @@
   let speedSetting = 0.8;
   let autoMove = true;
   try { const v = localStorage.getItem('ct.autoMove'); if (v !== null) autoMove = v === '1'; } catch (e) { /* storage is optional */ }
+  let musicOn = true;
+  try { const v = localStorage.getItem('ct.music'); if (v !== null) musicOn = v === '1'; } catch (e) { /* storage is optional */ }
   let lastFrame = performance.now();
   let msgTimer = 0;
   let shotTimer = 0;
@@ -19,8 +21,9 @@
   // ---------------- sound ----------------
   let audio = null, muted = false;
   function ensureAudio() {
-    if (audio || muted) return;
+    if (audio) return;
     try { audio = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audio = null; }
+    if (audio) { CT.Music.setOn(musicOn); CT.Music.start(audio); }
   }
   function blip(freq, dur, type, gain, slide) {
     if (!audio || muted) return;
@@ -247,6 +250,17 @@
     hintForState();
   }
 
+  function setMusic(on) {
+    musicOn = on;
+    try { localStorage.setItem('ct.music', on ? '1' : '0'); } catch (e) { /* storage is optional */ }
+    document.querySelectorAll('[data-music]').forEach((b) => b.setAttribute('aria-pressed', String((b.dataset.music === 'on') === on)));
+    const pb = $('musicPause');
+    pb.setAttribute('aria-pressed', String(on));
+    pb.textContent = on ? 'Music on' : 'Music off';
+    ensureAudio();
+    CT.Music.setOn(on);
+  }
+
   function setPaused(v) {
     if (!game || game.phase === 'matchOver') return;
     paused = v;
@@ -275,7 +289,10 @@
     canvas.addEventListener('pointerup', onUp, { passive: false });
     canvas.addEventListener('pointercancel', () => { touch = null; });
     window.addEventListener('resize', () => { if (game) layout(); });
-    document.addEventListener('visibilitychange', () => { if (document.hidden) setPaused(true); });
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) { setPaused(true); if (audio) audio.suspend(); }
+      else if (audio) audio.resume();
+    });
     document.querySelectorAll('.pick').forEach((b) => b.addEventListener('click', () => pickChar(b.dataset.char)));
     document.querySelectorAll('[data-speed]').forEach((b) => b.addEventListener('click', () => {
       speedSetting = parseFloat(b.dataset.speed);
@@ -284,6 +301,10 @@
     document.querySelectorAll('[data-auto]').forEach((b) => b.addEventListener('click', () => setAutoMove(b.dataset.auto === 'on')));
     $('autoPause').addEventListener('click', () => setAutoMove(!autoMove));
     setAutoMove(autoMove);
+    document.querySelectorAll('[data-music]').forEach((b) => b.addEventListener('click', () => setMusic(b.dataset.music === 'on')));
+    $('musicPause').addEventListener('click', () => setMusic(!musicOn));
+    document.querySelectorAll('[data-music]').forEach((b) => b.setAttribute('aria-pressed', String((b.dataset.music === 'on') === musicOn)));
+    $('musicPause').textContent = musicOn ? 'Music on' : 'Music off';
     $('play').addEventListener('click', () => { ensureAudio(); startMatch(); });
     $('rematch').addEventListener('click', startMatch);
     $('toMenu').addEventListener('click', () => { $('end').hidden = true; $('menu').hidden = false; game = null; });

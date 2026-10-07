@@ -186,9 +186,14 @@
       <button data-speed="0.8" aria-pressed="true">Club</button>
       <button data-speed="1" aria-pressed="false">Pro</button>
     </div>
+    <div class="label">Music</div>
+    <div class="seg">
+      <button data-music="on" aria-pressed="true">On</button>
+      <button data-music="off" aria-pressed="false">Off</button>
+    </div>
     <ul class="how">
       <li><b>Tap</b><span>Run to that spot. With automove on, your player chases the ball for you and a tap overrides it until the next shot. On your serve, tap to toss.</span></li>
-      <li><b>Swipe</b><span>Hit. The swipe's direction is where the ball goes.</span></li>
+      <li><b>Swipe</b><span>Hit. The swipe's direction is where the ball goes. A downward slice swipe aims the other way: top-left to bottom-right goes left.</span></li>
       <li><b>Spin</b><span>Swipe up for topspin, down for slice. Bend the swipe for sidespin.</span></li>
       <li><b>Pace</b><span>A fast flick hits hard and flat. A slow swipe adds spin and safety.</span></li>
       <li><b>Timing</b><span>Swipe as the ring closes. Late forehands drift right, late backhands drift left.</span></li>
@@ -204,6 +209,7 @@
     <div class="btns">
       <button class="btn primary" id="resume">Resume</button>
       <button class="btn" id="autoPause" aria-pressed="true">Automove on</button>
+      <button class="btn" id="musicPause" aria-pressed="true">Music on</button>
       <button class="btn" id="mute" aria-pressed="false">Sound on</button>
       <button class="btn" id="quit">Quit match</button>
     </div>
@@ -226,6 +232,7 @@
 <script src="js/match.js"></script>
 <script src="js/game.js"></script>
 <script src="js/render.js"></script>
+<script src="js/music.js"></script>
 <script src="js/main.js"></script>
 </body>
 </html>
