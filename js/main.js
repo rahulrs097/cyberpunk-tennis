@@ -9,7 +9,7 @@
   let game = null;
   let paused = false;
   let humanChar = 'octopus';
-  let speedSetting = 0.6;
+  let speedSetting = 0.8;
   let autoMove = true;
   try { const v = localStorage.getItem('ct.autoMove'); if (v !== null) autoMove = v === '1'; } catch (e) { /* storage is optional */ }
   let lastFrame = performance.now();
@@ -176,8 +176,9 @@
     const tail = Math.hypot(end.x - pts[k].x, end.y - pts[k].y) / Math.max(16, end.t - pts[k].t);
     const v = Math.max(tail, chord / dur) * 1000;                // px per second
     const u = v / Math.min(window.innerWidth, window.innerHeight);  // screens per second
-    const pace = CT.clamp((u - 1.0) / (6.5 - 1.0), 0, 1);
-    const over = CT.clamp((u - 9) / 4, 0, 1);
+    // A normal phone flick (about half the screen in ~150 ms) is close to full pace.
+    const pace = CT.clamp((u - 0.7) / (3.8 - 0.7), 0, 1);
+    const over = CT.clamp((u - 7) / 4, 0, 1);
     const spinDir = dy < 0 ? 1 : -1;
     let aim = Math.atan2(dx, Math.abs(dy));
     // bow of the path, measured towards screen-right
