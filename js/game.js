@@ -181,12 +181,12 @@
       margin = 2.2 - over * 2;
       side *= 0.3;
     } else {
-      speed = lerp(13, ch.pace[wing], pace) * capF;
+      speed = lerp(15, ch.pace[wing], pace) * capF;
       if (kind === 'power') speed *= 1.12;
       const sm = ch.spin[wing];
-      spin = lerp(sm, sm * 0.2, pace);
+      spin = lerp(sm, sm * 0.12, pace);
       if (input.spinDir < 0) spin = -spin * 0.75;
-      margin = input.spinDir < 0 ? 2.2 + 2.4 * (1 - pace) : 1.0 + 2.6 * (1 - pace);
+      margin = input.spinDir < 0 ? 1.8 + 2.4 * (1 - pace) : 0.7 + 2.8 * (1 - pace);
       margin -= over * 2.5;
       if (kind === 'volley') { speed *= 0.72; spin *= 0.3; }
     }
@@ -360,7 +360,7 @@
     const curve = rand(-0.25, 0.25);
     let input = null;
     for (let i = 0; i < 6; i++) {
-      const along = COURT.HL - (1 + 2.6 * (1 - pace)) - fwd * b.pos.y;
+      const along = COURT.HL - (0.7 + 2.8 * (1 - pace)) - fwd * b.pos.y;
       const aim = Math.atan2(fwd * (tx - b.pos.x), along);
       input = { aim, pace, over: 0, spinDir, curve };
       const shot = computeShot(g, c, input, 0);
