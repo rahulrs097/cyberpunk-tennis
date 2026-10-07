@@ -18,7 +18,7 @@
   const PHYS = {
     G: 9.81,
     R: 0.033,          // ball radius
-    K_DRAG: 0.0165,    // quadratic air drag
+    K_DRAG: 0.014,     // quadratic air drag
     K_MAG: 0.26,       // topspin dip (per unit spin, per m/s)
     K_SIDE: 0.10,      // sidespin curve
     DT: 1 / 240,       // fixed simulation step
