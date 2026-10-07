@@ -64,6 +64,8 @@
 
   function emit(g, type, data) { g.onEvent(type, data || {}); }
   function staminaF(p) { return p.stamina / 100; }
+  // Tired legs: top speed falls to 55% on empty.
+  function moveSpeed(p) { return p.ch.speed * (0.55 + 0.45 * staminaF(p)); }
 
   // ---------------- point setup ----------------
   function startPoint(g, fresh) {
@@ -117,7 +119,7 @@
 
   // ---------------- hitting ----------------
   function windowFor(p, wing) {
-    return p.ch.window[wing] * (0.6 + 0.4 * staminaF(p));
+    return p.ch.window[wing] * (0.35 + 0.65 * staminaF(p));
   }
 
   function canReach(g, p) {
@@ -174,7 +176,7 @@
     const drift = e * 0.065 * (wing === 'fh' ? 1 : -1);
     const powerF = Math.max(0.7, 1 - 0.1 * Math.pow(Math.abs(e), 1.5));
     const pace = clamp(input.pace, 0, 1), over = clamp(input.over || 0, 0, 1);
-    const capF = 0.82 + 0.18 * f;
+    const capF = 0.68 + 0.32 * f;   // tired arms: up to a third less pace
     let speed, spin, margin, minClear = 0.12, depthLine = COURT.HL;
     let side = clamp(input.curve || 0, -1, 1);
 
@@ -312,7 +314,7 @@
   function cpuPlan(g, c) {
     const b = CT.cloneBall(g.ball);
     const ch = c.ch, fwd = c.fwd, R = fwd;   // R: +x is the CPU's right when fwd = 1
-    const speed = ch.speed * (0.7 + 0.3 * staminaF(c));
+    const speed = moveSpeed(c);
     let t = 0, bounces = b.bounces;
     const cands = [];
     let step = 0;
@@ -488,7 +490,7 @@
       if (p.swing >= 0) { p.swing += dt / 0.28; if (p.swing > 1.2) p.swing = -1; }
       const dx = p.tx - p.x, dy = p.ty - p.y;
       const d = Math.hypot(dx, dy);
-      const sp = p.ch.speed * (0.7 + 0.3 * staminaF(p));
+      const sp = moveSpeed(p);
       if (d > 0.02 && g.time >= p.reactUntil) {
         const ux = dx / d, uy = dy / d;
         // turning sharply means slowing down first
@@ -507,7 +509,8 @@
       } else {
         p.moving = false;
         if (d <= 0.02) p.v = 0;
-        p.stamina = Math.min(p.cap, p.stamina + 1.2 * dt);
+        // a breather between points restores far more than standing mid-rally
+        p.stamina = Math.min(p.cap, p.stamina + (g.phase === 'rally' ? 2 : 7) * dt);
       }
     }
   }
