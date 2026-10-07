@@ -304,7 +304,11 @@
     net.link = CT.Net.connect(code, 'guest', onNet);
     lobby('Connecting to room ' + code + '…', '', false);
     // keep knocking until the host answers
-    const hello = () => send({ t: 'hello', char: humanChar, autoMove });
+    const t0 = performance.now();
+    const hello = () => {
+      send({ t: 'hello', char: humanChar, autoMove });
+      if (performance.now() - t0 > 8000) lobby('No answer from room ' + code + '. Check the code, and that your friend is still on the room screen.', '', true);
+    };
     hello();
     net.timer = setInterval(hello, 500);
   }
