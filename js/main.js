@@ -143,6 +143,7 @@
     $('endScore').textContent = score;
     $('end').hidden = false;
     leaveFullscreen();
+    CT.Music.setPlaying(false);
   }
 
   // ---------------- input ----------------
@@ -244,6 +245,7 @@
 
   // A CPU-vs-CPU rally plays behind the menu.
   function showMenu() {
+    CT.Music.setPlaying(false);
     $('end').hidden = true;
     $('pauseMenu').hidden = true;
     paused = false;
@@ -254,6 +256,7 @@
 
   function startMatch() {
     goFullscreen();
+    CT.Music.setPlaying(true);
     touch = null;
     const cpuChar = humanChar === 'octopus' ? 'philosopher' : 'octopus';
     // events fired while the game is being built are ignored; the HUD is

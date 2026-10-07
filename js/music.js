@@ -36,7 +36,7 @@
   const LEAD_B = [19, 17, 15, null, 19, 22, 24, null, 22, 19, 17, 15, 14, null, 12, null];
 
   let ctx = null, out = null, noise = null;
-  let on = true, timer = null;
+  let on = true, playing = false, timer = null;
   let section = 0, bar = 0, step = 0, nextTime = 0;
 
   function makeNoise() {
@@ -118,7 +118,7 @@
   }
 
   function schedule() {
-    if (!ctx || !on || ctx.state !== 'running') return;
+    if (!ctx || !on || !playing || ctx.state !== 'running') return;
     // after a stall, don't try to catch up on missed notes
     if (nextTime < ctx.currentTime - 0.05) nextTime = ctx.currentTime + 0.05;
     while (nextTime < ctx.currentTime + LOOKAHEAD) {
@@ -133,7 +133,7 @@
     if (ctx || !audioCtx) return;
     ctx = audioCtx;
     out = ctx.createGain();
-    out.gain.value = on ? VOLUME : 0;
+    out.gain.value = on && playing ? VOLUME : 0;
     // soften the square waves a little
     const lp = ctx.createBiquadFilter();
     lp.type = 'lowpass'; lp.frequency.value = 6000;
@@ -146,9 +146,22 @@
   function setOn(v) {
     on = !!v;
     if (!ctx) return;
-    out.gain.setTargetAtTime(on ? VOLUME : 0, ctx.currentTime, 0.05);
+    out.gain.setTargetAtTime(on && playing ? VOLUME : 0, ctx.currentTime, 0.05);
     if (on) nextTime = ctx.currentTime + 0.05;
   }
 
-  CT.Music = { start, setOn, isOn: () => on };
+  // The track plays during a match only: it starts from the top when a match
+  // begins and fades out when it ends.
+  function setPlaying(v) {
+    v = !!v;
+    if (v === playing) return;
+    playing = v;
+    if (v) { section = 0; bar = 0; step = 0; }
+    if (!ctx) return;
+    out.gain.cancelScheduledValues(ctx.currentTime);
+    out.gain.setTargetAtTime(on && playing ? VOLUME : 0, ctx.currentTime, playing ? 0.05 : 0.25);
+    if (v) nextTime = ctx.currentTime + 0.05;
+  }
+
+  CT.Music = { start, setOn, setPlaying, isOn: () => on, isPlaying: () => playing };
 })();
