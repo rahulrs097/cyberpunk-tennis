@@ -181,13 +181,16 @@
       margin = 2.2 - over * 2;
       side *= 0.3;
     } else {
-      speed = lerp(15, ch.pace[wing], pace) * capF;
-      if (kind === 'power') speed *= 1.12;
+      speed = lerp(ch.paceMin, ch.pace[wing], pace) * capF;
       const sm = ch.spin[wing];
       spin = lerp(sm, sm * 0.12, pace);
       if (input.spinDir < 0) spin = -spin * 0.75;
       margin = input.spinDir < 0 ? 1.8 + 2.4 * (1 - pace) : 0.7 + 2.8 * (1 - pace);
       margin -= over * 2.5;
+      if (kind === 'power') {
+        // A high ball can be driven down hard and flat.
+        speed *= 1.22; spin *= 0.5; margin *= 0.7;
+      }
       if (kind === 'volley') { speed *= 0.72; spin *= 0.3; }
     }
 
@@ -324,7 +327,10 @@
         const dist = Math.hypot(px - c.x, py - c.y);
         const slack = t - (dist / speed + 0.12);
         let q = -Math.abs(z - 1.0) + (bounced ? 0.4 : 0);
-        if (z >= ch.overheadZ && !bounced) q += 0.6;
+        // Punish high balls: smash them out of the air, or take them at
+        // shoulder height after the bounce for a power shot.
+        if (z >= ch.overheadZ && !bounced) q += 2.2;
+        else if (bounced && z >= POWER_Z + 0.1) q += 1.0 + 0.5 * (z - POWER_Z);
         q -= Math.max(0, -fwd * py - ch.home) * 0.25;   // don't drift too far back
         if (ch.id === 'octopus') q += 0.05 * t + (wing === 'bh' ? 0.05 : 0);
         else q += -0.1 * t + (wing === 'fh' ? 0.08 : 0);

@@ -192,6 +192,8 @@
     if (Math.abs(bulge) < 0.04) bulge = 0;
     const curve = -CT.clamp(bulge * 5, -1, 1);
     aim += CT.clamp(bulge * 0.45, -0.12, 0.12);
+    // A slice is swiped the other way: top-left to bottom-right goes left.
+    if (spinDir < 0) aim = -aim;
     CT.requestSwipe(game, HUMAN, { aim, pace, over, spinDir, curve });
   }
 

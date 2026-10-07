@@ -11,12 +11,13 @@
       after: 'Daniil Medvedev',
       blurb: 'Lives deep behind the baseline. Long tentacles, a flat backhand, and stamina for days.',
       height: 1.98,
-      speed: 6.0,          // top running speed, m/s
+      speed: 5.0,          // top running speed, m/s
       reach: 1.9,          // lateral reach from the body
       overheadZ: 2.45,     // balls above this are smashed
       maxZ: 3.25,          // highest ball he can touch
-      pace: { fh: 33, bh: 35 },      // speed caps, m/s
-      spin: { fh: 0.75, bh: 0.6 },   // spin caps
+      pace: { fh: 34, bh: 35 },      // speed caps, m/s
+      paceMin: 24,                   // slowest rally ball: Octopus keeps it low and flat
+      spin: { fh: 0.42, bh: 0.34 },  // spin caps
       serve: 58,
       window: { fh: 0.075, bh: 0.10 }, // timing windows, seconds of real time
       drain: 0.22,         // stamina per metre run
@@ -31,11 +32,12 @@
       after: 'Stefanos Tsitsipas',
       blurb: 'Heavy topspin forehand, one-handed backhand, and quick feet. Thinks before every point.',
       height: 1.93,
-      speed: 6.5,
+      speed: 5.4,
       reach: 1.7,
       overheadZ: 2.35,
       maxZ: 3.1,
       pace: { fh: 37, bh: 30 },
+      paceMin: 16,
       spin: { fh: 1.15, bh: 0.85 },
       serve: 56,
       window: { fh: 0.10, bh: 0.065 },
