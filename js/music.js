@@ -7,7 +7,7 @@
   const BPM = 140;
   const STEP = 60 / BPM / 4;          // one sixteenth note
   const LOOKAHEAD = 0.15;              // seconds scheduled ahead of the clock
-  const VOLUME = 0.6;                  // master level (peaks around 0.55)
+  const VOLUME = 1.0;                  // master level; the game's limiter catches peaks
 
   // MIDI note helpers
   const A2 = 45;
@@ -129,7 +129,7 @@
   }
 
   // Attach to the game's AudioContext (created on the first tap).
-  function start(audioCtx) {
+  function start(audioCtx, dest) {
     if (ctx || !audioCtx) return;
     ctx = audioCtx;
     out = ctx.createGain();
@@ -137,7 +137,7 @@
     // soften the square waves a little
     const lp = ctx.createBiquadFilter();
     lp.type = 'lowpass'; lp.frequency.value = 6000;
-    out.connect(lp).connect(ctx.destination);
+    out.connect(lp).connect(dest || ctx.destination);
     noise = makeNoise();
     nextTime = ctx.currentTime + 0.1;
     timer = setInterval(schedule, 50);

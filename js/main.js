@@ -19,11 +19,21 @@
   let shotTimer = 0;
 
   // ---------------- sound ----------------
-  let audio = null, muted = false;
+  let audio = null, master = null, muted = false;
+  const SFX_GAIN = 2.6;   // sound effects level
   function ensureAudio() {
     if (audio) return;
     try { audio = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audio = null; }
-    if (audio) { CT.Music.setOn(musicOn); CT.Music.start(audio); }
+    if (!audio) return;
+    // Everything runs through a limiter so it can be loud without crackling.
+    master = audio.createDynamicsCompressor();
+    master.threshold.value = -10; master.knee.value = 6; master.ratio.value = 12;
+    master.attack.value = 0.003; master.release.value = 0.15;
+    const makeup = audio.createGain();
+    makeup.gain.value = 1.4;
+    master.connect(makeup).connect(audio.destination);
+    CT.Music.setOn(musicOn);
+    CT.Music.start(audio, master);
   }
   function blip(freq, dur, type, gain, slide) {
     if (!audio || muted) return;
@@ -33,9 +43,9 @@
       o.type = type || 'square';
       o.frequency.setValueAtTime(freq, t);
       if (slide) o.frequency.exponentialRampToValueAtTime(slide, t + dur);
-      gn.gain.setValueAtTime(gain || 0.08, t);
+      gn.gain.setValueAtTime((gain || 0.08) * SFX_GAIN, t);
       gn.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-      o.connect(gn).connect(audio.destination);
+      o.connect(gn).connect(master);
       o.start(t); o.stop(t + dur + 0.02);
     } catch (e) { /* audio is optional */ }
   }
@@ -181,6 +191,9 @@
     const u = v / Math.min(window.innerWidth, window.innerHeight);  // screens per second
     // A normal phone flick (about half the screen in ~150 ms) is close to full pace.
     const pace = CT.clamp((u - 0.7) / (3.8 - 0.7), 0, 1);
+    // Swipe length sets depth: a short swipe drops the ball short, a swipe
+    // of about 40% of the screen or more goes to the baseline.
+    const depth = CT.clamp((chord / Math.min(window.innerWidth, window.innerHeight) - 0.1) / 0.3, 0, 1);
     const over = CT.clamp((u - 7) / 4, 0, 1);
     const spinDir = dy < 0 ? 1 : -1;
     let aim = Math.atan2(dx, Math.abs(dy));
@@ -197,7 +210,7 @@
     aim += CT.clamp(bulge * 0.45, -0.12, 0.12);
     // A slice is swiped the other way: top-left to bottom-right goes left.
     if (spinDir < 0) aim = -aim;
-    CT.requestSwipe(game, HUMAN, { aim, pace, over, spinDir, curve });
+    CT.requestSwipe(game, HUMAN, { aim, pace, over, spinDir, curve, depth });
   }
 
   // ---------------- flow ----------------

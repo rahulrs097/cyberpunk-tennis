@@ -215,7 +215,15 @@
     const dir = { x: fwd * Math.sin(a), y: fwd * Math.cos(a) };
     // Mistiming costs power: the ball comes off slower and shorter, and a
     // badly mistimed one may not clear the net at all.
-    const along = Math.max(1.5, depthLine - margin - fwd * pos.y - (1 - powerF) * 9);
+    // Short swipes aim short (down to ~3 m past the net) and come off softer
+    // so they can actually land there.
+    let target = depthLine - margin;
+    if (kind !== 'serve') {
+      const depth = input.depth === undefined ? 1 : clamp(input.depth, 0, 1);
+      target = lerp(3.2, target, depth);
+      speed *= lerp(0.5, 1, depth);
+    }
+    const along = Math.max(1.5, target - fwd * pos.y - (1 - powerF) * 9);
     const dist = along / Math.cos(a);
     const sol = CT.solveLaunch(pos, dir, speed * powerF, spin, side, dist, minClear - (1 - powerF) * 0.7);
     const vel = sol.vel;
@@ -591,6 +599,7 @@
   }
 
   CT.createGame = createGame;
+  CT._computeShot = computeShot;   // for tests
   CT.updateGame = update;
   CT.requestMove = requestMove;
   CT.requestToss = requestToss;
