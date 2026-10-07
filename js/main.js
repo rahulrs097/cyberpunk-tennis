@@ -325,7 +325,8 @@
   function hostStart() {
     net.started = true;
     me = 0;
-    const cfg = { p0: humanChar, p1: net.guestChar, timeScale: speedSetting, control: ['human', 'remote'], autoMove: [autoMove, net.guestAuto] };
+    // online matches always use Pro ball speed
+    const cfg = { p0: humanChar, p1: net.guestChar, timeScale: 1, control: ['human', 'remote'], autoMove: [autoMove, net.guestAuto] };
     send({ t: 'start', p0: cfg.p0, p1: cfg.p1, timeScale: cfg.timeScale });
     $('lobby').hidden = true;
     beginMatch(cfg);
