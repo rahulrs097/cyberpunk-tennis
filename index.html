@@ -139,6 +139,8 @@
   .how { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; font-size: 13px; line-height: 1.4; }
   .how li { display: grid; grid-template-columns: 74px 1fr; gap: 10px; }
   .how b { font-weight: 600; color: var(--cyan); text-transform: uppercase; font-size: 11px; letter-spacing: 0.1em; padding-top: 2px; }
+  .room-code { font-family: var(--display); font-size: 64px; font-weight: 900; letter-spacing: 0.18em; color: var(--ball); text-align: center; text-shadow: 0 0 18px rgba(228,255,74,0.45); }
+  #codeInput { font: 900 40px var(--display); letter-spacing: 0.3em; text-align: center; text-transform: uppercase; padding: 10px; border-radius: 12px; border: 1px solid var(--cyan); background: rgba(10,8,30,0.9); color: var(--ball); width: 100%; box-sizing: border-box; }
   .end-score { font-family: var(--display); font-size: 44px; font-weight: 900; color: var(--ball); font-variant-numeric: tabular-nums; }
   .btns { display: flex; gap: 10px; flex-wrap: wrap; }
   @media (prefers-reduced-motion: reduce) { #msg.pop { animation: none; } }
@@ -204,7 +206,25 @@
       <li><b>Timing</b><span>Swipe as the ring closes. Late forehands drift right, late backhands drift left.</span></li>
       <li><b>Stamina</b><span>Running and repeated power shots tire you. The striped part of the bar is gone for the set.</span></li>
     </ul>
-    <button class="btn primary" id="play">Play</button>
+    <button class="btn primary" id="play">Play vs CPU</button>
+    <div class="label">Play a friend online</div>
+    <div class="seg">
+      <button id="hostBtn">Create room</button>
+      <button id="joinBtn">Join room</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="lobby" hidden>
+  <div class="sheet">
+    <div class="title"><b>Online</b></div>
+    <p class="lede" id="lobbyText"></p>
+    <div class="room-code" id="roomCode"></div>
+    <input id="codeInput" maxlength="4" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="CODE" aria-label="Room code">
+    <div class="btns">
+      <button class="btn primary" id="lobbyGo">Join</button>
+      <button class="btn" id="lobbyCancel">Cancel</button>
+    </div>
   </div>
 </div>
 
@@ -238,6 +258,7 @@
 <script src="js/game.js"></script>
 <script src="js/render.js"></script>
 <script src="js/music.js"></script>
+<script src="js/net.js"></script>
 <script src="js/main.js"></script>
 </body>
 </html>

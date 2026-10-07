@@ -53,6 +53,9 @@
       events: [],
       onEvent: opts.onEvent || (() => {}),
       lastShot: null,
+      // A remote copy (the guest's phone in an online match) only moves the
+      // ball and players between the host's snapshots; the host owns the rules.
+      remote: !!opts.remote,
     };
     startPoint(g, true);
     return g;
@@ -282,13 +285,17 @@
   }
 
   // A swipe from a controller. `input` as in computeShot.
-  function requestSwipe(g, side, input) {
+  // `errOverride` (seconds, + = late) is timing already judged on the guest's
+  // phone against the ball it saw, so network delay doesn't make it late.
+  function requestSwipe(g, side, input, errOverride) {
+    if (g.remote) return;
     const p = g.players[side];
     const b = g.ball;
+    const given = typeof errOverride === 'number';
     if (g.phase === 'toss' && g.server === side) {
       let peak = g.peakT;
       if (peak === null) peak = g.time + Math.max(0, b.vel.z) / PHYS.G;
-      const err = (g.time - peak) / g.timeScale;
+      const err = given ? errOverride : (g.time - peak) / g.timeScale;
       if (Math.abs(err) > OUTER * windowFor(p, 'fh')) {
         emit(g, 'whiff', { side, reason: err < 0 ? 'Too early, wait for the top of the toss' : 'Too late' });
         return;
@@ -298,6 +305,14 @@
     }
     if (!incomingTo(g, p)) return;
     const Wout = OUTER * Math.max(windowFor(p, 'fh'), windowFor(p, 'bh'));
+    if (given) {
+      if (errOverride > Wout) { emit(g, 'whiff', { side, reason: 'Too late' }); return; }
+      if (errOverride < -Wout) { emit(g, 'whiff', { side, reason: 'Too early' }); return; }
+      // the ball may already have reached them here while the swipe was in flight
+      if (p.cross && p.cross.t >= g.lastHitT) tryHit(g, p, input, errOverride);
+      else p.pending = { t: g.time, input, err: errOverride };
+      return;
+    }
     if (p.cross && p.cross.t >= g.lastHitT) {
       const err = (g.time - p.cross.t) / g.timeScale;
       if (err <= Wout) { tryHit(g, p, input, err); return; }
@@ -550,7 +565,7 @@
             return;
           }
         } else if (p.pending) {
-          const err = (p.pending.t - g.time) / g.timeScale;
+          const err = p.pending.err !== undefined ? p.pending.err : (p.pending.t - g.time) / g.timeScale;
           const input = p.pending.input;
           p.pending = null;
           tryHit(g, p, input, err);
@@ -562,7 +577,27 @@
   }
   function c_hasPlan(p) { return !!p.plan && !p.leaving; }
 
+  // The guest's copy between snapshots: ball flight and running only, plus the
+  // moments its swipe timing is judged against (toss peak, contact plane).
+  function stepRemote(g, dt) {
+    g.time += dt;
+    updatePlayers(g, dt);
+    const b = g.ball;
+    if (!b.active) return;
+    const vz = b.vel.z;
+    const ev = CT.stepBall(b, dt);
+    if (g.phase === 'toss' && vz > 0 && b.vel.z <= 0) g.peakT = g.time;
+    if (ev === 'bounce' && g.phase === 'rally') b.bounces++;
+    for (const p of g.players) {
+      if (!incomingTo(g, p) || p.fwd * b.pos.y > 0) { p.prevRel = null; continue; }
+      const rel = p.fwd * b.pos.y - (p.fwd * p.y + CONTACT_AHEAD);
+      if (p.prevRel !== null && p.prevRel > 0 && rel <= 0) p.cross = { t: g.time, x: b.pos.x, y: b.pos.y, z: b.pos.z };
+      p.prevRel = rel;
+    }
+  }
+
   function stepOnce(g, dt) {
+    if (g.remote) { stepRemote(g, dt); return; }
     g.time += dt;
     updatePlayers(g, dt);
     const b = g.ball;
@@ -602,6 +637,7 @@
       g.trail.push({ ...g.ball.pos });
       if (g.trail.length > 10) g.trail.shift();
     }
+    if (g.remote) return;
     if (g.phase === 'fault' && g.phaseWall > 1.1) {
       const m = g.match;
       startPoint(g, true);
@@ -621,6 +657,46 @@
     return c ? { t: c.t / g.timeScale, x: c.x, y: c.y, z: c.z, reach: Math.abs(c.x - p.x) <= p.ch.reach && c.z <= p.ch.maxZ } : null;
   }
 
+  // ---------------- online ----------------
+  const SNAP_PLAYER = ['x', 'y', 'tx', 'ty', 'stamina', 'cap', 'run', 'streak', 'swing', 'swingWing', 'moving', 'v', 'dirX', 'dirY', 'reactUntil'];
+
+  // Everything the guest needs to draw the match, sent ~20 times a second.
+  function snapshot(g) {
+    return {
+      time: g.time, phase: g.phase, server: g.server, serveBox: g.serveBox,
+      peakT: g.peakT, lastHitT: g.lastHitT, match: g.match,
+      ball: CT.cloneBall(g.ball), predLand: g.predLand || null, lastShot: g.lastShot,
+      players: g.players.map((p) => { const o = {}; for (const k of SNAP_PLAYER) o[k] = p[k]; return o; }),
+    };
+  }
+
+  function applySnapshot(g, s) {
+    const fresh = s.lastHitT !== g.lastHitT || s.phase !== g.phase;
+    g.time = s.time; g.phase = s.phase; g.server = s.server; g.serveBox = s.serveBox;
+    g.peakT = s.peakT; g.lastHitT = s.lastHitT; g.match = s.match;
+    g.ball = s.ball; g.predLand = s.predLand; g.lastShot = s.lastShot;
+    s.players.forEach((q, i) => Object.assign(g.players[i], q));
+    if (fresh) for (const p of g.players) { p.cross = null; p.prevRel = null; }
+  }
+
+  // On the guest: how early (-) or late (+) a swipe is right now, judged
+  // against the ball on this screen. null = nothing to swing at.
+  function swipeTiming(g, side) {
+    const p = g.players[side], b = g.ball;
+    if (g.phase === 'toss' && g.server === side) {
+      const peak = g.peakT !== null ? g.peakT : g.time + Math.max(0, b.vel.z) / PHYS.G;
+      return { err: (g.time - peak) / g.timeScale };
+    }
+    if (!incomingTo(g, p)) return null;
+    if (p.cross && p.cross.t >= g.lastHitT) return { err: (g.time - p.cross.t) / g.timeScale };
+    const c = predictCross(g, p, 3);
+    if (!c) return { whiff: 'Nothing to hit' };
+    return { err: -c.t / g.timeScale };
+  }
+
+  CT.snapshot = snapshot;
+  CT.applySnapshot = applySnapshot;
+  CT.swipeTiming = swipeTiming;
   CT.createGame = createGame;
   CT._computeShot = computeShot;   // for tests
   CT.updateGame = update;

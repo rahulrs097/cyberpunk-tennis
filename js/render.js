@@ -507,7 +507,7 @@
     ctx.restore();
     const pose = {
       t: p.anim,
-      facing: p.side === 0 ? 'back' : 'front',
+      facing: p.side === r.human ? 'back' : 'front',
       swing: p.swing,
       wing: p.swingWing,
       running: p.moving,
@@ -597,6 +597,7 @@
     const dt = r.lastT ? Math.min(0.1, (now - r.lastT) / 1000) : 0;
     r.lastT = now;
     watchFrameRate(r, dt);
+    r.human = human;
     updateCamera(r, g, human, dt);
 
     const ctx = r.ctx;

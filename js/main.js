@@ -2,7 +2,8 @@
 (function () {
   const CT = window.CT;
   const $ = (id) => document.getElementById(id);
-  const HUMAN = 0;
+  let me = 0;          // the side of the court this phone plays (always drawn at the bottom)
+  let net = null;      // online match: { role: 'host' | 'guest', code, link, ... }
 
   const canvas = $('court');
   const renderer = CT.createRenderer(canvas);
@@ -75,8 +76,8 @@
     const srv = game.phase === 'preServe' || game.phase === 'toss' ? game.server : CT.currentServer(m);
     for (const side of [0, 1]) {
       const p = game.players[side];
-      const row = $('row' + side);
-      row.querySelector('.name').textContent = p.ch.name + (side === HUMAN ? ' (you)' : '');
+      const row = $('row' + (side === me ? 0 : 1));
+      row.querySelector('.name').textContent = p.ch.name + (side === me ? ' (you)' : '');
       row.querySelector('.games').textContent = m.games[side];
       row.querySelector('.pts').textContent = CT.pointLabel(m, side);
       row.querySelector('.serve').style.visibility = srv === side && !m.over ? 'visible' : 'hidden';
@@ -89,7 +90,7 @@
 
   function hintForState() {
     if (!game) return;
-    const humanServing = game.server === HUMAN;
+    const humanServing = game.server === me;
     if (game.phase === 'preServe') setHint(humanServing ? 'Tap to toss the ball' : autoMove ? 'Get ready to return' : 'Tap the court to move into position');
     else if (game.phase === 'toss' && humanServing) setHint('Swipe as the ball tops out in the ring');
     else if (game.phase === 'rally') setHint(autoMove ? 'Swipe as the ring closes · Tap to reposition' : 'Tap to move · Swipe as the ring closes');
@@ -100,7 +101,7 @@
     const names = game ? game.players.map((p) => p.ch.name) : ['', ''];
     if (type === 'hit') {
       blip(d.kind === 'overhead' || d.kind === 'serve' ? 220 : 330, 0.07, 'square', 0.09, 140);
-      if (d.side === HUMAN) {
+      if (d.side === me) {
         const kind = { fh: 'Forehand', bh: 'Backhand' }[d.wing];
         const label = d.kind === 'serve' ? 'Serve' : d.kind === 'overhead' ? 'Overhead' : d.kind === 'volley' ? kind + ' volley' : d.kind === 'power' ? 'Power ' + kind.toLowerCase() : d.kind === 'powerVolley' ? 'Power ' + kind.toLowerCase() + ' volley' : kind;
         const timing = d.perfect ? 'Perfect timing' : (d.errMs > 0 ? 'Late ' : 'Early ') + Math.abs(d.errMs) + ' ms';
@@ -110,15 +111,16 @@
       hintForState();
     } else if (type === 'bounce') {
       blip(120, 0.05, 'sine', 0.07);
+      if (net && net.role === 'guest') game.marks.push({ x: d.x, y: d.y, age: 0 });
     } else if (type === 'net') {
       blip(90, 0.12, 'sawtooth', 0.05);
     } else if (type === 'whiff') {
-      if (d.side === HUMAN) showShot(d.reason);
+      if (d.side === me) showShot(d.reason);
     } else if (type === 'fault') {
       showMsg(d.text === 'Net' ? 'Net' : 'Fault', 'Second serve', 'warn');
       blip(160, 0.2, 'sawtooth', 0.05, 90);
     } else if (type === 'point') {
-      const youWon = d.winner === HUMAN;
+      const youWon = d.winner === me;
       let sub = names[d.winner] + ' wins the point';
       if (d.result === 'game') sub = names[d.winner] + ' takes the game';
       if (d.result === 'set') sub = names[d.winner] + ' wins the set';
@@ -139,7 +141,7 @@
     const m = game.match;
     const w = game.players[winner].ch.name;
     const score = `${m.games[winner]}–${m.games[1 - winner]}` + (m.tiebreak ? ` (${m.points[winner]}–${m.points[1 - winner]})` : '');
-    $('endTitle').textContent = winner === HUMAN ? 'You win the set' : `${w} wins the set`;
+    $('endTitle').textContent = winner === me ? 'You win the set' : `${w} wins the set`;
     $('endScore').textContent = score;
     $('end').hidden = false;
     leaveFullscreen();
@@ -176,10 +178,17 @@
     handleSwipe(pts, dx, dy, chord, dur);
   }
 
+  const isGuest = () => !!(net && net.role === 'guest' && game && game.remote);
+
   function handleTap(x, y) {
-    if (game.phase === 'preServe' && game.server === HUMAN) { CT.requestToss(game, HUMAN); return; }
+    if (game.phase === 'preServe' && game.server === me) {
+      if (isGuest()) send({ t: 'in', k: 'toss' }); else CT.requestToss(game, me);
+      return;
+    }
     const w = CT.unproject(renderer, x, y);
-    if (w) CT.requestMove(game, HUMAN, w.x, w.y);
+    if (!w) return;
+    CT.requestMove(game, me, w.x, w.y);
+    if (isGuest()) send({ t: 'in', k: 'move', x: w.x, y: w.y });
   }
 
   // Turn a finger path into a shot: direction = aim, speed = pace vs spin,
@@ -212,7 +221,101 @@
     aim += CT.clamp(bulge * 0.45, -0.12, 0.12);
     // A slice is swiped the other way: top-left to bottom-right goes left.
     if (spinDir < 0) aim = -aim;
-    CT.requestSwipe(game, HUMAN, { aim, pace, over, spinDir, curve, depth });
+    const input = { aim, pace, over, spinDir, curve, depth };
+    if (isGuest()) {
+      // judge timing here, against the ball this player saw, then send it
+      const tm = CT.swipeTiming(game, me);
+      if (!tm) return;
+      if (tm.whiff) { showShot(tm.whiff); return; }
+      send({ t: 'in', k: 'swipe', input, err: tm.err });
+    } else CT.requestSwipe(game, me, input);
+  }
+
+  // ---------------- online ----------------
+  // The host's phone runs the match. The guest sends taps and swipes, and
+  // gets the match state back about 20 times a second plus every game event.
+  function send(m) { if (net) net.link.send(m); }
+
+  function lobby(text, code, joining) {
+    $('lobbyText').textContent = text;
+    $('roomCode').textContent = code || '';
+    $('roomCode').hidden = !code;
+    $('codeInput').hidden = !joining;
+    $('lobbyGo').hidden = !joining;
+    $('lobby').hidden = false;
+    $('menu').hidden = true;
+  }
+
+  function leaveOnline(tellOther) {
+    if (!net) return;
+    if (tellOther) send({ t: 'bye' });
+    clearInterval(net.timer);
+    net.link.close();
+    net = null;
+    me = 0;
+  }
+
+  function onNet(m) {
+    if (!net) return;
+    net.lastHeard = performance.now();
+    if (m.t === 'bye') { leaveOnline(false); showMenu(); showMsg('Opponent left', 'Back to the menu', 'warn'); return; }
+    if (net.role === 'host') {
+      if (m.t === 'hello' && !net.started) {
+        net.guestChar = CT.CHARACTERS[m.char] ? m.char : 'philosopher';
+        net.guestAuto = !!m.autoMove;
+        hostStart();
+      } else if (m.t === 'in' && game && net.started) {
+        if (m.k === 'move') CT.requestMove(game, 1, +m.x, +m.y);
+        else if (m.k === 'toss') CT.requestToss(game, 1);
+        else if (m.k === 'swipe') CT.requestSwipe(game, 1, m.input, +m.err);
+      } else if (m.t === 'auto' && game && net.started) {
+        net.guestAuto = !!m.on;
+        CT.setAutoMove(game, 1, net.guestAuto);
+      } else if (m.t === 'rematch' && game && game.phase === 'matchOver') hostStart();
+    } else {
+      if (m.t === 'start') {
+        net.started = true;
+        clearInterval(net.timer);
+        net.timer = setInterval(() => send({ t: 'ping' }), 1000);
+        me = 1;
+        $('lobby').hidden = true;
+        beginMatch({ p0: m.p0, p1: m.p1, timeScale: m.timeScale, control: ['remote', 'human'], remote: true });
+      } else if (m.t === 'st' && game && game.remote) {
+        CT.applySnapshot(game, m.s);
+      } else if (m.t === 'ev' && game && game.remote) {
+        onEvent(m.type, m.d);
+      }
+    }
+  }
+
+  function hostRoom() {
+    ensureAudio();
+    leaveOnline(true);
+    const code = CT.Net.makeCode();
+    net = { role: 'host', code, started: false, lastHeard: performance.now(), sendT: 0 };
+    net.link = CT.Net.connect(code, 'host', onNet);
+    lobby('Send this code to a friend. The match starts as soon as they join.', code, false);
+  }
+
+  function joinRoom(code) {
+    ensureAudio();
+    leaveOnline(true);
+    net = { role: 'guest', code, started: false, lastHeard: performance.now() };
+    net.link = CT.Net.connect(code, 'guest', onNet);
+    lobby('Connecting to room ' + code + '…', '', false);
+    // keep knocking until the host answers
+    const hello = () => send({ t: 'hello', char: humanChar, autoMove });
+    hello();
+    net.timer = setInterval(hello, 500);
+  }
+
+  function hostStart() {
+    net.started = true;
+    me = 0;
+    const cfg = { p0: humanChar, p1: net.guestChar, timeScale: speedSetting, control: ['human', 'remote'], autoMove: [autoMove, net.guestAuto] };
+    send({ t: 'start', p0: cfg.p0, p1: cfg.p1, timeScale: cfg.timeScale });
+    $('lobby').hidden = true;
+    beginMatch(cfg);
   }
 
   // ---------------- flow ----------------
@@ -245,6 +348,8 @@
 
   // A CPU-vs-CPU rally plays behind the menu.
   function showMenu() {
+    leaveOnline(true);
+    $('lobby').hidden = true;
     CT.Music.setPlaying(false);
     $('end').hidden = true;
     $('pauseMenu').hidden = true;
@@ -254,15 +359,29 @@
     layout();
   }
 
+  // Play vs CPU, or Rematch (online, the host restarts for both).
   function startMatch() {
+    if (net) {
+      if (net.role === 'host') hostStart(); else send({ t: 'rematch' });
+      return;
+    }
+    me = 0;
+    const cpuChar = humanChar === 'octopus' ? 'philosopher' : 'octopus';
+    beginMatch({ p0: humanChar, p1: cpuChar, timeScale: speedSetting, control: ['human', 'cpu'], autoMove: [autoMove, false] });
+  }
+
+  function beginMatch(cfg) {
     goFullscreen();
     CT.Music.setPlaying(true);
     touch = null;
-    const cpuChar = humanChar === 'octopus' ? 'philosopher' : 'octopus';
     // events fired while the game is being built are ignored; the HUD is
-    // refreshed below once it exists
+    // refreshed below once it exists. The host also forwards every event.
     let g = null;
-    g = CT.createGame({ p0: humanChar, p1: cpuChar, timeScale: speedSetting, firstServer: 0, autoMove: [autoMove, false], onEvent: (t, d) => { if (g && game === g) onEvent(t, d); } });
+    g = CT.createGame({ ...cfg, firstServer: 0, onEvent: (t, d) => {
+      if (!g || game !== g) return;
+      onEvent(t, d);
+      if (net && net.role === 'host') send({ t: 'ev', type: t, d });
+    } });
     game = g;
     $('menu').hidden = true;
     $('end').hidden = true;
@@ -277,13 +396,18 @@
   function frame(now) {
     const dt = Math.min(0.05, (now - lastFrame) / 1000);
     lastFrame = now;
-    if (game && !paused) {
+    // an online match can't be paused: the pause menu just sits over it
+    if (game && (!paused || net)) {
       CT.updateGame(game, dt);
+      if (net && net.started) {
+        if (net.role === 'host' && now - net.sendT > 50) { net.sendT = now; send({ t: 'st', s: CT.snapshot(game) }); }
+        if (now - net.lastHeard > 6000) { leaveOnline(false); showMenu(); showMsg('Connection lost', 'Back to the menu', 'warn'); }
+      }
       updateHud();
       if (msgTimer > 0) { msgTimer -= dt; if (msgTimer <= 0) $('msg').hidden = true; }
       if (shotTimer > 0) { shotTimer -= dt; if (shotTimer <= 0) $('shot').hidden = true; }
     }
-    if (game) CT.renderGame(renderer, game, HUMAN, paused ? null : CT.incomingInfo(game, HUMAN));
+    if (game) CT.renderGame(renderer, game, me, paused ? null : CT.incomingInfo(game, me));
     requestAnimationFrame(frame);
   }
 
@@ -299,7 +423,8 @@
     const pb = $('autoPause');
     pb.setAttribute('aria-pressed', String(on));
     pb.textContent = on ? 'Automove on' : 'Automove off';
-    if (game && game.control[HUMAN] === 'human') CT.setAutoMove(game, HUMAN, on);
+    if (game && game.control[me] === 'human') CT.setAutoMove(game, me, on);
+    if (isGuest()) send({ t: 'auto', on });
     hintForState();
   }
 
@@ -364,6 +489,15 @@
     $('pauseBtn').addEventListener('click', () => setPaused(true));
     $('resume').addEventListener('click', () => setPaused(false));
     $('quit').addEventListener('click', () => { leaveFullscreen(); showMenu(); });
+    $('hostBtn').addEventListener('click', hostRoom);
+    $('joinBtn').addEventListener('click', () => { leaveOnline(true); lobby('Enter the 4-letter code your friend sees.', '', true); $('codeInput').value = ''; $('codeInput').focus(); });
+    $('lobbyGo').addEventListener('click', () => {
+      const code = $('codeInput').value.toUpperCase().replace(/[^A-Z]/g, '');
+      if (code.length === 4) joinRoom(code);
+    });
+    $('codeInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('lobbyGo').click(); });
+    $('lobbyCancel').addEventListener('click', showMenu);
+    window.addEventListener('pagehide', () => leaveOnline(true));
     $('mute').addEventListener('click', () => {
       muted = !muted;
       $('mute').setAttribute('aria-pressed', String(muted));
