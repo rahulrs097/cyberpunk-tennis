@@ -8,7 +8,9 @@
   // The Cloudflare Worker relay. Add ?local to the page URL to use the
   // same-browser tab link instead (for testing on one machine).
   const local = /[?&]local\b/.test(location.search);
-  CT.RELAY_URL = CT.RELAY_URL || (local ? '' : 'wss://cyberpunk-tennis.rahulrs097.workers.dev');
+  // When the game is served by that same Worker, use its own address.
+  const sameHost = /\.workers\.dev$/.test(location.hostname) ? 'wss://' + location.host : '';
+  CT.RELAY_URL = CT.RELAY_URL || (local ? '' : sameHost || 'wss://cyberpunk-tennis.rahulrs097.workers.dev');
 
   // Letters that can't be misread for each other (no I/O/0/1).
   const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ';

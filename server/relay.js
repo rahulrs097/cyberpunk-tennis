@@ -3,13 +3,14 @@
 // message from one to the other unchanged. The game itself runs on the
 // host's phone; this only forwards.
 //
-// Clients connect to wss://<worker>/room/<CODE>?role=host|guest
+// Clients connect to wss://<worker>/room/<CODE>?role=host|guest. Every other
+// path is the game itself, served from the static files.
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const m = url.pathname.match(/^\/room\/([A-Z]{4})$/);
-    if (!m) return new Response('cyberpunk tennis relay', { status: 200 });
+    if (!m) return env.ASSETS ? env.ASSETS.fetch(request) : new Response('cyberpunk tennis relay');
     if (request.headers.get('Upgrade') !== 'websocket') return new Response('Expected a WebSocket', { status: 426 });
     const role = url.searchParams.get('role');
     if (role !== 'host' && role !== 'guest') return new Response('Bad role', { status: 400 });
