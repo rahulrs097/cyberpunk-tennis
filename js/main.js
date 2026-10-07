@@ -208,9 +208,38 @@
     CT.resizeRenderer(renderer, W, H, hud.bottom + Math.min(80, H * 0.08), 56, hud.bottom);
   }
 
+  // Fill the screen (browsers only allow this from a tap). iPhones don't
+  // support it for web pages; there the game is best added to the home screen.
+  function goFullscreen() {
+    const el = document.documentElement;
+    if (document.fullscreenElement || document.webkitFullscreenElement) return;
+    const req = el.requestFullscreen || el.webkitRequestFullscreen;
+    if (!req) return;
+    try {
+      const p = req.call(el, { navigationUI: 'hide' });
+      if (p && p.then) p.then(() => { try { screen.orientation.lock('portrait').catch(() => {}); } catch (e) { /* optional */ } }).catch(() => {});
+    } catch (e) { /* not allowed here */ }
+  }
+
+  // A CPU-vs-CPU rally plays behind the menu.
+  function showMenu() {
+    $('end').hidden = true;
+    $('pauseMenu').hidden = true;
+    paused = false;
+    $('menu').hidden = false;
+    game = CT.createGame({ p0: 'octopus', p1: 'philosopher', timeScale: 0.6, control: ['cpu', 'cpu'], onEvent: () => {} });
+    layout();
+  }
+
   function startMatch() {
+    goFullscreen();
+    touch = null;
     const cpuChar = humanChar === 'octopus' ? 'philosopher' : 'octopus';
-    game = CT.createGame({ p0: humanChar, p1: cpuChar, timeScale: speedSetting, firstServer: 0, autoMove: [autoMove, false], onEvent });
+    // events fired while the game is being built are ignored; the HUD is
+    // refreshed below once it exists
+    let g = null;
+    g = CT.createGame({ p0: humanChar, p1: cpuChar, timeScale: speedSetting, firstServer: 0, autoMove: [autoMove, false], onEvent: (t, d) => { if (g && game === g) onEvent(t, d); } });
+    game = g;
     $('menu').hidden = true;
     $('end').hidden = true;
     $('pauseMenu').hidden = true;
@@ -307,10 +336,10 @@
     $('musicPause').textContent = musicOn ? 'Music on' : 'Music off';
     $('play').addEventListener('click', () => { ensureAudio(); startMatch(); });
     $('rematch').addEventListener('click', startMatch);
-    $('toMenu').addEventListener('click', () => { $('end').hidden = true; $('menu').hidden = false; game = null; });
+    $('toMenu').addEventListener('click', showMenu);
     $('pauseBtn').addEventListener('click', () => setPaused(true));
     $('resume').addEventListener('click', () => setPaused(false));
-    $('quit').addEventListener('click', () => { $('pauseMenu').hidden = true; paused = false; game = null; $('menu').hidden = false; });
+    $('quit').addEventListener('click', showMenu);
     $('mute').addEventListener('click', () => {
       muted = !muted;
       $('mute').setAttribute('aria-pressed', String(muted));
@@ -320,9 +349,7 @@
     const fontsReady = document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve();
     fontsReady.then(() => { drawPortraits(); if (game) layout(); });
     drawPortraits();
-    // a demo rally behind the menu
-    game = CT.createGame({ p0: 'octopus', p1: 'philosopher', timeScale: 0.6, control: ['cpu', 'cpu'], onEvent: () => {} });
-    layout();
+    showMenu();
     requestAnimationFrame(frame);
     window.__CT_GAME = () => game;   // handy for debugging in the console
     window.__cam = renderer.cam;

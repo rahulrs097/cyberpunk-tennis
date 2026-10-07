@@ -7,6 +7,7 @@
   const BPM = 140;
   const STEP = 60 / BPM / 4;          // one sixteenth note
   const LOOKAHEAD = 0.15;              // seconds scheduled ahead of the clock
+  const VOLUME = 0.6;                  // master level (peaks around 0.55)
 
   // MIDI note helpers
   const A2 = 45;
@@ -132,7 +133,7 @@
     if (ctx || !audioCtx) return;
     ctx = audioCtx;
     out = ctx.createGain();
-    out.gain.value = on ? 0.25 : 0;
+    out.gain.value = on ? VOLUME : 0;
     // soften the square waves a little
     const lp = ctx.createBiquadFilter();
     lp.type = 'lowpass'; lp.frequency.value = 6000;
@@ -145,7 +146,7 @@
   function setOn(v) {
     on = !!v;
     if (!ctx) return;
-    out.gain.setTargetAtTime(on ? 0.25 : 0, ctx.currentTime, 0.05);
+    out.gain.setTargetAtTime(on ? VOLUME : 0, ctx.currentTime, 0.05);
     if (on) nextTime = ctx.currentTime + 0.05;
   }
 

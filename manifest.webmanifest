@@ -1,0 +1,9 @@
+{
+  "name": "Cyberpunk Tennis",
+  "short_name": "CT Tennis",
+  "start_url": ".",
+  "display": "fullscreen",
+  "orientation": "portrait",
+  "background_color": "#05040c",
+  "theme_color": "#05040c"
+}
