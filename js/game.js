@@ -171,7 +171,7 @@
     let kind;
     if (isServe) kind = 'serve';
     else if (pos.z >= ch.overheadZ) kind = 'overhead';
-    else if (b.bounces === 0) kind = 'volley';
+    else if (b.bounces === 0) kind = pos.z >= POWER_Z ? 'powerVolley' : 'volley';
     else if (pos.z >= POWER_Z) kind = 'power';
     else kind = 'ground';
 
@@ -208,6 +208,8 @@
         speed *= 1.22; spin *= 0.5; margin *= 0.7;
       }
       if (kind === 'volley') { speed *= 0.72; spin *= 0.3; }
+      // a volley above power height can be punched down hard
+      if (kind === 'powerVolley') { speed *= 1.1; spin *= 0.3; margin *= 0.7; }
     }
 
     let a;
@@ -244,7 +246,7 @@
     b.active = true; b.inFlight = true; b.bounces = 0; b.netted = false;
     b.lastHitter = p.side;
     b.isServe = shot.kind === 'serve';
-    if (shot.kind === 'power') { p.streak++; p.stamina = Math.max(0, p.stamina - 3 * p.streak); }
+    if (shot.kind === 'power' || shot.kind === 'powerVolley') { p.streak++; p.stamina = Math.max(0, p.stamina - 3 * p.streak); }
     else if (shot.kind === 'ground' || shot.kind === 'volley') p.streak = 0;
     p.swing = 0;
     p.swingWing = shot.kind === 'overhead' ? 'oh' : shot.kind === 'serve' ? 'serve' : shot.wing;
@@ -366,6 +368,7 @@
         let q = -Math.abs(z - 1.0) + (bounced ? 0.4 : 0);
         // at the net: volley it rather than backing up for the bounce
         if (c.atNet) q += bounced ? -1.5 : 0.8;
+        if (!bounced && z >= POWER_Z + 0.1 && z < ch.overheadZ) q += 0.6;   // power volley height
         // Punish high balls: smash them out of the air, or take them at
         // shoulder height after the bounce for a power shot.
         if (z >= ch.overheadZ && !bounced) q += 2.2;
