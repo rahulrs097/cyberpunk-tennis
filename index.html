@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Cyberpunk Tennis</title>
+<meta name="theme-color" content="#05040c">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600&family=Tektur:wght@500;700;900&display=swap">
+<style>
+  /* Layout: full-bleed canvas court, scoreboard pinned on top, overlays for menus. One deliberate dark neon look. */
+  :root {
+    --void: #05040c;
+    --panel: rgba(14, 10, 34, 0.78);
+    --ink: #eae6ff;
+    --muted: #9d95c9;
+    --cyan: #25d9ff;
+    --pink: #ff3fb4;
+    --gold: #ffc23d;
+    --ball: #e4ff4a;
+    --line: rgba(122, 92, 255, 0.35);
+    --display: "Tektur", "Chakra Petch", system-ui, sans-serif;
+    --ui: "Chakra Petch", system-ui, sans-serif;
+    color-scheme: dark;
+  }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--void);
+    color: var(--ink);
+    font-family: var(--ui);
+    overflow: hidden;
+    overscroll-behavior: none;
+    -webkit-user-select: none; user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #court { position: fixed; inset: 0; display: block; touch-action: none; }
+
+  #hud {
+    position: fixed; top: 0; left: 0; right: 0;
+    padding: calc(env(safe-area-inset-top, 0px) + 8px) 12px 0;
+    display: flex; align-items: flex-start; gap: 8px;
+    pointer-events: none;
+  }
+  .board {
+    flex: 1; min-width: 0;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 6px 10px;
+    display: grid; gap: 4px;
+    font-variant-numeric: tabular-nums;
+  }
+  .row { display: grid; grid-template-columns: 10px minmax(0, 1fr) 26px 34px; align-items: center; gap: 8px; }
+  .row .serve { width: 8px; height: 8px; border-radius: 50%; background: var(--ball); box-shadow: 0 0 8px var(--ball); }
+  .row .name { font-family: var(--display); font-weight: 700; font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--pc, var(--ink)); }
+  .row .games { font-size: 18px; font-weight: 600; text-align: right; }
+  .row .pts { font-size: 16px; font-weight: 600; text-align: right; color: var(--ball); }
+  .stam { grid-column: 2 / 5; position: relative; height: 4px; background: rgba(255,255,255,0.08); border-radius: 2px; overflow: hidden; }
+  .stam-fill { position: absolute; inset: 0 auto 0 0; background: var(--pc, var(--cyan)); box-shadow: 0 0 6px var(--pc, var(--cyan)); }
+  .stam-cap { position: absolute; top: 0; bottom: 0; right: 0; background: repeating-linear-gradient(135deg, rgba(255,63,108,0.55) 0 3px, transparent 3px 6px); }
+  #callout { font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--gold); min-height: 0; }
+  #callout:empty { display: none; }
+  .hud-btn {
+    pointer-events: auto;
+    background: var(--panel); color: var(--ink);
+    border: 1px solid var(--line); border-radius: 6px;
+    width: 40px; height: 40px; font: 600 15px var(--ui);
+  }
+
+  #msg {
+    position: fixed; left: 16px; right: 16px; top: 38%;
+    text-align: center; pointer-events: none;
+  }
+  #msg .big { font-family: var(--display); font-weight: 900; font-size: clamp(38px, 12vw, 72px); letter-spacing: 0.04em; text-transform: uppercase; line-height: 1; color: var(--ink); text-shadow: 0 0 18px var(--cyan); }
+  #msg[data-tone="good"] .big { text-shadow: 0 0 22px var(--cyan), 0 0 2px #fff; color: #dffbff; }
+  #msg[data-tone="bad"] .big { text-shadow: 0 0 22px var(--pink); color: #ffe1f3; }
+  #msg[data-tone="warn"] .big { text-shadow: 0 0 22px var(--gold); color: #fff3d6; }
+  #msg .sub { margin-top: 8px; font-size: 15px; color: var(--muted); letter-spacing: 0.05em; }
+  #msg.pop { animation: pop 0.35s ease-out; }
+  @keyframes pop { from { transform: scale(1.25); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+  #shot {
+    position: fixed; left: 16px; right: 16px;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 34px);
+    text-align: center; font-size: 13px; color: var(--ink);
+    text-shadow: 0 0 6px #000; pointer-events: none;
+    font-variant-numeric: tabular-nums;
+  }
+  #hint {
+    position: fixed; left: 16px; right: 16px;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
+    text-align: center; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); pointer-events: none;
+  }
+
+  .overlay {
+    position: fixed; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    padding: calc(env(safe-area-inset-top, 0px) + 16px) 16px calc(env(safe-area-inset-bottom, 0px) + 16px);
+    background: rgba(5, 4, 12, 0.72);
+    backdrop-filter: blur(3px);
+    overflow-y: auto;
+  }
+  .sheet { width: 100%; max-width: 440px; display: grid; gap: 16px; }
+  .title { font-family: var(--display); font-weight: 900; font-size: clamp(34px, 11vw, 54px); line-height: 0.95; letter-spacing: 0.02em; text-transform: uppercase; text-wrap: balance; }
+  .title span { display: block; color: var(--pink); text-shadow: 0 0 20px rgba(255,63,180,0.7); }
+  .title b { color: var(--cyan); text-shadow: 0 0 20px rgba(37,217,255,0.6); font-weight: 900; }
+  .lede { color: var(--muted); font-size: 14px; line-height: 1.45; margin: 0; }
+  .label { font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); }
+  .picks { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .pick {
+    display: grid; grid-template-rows: 120px auto auto; gap: 4px; text-align: left;
+    background: var(--panel); color: var(--ink);
+    border: 1px solid var(--line); border-radius: 6px; padding: 10px; font-family: var(--ui);
+    min-width: 0;
+  }
+  .pick[aria-pressed="true"] { border-color: var(--cyan); box-shadow: 0 0 0 1px var(--cyan), 0 0 22px rgba(37,217,255,0.25); }
+  .pick .portrait { width: 100%; height: 120px; display: block; }
+  .pick .nm { font-family: var(--display); font-weight: 700; font-size: 15px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .pick .af { font-size: 11px; color: var(--muted); }
+  .pick dl { margin: 6px 0 0; display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; font-size: 11px; }
+  .pick dt { color: var(--muted); }
+  .pick dd { margin: 0; font-variant-numeric: tabular-nums; }
+  .seg { display: flex; gap: 8px; }
+  .seg button, .btn {
+    flex: 1; min-height: 44px; border-radius: 6px; border: 1px solid var(--line);
+    background: var(--panel); color: var(--ink); font: 600 14px var(--ui); letter-spacing: 0.06em; text-transform: uppercase;
+  }
+  .seg button[aria-pressed="true"] { border-color: var(--gold); color: var(--gold); }
+  .btn.primary { background: var(--pink); border-color: var(--pink); color: #14001a; font-family: var(--display); font-weight: 700; font-size: 17px; box-shadow: 0 0 24px rgba(255,63,180,0.45); }
+  button:focus-visible { outline: 2px solid var(--ball); outline-offset: 2px; }
+  .how { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; font-size: 13px; line-height: 1.4; }
+  .how li { display: grid; grid-template-columns: 74px 1fr; gap: 10px; }
+  .how b { font-weight: 600; color: var(--cyan); text-transform: uppercase; font-size: 11px; letter-spacing: 0.1em; padding-top: 2px; }
+  .end-score { font-family: var(--display); font-size: 44px; font-weight: 900; color: var(--ball); font-variant-numeric: tabular-nums; }
+  .btns { display: flex; gap: 10px; flex-wrap: wrap; }
+  @media (prefers-reduced-motion: reduce) { #msg.pop { animation: none; } }
+</style>
+</head>
+<body>
+
+<canvas id="court" aria-label="Tennis court"></canvas>
+
+<div id="hud">
+  <div class="board" aria-live="polite">
+    <div class="row" id="row1"><span class="serve"></span><span class="name"></span><span class="games">0</span><span class="pts">0</span><div class="stam"><div class="stam-fill"></div><div class="stam-cap"></div></div></div>
+    <div class="row" id="row0"><span class="serve"></span><span class="name"></span><span class="games">0</span><span class="pts">0</span><div class="stam"><div class="stam-fill"></div><div class="stam-cap"></div></div></div>
+    <div id="callout"></div>
+  </div>
+  <button class="hud-btn" id="pauseBtn" aria-label="Pause">II</button>
+</div>
+
+<div id="msg" hidden><div class="big"></div><div class="sub"></div></div>
+<div id="shot" hidden></div>
+<div id="hint"></div>
+
+<div class="overlay" id="menu">
+  <div class="sheet">
+    <div class="title"><span>Cyberpunk</span><b>Tennis</b></div>
+    <p class="lede">One set on a rooftop parking lot under the night sky. First to six games, tiebreak at 6–6.</p>
+    <div class="label">Choose your player</div>
+    <div class="picks">
+      <button class="pick" data-char="octopus" aria-pressed="true">
+        <canvas class="portrait" data-char="octopus"></canvas>
+        <span class="nm">Octopus</span>
+        <span class="af">After Daniil Medvedev</span>
+        <dl><dt>Style</dt><dd>Deep defender</dd><dt>Best wing</dt><dd>Flat backhand</dd><dt>Reach</dt><dd>Longest</dd></dl>
+      </button>
+      <button class="pick" data-char="philosopher" aria-pressed="false">
+        <canvas class="portrait" data-char="philosopher"></canvas>
+        <span class="nm">Philosopher</span>
+        <span class="af">After Stefanos Tsitsipas</span>
+        <dl><dt>Style</dt><dd>Aggressive</dd><dt>Best wing</dt><dd>Topspin forehand</dd><dt>Feet</dt><dd>Quickest</dd></dl>
+      </button>
+    </div>
+    <div class="label">Automove</div>
+    <div class="seg">
+      <button data-auto="on" aria-pressed="true">On</button>
+      <button data-auto="off" aria-pressed="false">Off</button>
+    </div>
+    <div class="label">Ball speed</div>
+    <div class="seg">
+      <button data-speed="0.5" aria-pressed="false">Chill</button>
+      <button data-speed="0.6" aria-pressed="true">Club</button>
+      <button data-speed="0.72" aria-pressed="false">Pro</button>
+    </div>
+    <ul class="how">
+      <li><b>Tap</b><span>Run to that spot. With automove on, your player chases the ball for you and a tap overrides it until the next shot. On your serve, tap to toss.</span></li>
+      <li><b>Swipe</b><span>Hit. The swipe's direction is where the ball goes.</span></li>
+      <li><b>Spin</b><span>Swipe up for topspin, down for slice. Bend the swipe for sidespin.</span></li>
+      <li><b>Pace</b><span>A fast flick hits hard and flat. A slow swipe adds spin and safety.</span></li>
+      <li><b>Timing</b><span>Swipe as the ring closes. Late forehands drift right, late backhands drift left.</span></li>
+      <li><b>Stamina</b><span>Running and repeated power shots tire you. The striped part of the bar is gone for the set.</span></li>
+    </ul>
+    <button class="btn primary" id="play">Play</button>
+  </div>
+</div>
+
+<div class="overlay" id="pauseMenu" hidden>
+  <div class="sheet">
+    <div class="title"><b>Paused</b></div>
+    <div class="btns">
+      <button class="btn primary" id="resume">Resume</button>
+      <button class="btn" id="autoPause" aria-pressed="true">Automove on</button>
+      <button class="btn" id="mute" aria-pressed="false">Sound on</button>
+      <button class="btn" id="quit">Quit match</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="end" hidden>
+  <div class="sheet">
+    <div class="title"><b id="endTitle">Set</b></div>
+    <div class="end-score" id="endScore"></div>
+    <div class="btns">
+      <button class="btn primary" id="rematch">Rematch</button>
+      <button class="btn" id="toMenu">Change player</button>
+    </div>
+  </div>
+</div>
+
+<script src="js/physics.js"></script>
+<script src="js/characters.js"></script>
+<script src="js/match.js"></script>
+<script src="js/game.js"></script>
+<script src="js/render.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
