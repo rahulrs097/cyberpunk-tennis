@@ -78,10 +78,15 @@
     S.x = S.fwd * rs * 0.7; S.y = -S.fwd * (COURT.HL + 0.3);
     const boxSign = deuce ? Rp.fwd : -Rp.fwd;     // receiver's deuce box is on their right
     Rp.x = boxSign * 2.5; Rp.y = -Rp.fwd * Rp.ch.returnDepth;
+    // A short breather between points; a proper rest at the changeover
+    // (after every odd game). Never above the cap.
+    const gamesPlayed = m.games[0] + m.games[1];
+    const changeover = gamesPlayed !== g.lastGames && gamesPlayed % 2 === 1;
+    g.lastGames = gamesPlayed;
     for (const p of g.players) {
       p.tx = p.x; p.ty = p.y; p.swing = -1; p.pending = null; p.plan = null;
-      p.cross = null; p.prevRel = null; p.streak = 0;
-      if (!fresh) p.stamina = Math.min(p.cap, p.stamina + 14);
+      p.cross = null; p.prevRel = null; p.streak = 0; p.v = 0; p.atNet = false;
+      if (!fresh) p.stamina = Math.min(p.cap, p.stamina + (changeover ? 25 : 8));
     }
     g.serveBox = { side: recv, sign: boxSign };
     g.server = server;
@@ -306,9 +311,19 @@
   // ---------------- CPU ----------------
   function cpuRecover(g, c) {
     const opp = g.players[1 - c.side];
+    c.plan = null;
+    // Once in the front half of the court, hold the net instead of
+    // retreating: cover the line the ball went down, a few metres back.
+    if (-c.fwd * c.y < 7.5) {
+      c.atNet = true;
+      const bx = g.ball.active ? g.ball.pos.x : 0;
+      c.tx = clamp(c.x * 0.4 + bx * 0.4, -3, 3);
+      c.ty = -c.fwd * clamp(-c.fwd * c.y, 2.6, 4.2);
+      return;
+    }
+    c.atNet = false;
     c.tx = clamp(opp.x * 0.15, -1.5, 1.5);
     c.ty = -c.fwd * c.ch.home;
-    c.plan = null;
   }
 
   function cpuPlan(g, c) {
@@ -338,7 +353,7 @@
       if (bounced) { if (z < 0.25 || z > ch.maxZ) continue; }
       else {
         if (g.ball.isServe) continue;
-        if (z < 0.45 || z > ch.maxZ) continue;
+        if (z < (c.atNet ? 0.3 : 0.45) || z > ch.maxZ) continue;
         if (fwd * b.pos.y < -8 && z < ch.overheadZ) continue;   // only volley near the net
       }
       for (const wing of ['fh', 'bh']) {
@@ -349,6 +364,8 @@
         const dist = Math.hypot(px - c.x, py - c.y);
         const slack = t - ((c.reactUntil - g.time) + runTime(dist, speed) + 0.12);
         let q = -Math.abs(z - 1.0) + (bounced ? 0.4 : 0);
+        // at the net: volley it rather than backing up for the bounce
+        if (c.atNet) q += bounced ? -1.5 : 0.8;
         // Punish high balls: smash them out of the air, or take them at
         // shoulder height after the bounce for a power shot.
         if (z >= ch.overheadZ && !bounced) q += 2.2;
@@ -510,7 +527,7 @@
         p.moving = false;
         if (d <= 0.02) p.v = 0;
         // a breather between points restores far more than standing mid-rally
-        p.stamina = Math.min(p.cap, p.stamina + (g.phase === 'rally' ? 2 : 7) * dt);
+        p.stamina = Math.min(p.cap, p.stamina + (g.phase === 'rally' ? 0.6 : 1.5) * dt);
       }
     }
   }

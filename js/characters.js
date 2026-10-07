@@ -20,7 +20,7 @@
       spin: { fh: 0.42, bh: 0.34 },  // spin caps
       serve: 58,
       window: { fh: 0.075, bh: 0.10 }, // timing windows, seconds of real time
-      drain: 0.9,          // stamina per metre run
+      drain: 0.5,          // stamina per metre run
       capDrain: 0.03,      // hard-cap loss per metre run
       home: 13.4,          // rally depth (distance from the net)
       returnDepth: 14.2,
@@ -41,7 +41,7 @@
       spin: { fh: 1.15, bh: 0.85 },
       serve: 56,
       window: { fh: 0.10, bh: 0.065 },
-      drain: 1.05,
+      drain: 0.6,
       capDrain: 0.036,
       home: 12.7,
       returnDepth: 13.3,
