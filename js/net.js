@@ -5,8 +5,10 @@
 (function () {
   const CT = (window.CT = window.CT || {});
 
-  // e.g. 'wss://cyberpunk-tennis-relay.<account>.workers.dev'
-  CT.RELAY_URL = CT.RELAY_URL || '';
+  // The Cloudflare Worker relay. Add ?local to the page URL to use the
+  // same-browser tab link instead (for testing on one machine).
+  const local = /[?&]local\b/.test(location.search);
+  CT.RELAY_URL = CT.RELAY_URL || (local ? '' : 'wss://cyberpunk-tennis.rahulrs097.workers.dev');
 
   // Letters that can't be misread for each other (no I/O/0/1).
   const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ';

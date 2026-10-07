@@ -288,12 +288,20 @@
     }
   }
 
+  // only matters before the match starts; mid-match the 6 s silence check handles it
+  function onLink(n, status) {
+    if (net !== n || net.started || status === 'open') return;
+    clearInterval(net.timer);
+    lobby("Couldn't reach the online server. Check your connection and try again.", '', net.role === 'guest');
+  }
+
   function hostRoom() {
     ensureAudio();
     leaveOnline(true);
     const code = CT.Net.makeCode();
     net = { role: 'host', code, started: false, lastHeard: performance.now(), sendT: 0 };
-    net.link = CT.Net.connect(code, 'host', onNet);
+    const n = net;
+    net.link = CT.Net.connect(code, 'host', onNet, (st) => onLink(n, st));
     lobby('Send this code to a friend. The match starts as soon as they join.', code, false);
   }
 
@@ -301,7 +309,8 @@
     ensureAudio();
     leaveOnline(true);
     net = { role: 'guest', code, started: false, lastHeard: performance.now() };
-    net.link = CT.Net.connect(code, 'guest', onNet);
+    const n = net;
+    net.link = CT.Net.connect(code, 'guest', onNet, (st) => onLink(n, st));
     lobby('Connecting to room ' + code + '…', '', false);
     // keep knocking until the host answers
     const t0 = performance.now();
