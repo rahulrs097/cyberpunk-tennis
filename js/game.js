@@ -10,6 +10,14 @@
   const POWER_Z = 1.3;          // balls above this can be hit as power shots
   const CONTACT_AHEAD = 0.35;   // ideal contact point in front of the body
   const OUTER = 2.5;            // a swipe more than this many windows off whiffs
+  const REACT = 0.24;           // split-step: seconds before an auto-moving player can react to a shot
+  const ACCEL = 8;              // m/s² from a standstill to top speed
+
+  // Seconds to run `dist` metres from a standstill at top speed `sp`.
+  function runTime(dist, sp) {
+    const dA = (sp * sp) / (2 * ACCEL);
+    return dist < dA ? Math.sqrt((2 * dist) / ACCEL) : (dist - dA) / sp + sp / ACCEL;
+  }
   const fwdOf = (side) => (side === 0 ? 1 : -1);
   const rand = (a, b) => a + Math.random() * (b - a);   // CPU shot selection only
 
@@ -20,6 +28,7 @@
       stamina: 100, cap: 100, run: 0, streak: 0,
       swing: -1, swingWing: 'fh', moving: false, anim: side * 1.7,
       prevRel: null, cross: null, pending: null, plan: null,
+      v: 0, dirX: 0, dirY: 0, reactUntil: 0,
     };
   }
 
@@ -163,7 +172,7 @@
     const e = clamp(err / W, -OUTER, OUTER);
     // Late forehands drift to the hitter's right, late backhands to the left.
     const drift = e * 0.065 * (wing === 'fh' ? 1 : -1);
-    const powerF = Math.max(0.5, 1 - 0.16 * Math.pow(Math.abs(e), 1.5));
+    const powerF = Math.max(0.7, 1 - 0.1 * Math.pow(Math.abs(e), 1.5));
     const pace = clamp(input.pace, 0, 1), over = clamp(input.over || 0, 0, 1);
     const capF = 0.82 + 0.18 * f;
     let speed, spin, margin, minClear = 0.12, depthLine = COURT.HL;
@@ -240,7 +249,10 @@
     const fl = CT.flight(b.pos, b.vel, b.spin, b.side);
     g.predLand = fl.land;
     const other = g.players[1 - p.side];
-    if (autoMoves(g, other.side)) cpuPlan(g, other);
+    // auto-moving players need a moment to read the shot; a human moving
+    // themselves already has their own reaction time
+    // (returners split-step as the server swings, so they react faster)
+    if (autoMoves(g, other.side)) { other.reactUntil = g.time + (b.isServe ? 0.08 : REACT); cpuPlan(g, other); }
     if (autoMoves(g, p.side)) cpuRecover(g, p);
     emit(g, 'hit', info);
   }
@@ -325,7 +337,7 @@
         let py = b.pos.y - fwd * CONTACT_AHEAD;
         if (fwd * py > -0.8 || fwd * py < -16.5) continue;
         const dist = Math.hypot(px - c.x, py - c.y);
-        const slack = t - (dist / speed + 0.12);
+        const slack = t - ((c.reactUntil - g.time) + runTime(dist, speed) + 0.12);
         let q = -Math.abs(z - 1.0) + (bounced ? 0.4 : 0);
         // Punish high balls: smash them out of the air, or take them at
         // shoulder height after the bounce for a power shot.
@@ -363,6 +375,7 @@
     if (r < 0.55) tx = away * rand(1.4, 3.5);
     else if (r < 0.8) tx = rand(-1.4, 1.4);
     else tx = -away * rand(1.4, 3.3);
+    if (slack < 0.2) tx *= 0.5;   // stretched: play it back through the middle
     const curve = rand(-0.25, 0.25);
     let input = null;
     for (let i = 0; i < 6; i++) {
@@ -402,14 +415,14 @@
   // `pace` is the pace the CPU chose for this shot: going big is riskier.
   function cpuTimingError(g, c, wing, pace) {
     const slack = c.plan ? c.plan.slack : 0;
-    let n = slack >= 0.5 ? 0 : ((0.5 - slack) / 0.5) * 1.9;
-    n += Math.pow(pace, 3) * 1.1;
+    let n = slack >= 0.5 ? 0 : ((0.5 - slack) / 0.5) * 1.4;
+    n += Math.pow(pace, 3) * 0.8;
     n += Math.abs(g.ball.pos.z - 1.0) * 0.6;
     n += (1 - staminaF(c)) * 0.5;
     // pace on the incoming ball rushes the swing too
     const v = Math.hypot(g.ball.vel.x, g.ball.vel.y, g.ball.vel.z);
-    n += Math.max(0, (v - 16) / 10) * 0.9;
-    return Math.min(n, 2.2) * windowFor(c, wing);
+    n += Math.max(0, (v - 16) / 10) * 0.6;
+    return Math.min(n, 1.6) * windowFor(c, wing);
   }
 
   function cpuThink(g, c) {
@@ -468,9 +481,14 @@
       const dx = p.tx - p.x, dy = p.ty - p.y;
       const d = Math.hypot(dx, dy);
       const sp = p.ch.speed * (0.7 + 0.3 * staminaF(p));
-      if (d > 0.02) {
-        const step = Math.min(d, sp * dt);
-        p.x += (dx / d) * step; p.y += (dy / d) * step;
+      if (d > 0.02 && g.time >= p.reactUntil) {
+        const ux = dx / d, uy = dy / d;
+        // turning sharply means slowing down first
+        if (ux * p.dirX + uy * p.dirY < 0.3) p.v *= 0.3;
+        p.dirX = ux; p.dirY = uy;
+        p.v = Math.min(sp, p.v + ACCEL * dt);
+        const step = Math.min(d, p.v * dt);
+        p.x += ux * step; p.y += uy * step;
         p.moving = true;
         if (g.phase === 'rally') {
           p.run += step;
@@ -480,6 +498,7 @@
         }
       } else {
         p.moving = false;
+        if (d <= 0.02) p.v = 0;
         p.stamina = Math.min(p.cap, p.stamina + 1.2 * dt);
       }
     }
