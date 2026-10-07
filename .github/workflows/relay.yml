@@ -1,0 +1,18 @@
+# Deploys the online-play relay (server/) to Cloudflare Workers.
+# Needs two repository secrets: CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID.
+name: Deploy relay
+on:
+  push:
+    branches: [main]
+    paths: ['server/**', '.github/workflows/relay.yml']
+  workflow_dispatch:
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: server
