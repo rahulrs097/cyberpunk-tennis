@@ -142,6 +142,7 @@
     $('endTitle').textContent = winner === HUMAN ? 'You win the set' : `${w} wins the set`;
     $('endScore').textContent = score;
     $('end').hidden = false;
+    leaveFullscreen();
   }
 
   // ---------------- input ----------------
@@ -232,6 +233,13 @@
       const p = req.call(el, { navigationUI: 'hide' });
       if (p && p.then) p.then(() => { try { screen.orientation.lock('portrait').catch(() => {}); } catch (e) { /* optional */ } }).catch(() => {});
     } catch (e) { /* not allowed here */ }
+  }
+
+  function leaveFullscreen() {
+    try {
+      if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {});
+      else if (document.webkitFullscreenElement && document.webkitExitFullscreen) document.webkitExitFullscreen();
+    } catch (e) { /* nothing to leave */ }
   }
 
   // A CPU-vs-CPU rally plays behind the menu.
@@ -352,7 +360,7 @@
     $('toMenu').addEventListener('click', showMenu);
     $('pauseBtn').addEventListener('click', () => setPaused(true));
     $('resume').addEventListener('click', () => setPaused(false));
-    $('quit').addEventListener('click', showMenu);
+    $('quit').addEventListener('click', () => { leaveFullscreen(); showMenu(); });
     $('mute').addEventListener('click', () => {
       muted = !muted;
       $('mute').setAttribute('aria-pressed', String(muted));
