@@ -22,9 +22,11 @@ which only adds the doctype and viewport tags the artifact host normally supplie
 - **Direction** is the swipe angle (`aim`): it picks a spot between the sidelines, straight = the middle, about 34° = the line. **Swipe speed** sets `pace`: fast = fast and flat, slow = more spin and less speed (`computeShot`). A well-timed shot always lands in: when clearing the net would carry it long, it comes off with less pace.
 - **Up = topspin, down = backspin, a bowed swipe = sidespin** (`spinDir`, `curve`).
 - **Timing.** Each wing has its own window per character (`window.fh` / `window.bh`). Being late or early by `err` drifts the shot: late forehand right, early forehand left, late backhand left, early backhand right. It also costs power and height in proportion to how far off it was (`powerF`), so a badly mistimed ball lands short or finds the net.
-- **Stamina.** Running drains it, and every metre run also lowers a hard cap for the rest of the set (`cap`). Repeated power shots cost 3, 6, 9… Low stamina slows running, cuts power and narrows timing windows.
+- **Stamina.** Running drains it, and every metre run also lowers a hard cap for the rest of the set (`cap`). Repeated power shots cost 3, 6, 9… Low stamina slows running, cuts power and narrows timing windows. Between points you get a fixed breather (10, or 20 at a changeover); waiting before you serve adds nothing.
 - **Overheads** above the player's `overheadZ` are very fast and cost no stamina. **Power shots** happen above 1.3 m. **Volleys** happen when you meet the ball before it bounces.
-- **Randomness** only appears in `cpuChooseShot` / `cpuChooseServe`. CPU errors are deterministic: they come from being rushed, tired, the pace of the incoming ball, and how much pace the CPU itself chose.
+- **Randomness** only appears in `cpuChooseShot` / `cpuChooseServe`. CPU errors on groundstrokes are deterministic: they come from being rushed, tired, the pace of the incoming ball, and how much pace the CPU itself chose. CPU serves get a random timing error, so some miss.
+- **CPU tactics** come from each character's `tactics` block: Octopus counterpunches (steady pace, away from the lines, passes or lobs a net rusher); Philosopher attacks (aims at your weaker wing, follows short balls in, sometimes serves and volleys). The ball speed setting also sets how often the CPU mistimes (`CPU_ERR` in `main.js`).
+- **Serve clock.** Online, a server has 20 seconds to toss; running out costs the serve.
 
 ## Multiplayer later
 

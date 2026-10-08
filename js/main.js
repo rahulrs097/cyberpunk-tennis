@@ -11,6 +11,9 @@
   let paused = false;
   let humanChar = 'octopus';
   let speedSetting = 0.8;
+  // The ball speed setting is also the difficulty: how much the CPU mistimes.
+  const CPU_ERR = { 0.65: 1.3, 0.8: 1, 1: 0.7 };
+  const SERVE_CLOCK = 20;   // seconds to start a serve in an online match
   let autoMove = true;
   try { const v = localStorage.getItem('ct.autoMove'); if (v !== null) autoMove = v === '1'; } catch (e) { /* storage is optional */ }
   let musicOn = true;
@@ -85,7 +88,13 @@
       row.querySelector('.stam-cap').style.left = p.cap.toFixed(1) + '%';
       row.style.setProperty('--pc', p.ch.colors.glow);
     }
-    $('callout').textContent = CT.matchCallout(m) || (m.firstServe ? '' : 'Second serve');
+    let call = CT.matchCallout(m) || (m.firstServe ? '' : 'Second serve');
+    // the serve clock shows for its last 10 seconds
+    if (game.serveClock && game.phase === 'preServe') {
+      const left = game.serveClock - game.serveWait;
+      if (left <= 10) call = 'Serve clock ' + Math.max(0, Math.ceil(left)) + (call ? ' · ' + call : '');
+    }
+    $('callout').textContent = call;
   }
 
   function hintForState() {
@@ -117,7 +126,7 @@
     } else if (type === 'whiff') {
       if (d.side === me) showShot(d.reason);
     } else if (type === 'fault') {
-      showMsg(d.text === 'Net' ? 'Net' : 'Fault', 'Second serve', 'warn');
+      showMsg(d.text === 'Net' || d.text === 'Serve clock' ? d.text : 'Fault', 'Second serve', 'warn');
       blip(160, 0.2, 'sawtooth', 0.05, 90);
     } else if (type === 'point') {
       const youWon = d.winner === me;
@@ -279,7 +288,7 @@
         net.timer = setInterval(() => send({ t: 'ping' }), 1000);
         me = 1;
         $('lobby').hidden = true;
-        beginMatch({ p0: m.p0, p1: m.p1, timeScale: m.timeScale, control: ['remote', 'human'], remote: true });
+        beginMatch({ p0: m.p0, p1: m.p1, timeScale: m.timeScale, control: ['remote', 'human'], remote: true, serveClock: m.serveClock });
       } else if (m.t === 'st' && game && game.remote) {
         const was = game.phase + game.server;
         CT.applySnapshot(game, m.s);
@@ -329,9 +338,9 @@
   function hostStart() {
     net.started = true;
     me = 0;
-    // online matches always use Pro ball speed
-    const cfg = { p0: humanChar, p1: net.guestChar, timeScale: 1, control: ['human', 'remote'], autoMove: [autoMove, net.guestAuto] };
-    send({ t: 'start', p0: cfg.p0, p1: cfg.p1, timeScale: cfg.timeScale });
+    // online matches always use Pro ball speed, with a serve clock
+    const cfg = { p0: humanChar, p1: net.guestChar, timeScale: 1, control: ['human', 'remote'], autoMove: [autoMove, net.guestAuto], serveClock: SERVE_CLOCK };
+    send({ t: 'start', p0: cfg.p0, p1: cfg.p1, timeScale: cfg.timeScale, serveClock: cfg.serveClock });
     $('lobby').hidden = true;
     beginMatch(cfg);
   }
@@ -385,7 +394,7 @@
     }
     me = 0;
     const cpuChar = humanChar === 'octopus' ? 'philosopher' : 'octopus';
-    beginMatch({ p0: humanChar, p1: cpuChar, timeScale: speedSetting, control: ['human', 'cpu'], autoMove: [autoMove, false] });
+    beginMatch({ p0: humanChar, p1: cpuChar, timeScale: speedSetting, control: ['human', 'cpu'], autoMove: [autoMove, false], cpuErr: CPU_ERR[speedSetting] || 1 });
   }
 
   function beginMatch(cfg) {
