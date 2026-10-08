@@ -14,6 +14,12 @@ run_worker_first = ["/room/*"]
 name = "ROOMS"
 class_name = "Room"
 
+# Branch previews (Workers Builds runs one for every pull request) need the
+# binding again; each preview then gets its own empty set of rooms.
+[[previews.durable_objects.bindings]]
+name = "ROOMS"
+class_name = "Room"
+
 # SQLite-backed Durable Objects are the ones the free plan allows
 [[migrations]]
 tag = "v1"
