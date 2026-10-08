@@ -19,9 +19,9 @@ which only adds the doctype and viewport tags the artifact host normally supplie
 ## How the spec maps to the code
 
 - **Swipe = shot, tap = move.** `main.js` `handleSwipe` / `handleTap`.
-- **Direction** is the swipe angle (`aim`). **Swipe speed** sets `pace`: fast = fast and flat, slow = more spin and less speed (`computeShot`).
+- **Direction** is the swipe angle (`aim`): it picks a spot between the sidelines, straight = the middle, about 34° = the line. **Swipe speed** sets `pace`: fast = fast and flat, slow = more spin and less speed (`computeShot`). A well-timed shot always lands in: when clearing the net would carry it long, it comes off with less pace.
 - **Up = topspin, down = backspin, a bowed swipe = sidespin** (`spinDir`, `curve`).
-- **Timing.** Each wing has its own window per character (`window.fh` / `window.bh`). Being late or early by `err` drifts the shot: late forehand right, early forehand left, late backhand left, early backhand right. It also costs power in proportion to how far off it was (`powerF`).
+- **Timing.** Each wing has its own window per character (`window.fh` / `window.bh`). Being late or early by `err` drifts the shot: late forehand right, early forehand left, late backhand left, early backhand right. It also costs power and height in proportion to how far off it was (`powerF`), so a badly mistimed ball lands short or finds the net.
 - **Stamina.** Running drains it, and every metre run also lowers a hard cap for the rest of the set (`cap`). Repeated power shots cost 3, 6, 9… Low stamina slows running, cuts power and narrows timing windows.
 - **Overheads** above the player's `overheadZ` are very fast and cost no stamina. **Power shots** happen above 1.3 m. **Volleys** happen when you meet the ball before it bounces.
 - **Randomness** only appears in `cpuChooseShot` / `cpuChooseServe`. CPU errors are deterministic: they come from being rushed, tired, the pace of the incoming ball, and how much pace the CPU itself chose.
