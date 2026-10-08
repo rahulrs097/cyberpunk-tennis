@@ -281,7 +281,11 @@
         $('lobby').hidden = true;
         beginMatch({ p0: m.p0, p1: m.p1, timeScale: m.timeScale, control: ['remote', 'human'], remote: true });
       } else if (m.t === 'st' && game && game.remote) {
+        const was = game.phase + game.server;
         CT.applySnapshot(game, m.s);
+        // events arrive just before the state they belong to, so the hint
+        // is worked out again once that state is here
+        if (game.phase + game.server !== was) hintForState();
       } else if (m.t === 'ev' && game && game.remote) {
         onEvent(m.type, m.d);
       }
