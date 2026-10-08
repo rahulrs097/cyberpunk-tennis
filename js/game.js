@@ -265,10 +265,10 @@
         if (!again) break;
       }
       // Then mistiming costs power and pushes it off line: the ball comes off
-      // slower, shorter and lower, and a badly mistimed one finds the net.
+      // slower, shorter and a little lower (mostly it misses wide or long).
       if (Math.abs(drift) > 0.002 || powerF < 0.999) {
         sol = solve(a + drift, spd * powerF, along - (1 - powerF) * 9, minClear - (1 - powerF) * 0.7);
-        sol.vel.z -= (1 - powerF) * 4;
+        sol.vel.z -= (1 - powerF) * 2;
       }
     }
     const vel = sol.vel;
@@ -543,7 +543,7 @@
     n += Math.max(0, (v - 16) / 10) * 0.6;
     // scaled so CPU rallies last about as long as before mistimed shots
     // started finding the net
-    return Math.min(n, 1.6) * 0.6 * windowFor(c, wing);
+    return Math.min(n, 1.6) * 0.8 * windowFor(c, wing);
   }
 
   function cpuThink(g, c) {
