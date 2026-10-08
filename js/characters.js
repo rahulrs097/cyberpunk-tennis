@@ -8,7 +8,6 @@
     octopus: {
       id: 'octopus',
       name: 'Octopus',
-      after: 'Daniil Medvedev',
       blurb: 'Lives deep behind the baseline. Long tentacles, a flat backhand, and stamina for days.',
       height: 1.98,
       speed: 5.0,          // top running speed, m/s
@@ -24,16 +23,22 @@
       capDrain: 0.03,      // hard-cap loss per metre run
       home: 13.4,          // rally depth (distance from the net)
       returnDepth: 14.2,
+      // How the CPU plays him: a counterpuncher. Steady pace, keeps the ball
+      // away from the lines, makes you hit one more, and passes or lobs
+      // anyone who comes in. Takes the ball late and likes his backhand.
+      tactics: {
+        pace: [0.45, 0.8], safe: 0.8, slice: 0.1, weakWing: 0.12, openCourt: 0.5,
+        approach: 0, serveVolley: 0, lob: 0.4, fhPref: -0.05, late: 0.05,
+      },
       colors: { main: '#8f5bff', glow: '#28f0d6', dark: '#2a1257', accent: '#ff3fa4' },
     },
     philosopher: {
       id: 'philosopher',
       name: 'Philosopher',
-      after: 'Stefanos Tsitsipas',
       blurb: 'Heavy topspin forehand, one-handed backhand, and quick feet. Thinks before every point.',
       height: 1.93,
       speed: 5.4,
-      reach: 1.7,
+      reach: 1.8,
       overheadZ: 2.35,
       maxZ: 3.1,
       pace: { fh: 38, bh: 32 },
@@ -45,6 +50,13 @@
       capDrain: 0.036,
       home: 12.7,
       returnDepth: 13.3,
+      // How the CPU plays him: an attacker. Runs around his backhand to hit
+      // forehands, hits at your weaker wing, follows short balls to the net and
+      // sometimes serves and volleys.
+      tactics: {
+        pace: [0.45, 0.8], safe: 0.8, slice: 0.06, weakWing: 0.45, openCourt: 0.5,
+        approach: 0.6, serveVolley: 0.2, lob: 0.1, fhPref: 0.08, late: 0,
+      },
       colors: { main: '#ece6ff', glow: '#ffc23d', dark: '#3a2f63', accent: '#3fd2ff' },
     },
   };
@@ -337,7 +349,7 @@
       ctx.fillStyle = c.glow; ctx.fill();
     }
 
-    // mantle (tall, Medvedev-lanky)
+    // mantle (tall and lanky)
     ctx.save();
     ctx.translate(bodyX, bottom);
     ctx.rotate(tilt);

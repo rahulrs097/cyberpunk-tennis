@@ -13,7 +13,10 @@
   const REACT = 0.24;           // split-step: seconds before an auto-moving player can react to a shot
   const ACCEL = 8;              // m/s² from a standstill to top speed
   const AIM_FULL = 0.6;         // a swipe this many radians off straight aims at the sideline
-  const NET_ZONE = 7.5;         // a player this close to the net is at the net
+  const NET_ZONE = 7.5;
+  const STAMINA_POINT = 10;      // stamina back between points
+  const STAMINA_CHANGEOVER = 20; // and at a changeover
+  const STAMINA_STILL = 0.4;   // per second standing still mid-rally         // a player this close to the net is at the net
   // An online guest's swipe arrives a round trip after they saw the ball, so
   // the host waits this long (s) past the guest's latest swing before calling
   // a ball the guest was about to hit a winner.
@@ -62,6 +65,16 @@
       // A remote copy (the guest's phone in an online match) only moves the
       // ball and players between the host's snapshots; the host owns the rules.
       remote: !!opts.remote,
+      // seconds a human server gets to start their toss (online matches);
+      // null = no clock
+      serveClock: opts.serveClock || null,
+      serveWait: 0,
+      // scales the CPU's timing errors: lower = a stronger CPU
+      cpuErr: opts.cpuErr || 1,
+      // how fast the CPU reads a shot, and how far it shades its recovery
+      // towards the side the opponent can angle it to (both rise with level)
+      cpuReact: opts.cpuReact || REACT,
+      cpuCover: opts.cpuCover || 0.15,
     };
     startPoint(g, true);
     return g;
@@ -77,7 +90,8 @@
   function moveSpeed(p) { return p.ch.speed * (0.55 + 0.45 * staminaF(p)); }
 
   // ---------------- point setup ----------------
-  function startPoint(g, fresh) {
+  // keepClock: a re-toss, which doesn't restart the serve clock
+  function startPoint(g, fresh, keepClock) {
     const m = g.match;
     const server = CT.currentServer(m);
     const recv = 1 - server;
@@ -88,14 +102,15 @@
     const boxSign = deuce ? Rp.fwd : -Rp.fwd;     // receiver's deuce box is on their right
     Rp.x = boxSign * 2.5; Rp.y = -Rp.fwd * Rp.ch.returnDepth;
     // A short breather between points; a proper rest at the changeover
-    // (after every odd game). Never above the cap.
+    // (after every odd game). Never above the cap. This is all the rest there
+    // is between points: standing around before serving doesn't add to it.
     const gamesPlayed = m.games[0] + m.games[1];
     const changeover = gamesPlayed !== g.lastGames && gamesPlayed % 2 === 1;
     g.lastGames = gamesPlayed;
     for (const p of g.players) {
       p.tx = p.x; p.ty = p.y; p.swing = -1; p.pending = null; p.plan = null;
       p.cross = null; p.prevRel = null; p.streak = 0; p.v = 0; p.atNet = false; p.netSpot = null;
-      if (!fresh) p.stamina = Math.min(p.cap, p.stamina + (changeover ? 25 : 8));
+      if (!fresh) p.stamina = Math.min(p.cap, p.stamina + (changeover ? STAMINA_CHANGEOVER : STAMINA_POINT));
     }
     g.serveBox = { side: recv, sign: boxSign };
     g.server = server;
@@ -106,6 +121,7 @@
     g.peakT = null;
     g.peakBall = null;
     g.held = null;
+    if (!keepClock) g.serveWait = 0;
     emit(g, 'serveReady', { server, first: m.firstServe });
   }
 
@@ -199,7 +215,7 @@
     const powerF = Math.max(0.7, 1 - 0.1 * Math.pow(Math.abs(e), 1.5));
     const pace = clamp(input.pace, 0, 1), over = clamp(input.over || 0, 0, 1);
     const capF = 0.68 + 0.32 * f;   // tired arms: up to a third less pace
-    let speed, spin, margin, minClear = 0.12, depthLine = COURT.HL;
+    let speed, spin, margin, minClear = input.clear || 0.12, depthLine = COURT.HL;
     let side = clamp(input.curve || 0, -1, 1);
 
     if (kind === 'serve') {
@@ -227,6 +243,8 @@
       if (kind === 'volley') { speed *= 0.72; spin *= 0.3; }
       // a volley above power height can be punched down hard
       if (kind === 'powerVolley') { speed *= 1.1; spin *= 0.3; margin *= 0.7; }
+      // a topspin lob: up over a player at the net and down deep
+      if (input.lob) { speed = lerp(18, 20, pace) * capF; spin = 1.3; margin = 1.5; side = 0; }
     }
 
     // launch at angle `ang` to land `along` metres down the court
@@ -249,26 +267,27 @@
       // The swipe angle picks a spot between the sidelines (straight = the
       // middle), so a well-timed angled shot stays in wherever it's hit from.
       const edge = COURT.SW - 0.45;
-      const landX = input.landX !== undefined ? clamp(input.landX, -edge, edge)
+      const landX = Number.isFinite(input.landX) ? clamp(input.landX, -edge, edge)
         : fwd * edge * clamp(input.aim / AIM_FULL, -1, 1);
       const along = target - fwd * pos.y;
       // Solve the well-timed shot first: re-aim for sidespin curl, and when
       // clearing the net would carry it past the baseline, take pace off.
       let aimX = landX, spd = speed, a = 0;
-      for (let i = 0; i < 6; i++) {
+      for (let i = 0; i < 12; i++) {
         a = Math.atan2(fwd * (aimX - pos.x), along);
         sol = solve(a, spd, along, minClear);
         const land = sol.landing.land;
         let again = false;
         if (Math.abs(land.x - landX) > 0.25) { aimX -= land.x - landX; again = true; }
-        if (target <= depthLine - 0.3 && fwd * land.y > depthLine - 0.25) { spd *= 0.9; again = true; }
+        if (target <= depthLine - 0.3 && fwd * land.y > depthLine - 0.25) { spd *= 0.85; again = true; }
         if (!again) break;
       }
       // Then mistiming costs power and pushes it off line: the ball comes off
       // slower, shorter and a little lower (mostly it misses wide or long).
       if (Math.abs(drift) > 0.002 || powerF < 0.999) {
         sol = solve(a + drift, spd * powerF, along - (1 - powerF) * 9, minClear - (1 - powerF) * 0.7);
-        sol.vel.z -= (1 - powerF) * 2;
+        // (a soft ball, like a scoop off a drop shot, dips by less)
+        sol.vel.z -= (1 - powerF) * 2 * Math.min(1, spd / 25);
       }
     }
     const vel = sol.vel;
@@ -306,7 +325,7 @@
     // auto-moving players need a moment to read the shot; a human moving
     // themselves already has their own reaction time
     // (returners split-step as the server swings, so they react faster)
-    if (autoMoves(g, other.side)) { other.reactUntil = g.time + (b.isServe ? 0.08 : REACT); cpuPlan(g, other); }
+    if (autoMoves(g, other.side)) { other.reactUntil = g.time + (b.isServe ? 0.08 : g.control[other.side] === 'cpu' ? g.cpuReact : REACT); cpuPlan(g, other); }
     if (autoMoves(g, p.side)) cpuRecover(g, p);
     emit(g, 'hit', info);
   }
@@ -411,7 +430,8 @@
       return;
     }
     c.atNet = false;
-    c.tx = clamp(opp.x * 0.15, -1.5, 1.5);
+    const cover = g.control[c.side] === 'cpu' ? g.cpuCover : 0.15;
+    c.tx = clamp(opp.x * cover, -2.2, 2.2);
     c.ty = -c.fwd * c.ch.home;
   }
 
@@ -444,6 +464,8 @@
         if (g.ball.isServe) continue;
         if (z < (c.atNet ? 0.3 : 0.45) || z > ch.maxZ) continue;
         if (fwd * b.pos.y < -8 && z < ch.overheadZ) continue;   // only volley near the net
+        // a ball dropping below the tape right by the net can't be volleyed back over
+        if (z < CT.netHeight(b.pos.x) + 0.1 && fwd * b.pos.y > -2) continue;
       }
       for (const wing of ['fh', 'bh']) {
         const ws = wing === 'fh' ? 1 : -1;
@@ -461,8 +483,7 @@
         if (z >= ch.overheadZ && !bounced) q += 2.2;
         else if (bounced && z >= POWER_Z + 0.1) q += 1.0 + 0.5 * (z - POWER_Z);
         q -= Math.max(0, -fwd * py - ch.home) * 0.25;   // don't drift too far back
-        if (ch.id === 'octopus') q += 0.05 * t + (wing === 'bh' ? 0.05 : 0);
-        else q += -0.1 * t + (wing === 'fh' ? 0.08 : 0);
+        q += ch.tactics.late * t + (wing === 'fh' ? ch.tactics.fhPref : 0);
         q -= dist * 0.05;
         cands.push({ t, x: px, y: py, z, slack, q, wing });
       }
@@ -476,34 +497,59 @@
     c.tx = best.x; c.ty = best.y;
   }
 
+  // The CPU picks a shot the way its character plays (`ch.tactics`).
   function cpuChooseShot(g, c) {
     const opp = g.players[1 - c.side];
     const b = g.ball;
     const fwd = c.fwd;
+    const T = c.ch.tactics;
     const slack = c.plan ? c.plan.slack : 0;
-    const style = c.ch.id === 'octopus' ? { lo: 0.5, hi: 0.85, slice: 0.07 } : { lo: 0.45, hi: 0.95, slice: 0.12 };
-    let pace = rand(style.lo, style.hi);
+    const edge = COURT.SW - 0.45;
+    let pace = rand(T.pace[0], T.pace[1]);
     if (slack < 0.2) pace *= 0.75;
-    if (b.pos.z < 0.5) pace *= 0.85;
-    let spinDir = (b.pos.z < 0.42 || slack < 0.05) ? -1 : (Math.random() < style.slice ? -1 : 1);
-    const r = Math.random();
+    // a low ball (dug out of a drop shot, say) has to be lifted, not hit
+    if (b.pos.z < 0.5) pace *= 0.6;
+    let spinDir = (b.pos.z < 0.42 || slack < 0.05) ? -1 : (Math.random() < T.slice ? -1 : 1);
+    // the opponent's weaker wing is the one with the narrower timing window
+    const weakSide = (opp.ch.window.fh < opp.ch.window.bh ? 1 : -1) * opp.fwd;
     const away = opp.x > 0 ? -1 : 1;
-    let tx;
-    if (r < 0.55) tx = away * rand(1.4, 3.5);
-    else if (r < 0.8) tx = rand(-1.4, 1.4);
-    else tx = -away * rand(1.4, 3.3);
-    if (slack < 0.2) tx *= 0.5;   // stretched: play it back through the middle
+    const oppAtNet = -opp.fwd * opp.y < NET_ZONE;
+    // a tired opponent gets run from side to side
+    const oppTired = staminaF(opp) < 0.4;
+    let tx, lob = false;
+    if (oppAtNet) {
+      // they're at the net: lob over them or pass them
+      if (Math.random() < T.lob) { lob = true; tx = rand(-1.5, 1.5); }
+      else { tx = away * edge * rand(0.75, 1); pace = Math.max(pace, 0.7); }
+    } else if (Math.abs(opp.x) > (oppTired ? 1 : 1.8) && Math.random() < T.openCourt + (oppTired ? 0.3 : 0)) {
+      tx = away * edge * rand(0.7, 1);            // into the open court
+    } else if (Math.random() < T.weakWing) {
+      tx = weakSide * edge * rand(0.55, 0.9);     // at the weaker wing
+    } else {
+      tx = rand(-edge, edge) * 0.8;
+    }
+    // an easy ball with plenty of time: go for it, away from them
+    if (!lob && slack > 0.6 && b.pos.z > 0.8) { pace = Math.max(pace, T.pace[1]); tx = away * edge; }
+    tx *= T.safe;
+    if (slack < 0.2 && !lob) tx *= 0.5;           // stretched: play it back through the middle
+    // A short ball with time to spare: hit an approach and follow it in.
+    const fromNet = -fwd * c.y;
+    const approach = !lob && T.approach > 0 && fromNet < 10 && slack > 0.15 && b.pos.z > 0.6 &&
+      Math.random() < T.approach;
+    if (approach) { pace = Math.max(pace, 0.75); tx = (Math.random() < 0.5 ? weakSide : away) * edge * 0.85; spinDir = 1; }
     const curve = rand(-0.25, 0.25);
     let input = null;
     for (let i = 0; i < 6; i++) {
-      input = { aim: 0, landX: tx, pace, over: 0, spinDir, curve };
+      // the CPU plays with a safe margin over the net
+      input = { aim: 0, landX: tx, pace, over: 0, spinDir, curve, lob, clear: 0.4 };
       const shot = computeShot(g, c, input, 0);
-      const land = CT.flight(shot.pos, shot.vel, shot.spin, shot.side).land;
-      const safe = fwd * land.y > 0.3 && Math.abs(land.x) < COURT.SW - 0.25 && Math.abs(land.y) < COURT.HL - 0.3;
+      const fl = CT.flight(shot.pos, shot.vel, shot.spin, shot.side), land = fl.land;
+      const safe = fwd * land.y > 0.3 && fl.netClear > 0.3 && Math.abs(land.x) < COURT.SW - 0.25 && Math.abs(land.y) < COURT.HL - 0.3;
       if (safe) break;
       pace = Math.max(0.15, pace - 0.12);
       tx *= 0.7;
     }
+    if (approach) c.netSpot = { x: clamp(tx * 0.3, -1.5, 1.5), y: -fwd * 3.6 };
     return input;
   }
 
@@ -523,6 +569,7 @@
       pace = Math.max(0.2, pace - 0.1);
       aim *= 0.6;
     }
+    if (first && Math.random() < c.ch.tactics.serveVolley) c.netSpot = { x: 0, y: -c.fwd * 4.2 };
     // Timing on the toss, so some serves miss: a big first serve is mistimed
     // more often than a careful second one.
     const W = windowFor(c, 'fh');
@@ -541,9 +588,8 @@
     // pace on the incoming ball rushes the swing too
     const v = Math.hypot(g.ball.vel.x, g.ball.vel.y, g.ball.vel.z);
     n += Math.max(0, (v - 16) / 10) * 0.6;
-    // scaled so CPU rallies last about as long as before mistimed shots
-    // started finding the net
-    return Math.min(n, 1.6) * 0.8 * windowFor(c, wing);
+    // g.cpuErr sets the difficulty (1 = Club)
+    return Math.min(n, 1.6) * g.cpuErr * windowFor(c, wing);
   }
 
   function cpuThink(g, c) {
@@ -630,8 +676,9 @@
       } else {
         p.moving = false;
         if (d <= 0.02) p.v = 0;
-        // a breather between points restores far more than standing mid-rally
-        p.stamina = Math.min(p.cap, p.stamina + (g.phase === 'rally' ? 0.6 : 1.5) * dt);
+        // catching your breath mid-rally; between points the fixed breather
+        // in startPoint is all you get
+        if (g.phase === 'rally') p.stamina = Math.min(p.cap, p.stamina + STAMINA_STILL * dt);
       }
     }
   }
@@ -701,7 +748,7 @@
           }
         } else if (b.vel.z < 0 && b.pos.z < 1.25) {
           emit(g, 'whiff', { side: g.server, reason: 'Re-toss' });
-          startPoint(g, true);
+          startPoint(g, true, true);
         }
         return;
       }
@@ -718,6 +765,7 @@
     wallDt = Math.min(wallDt, 0.05);
     g.wall += wallDt;
     g.phaseWall += wallDt;
+    if (g.phase === 'preServe' || g.phase === 'toss') g.serveWait += wallDt;
     g.acc += wallDt * g.timeScale;
     while (g.acc >= PHYS.DT) { stepOnce(g, PHYS.DT); g.acc -= PHYS.DT; }
     for (const mk of g.marks) mk.age += wallDt;
@@ -727,6 +775,9 @@
       if (g.trail.length > 10) g.trail.shift();
     }
     if (g.remote) return;
+    if (g.serveClock && g.phase === 'preServe' && g.control[g.server] !== 'cpu' && g.serveWait > g.serveClock) {
+      fault(g, 'Serve clock');
+    }
     if (g.phase === 'fault' && g.phaseWall > 1.1) {
       const m = g.match;
       startPoint(g, true);
@@ -752,7 +803,7 @@
   // Everything the guest needs to draw the match, sent ~20 times a second.
   function snapshot(g) {
     return {
-      time: g.time, phase: g.phase, server: g.server, serveBox: g.serveBox,
+      time: g.time, phase: g.phase, server: g.server, serveBox: g.serveBox, serveWait: g.serveWait,
       peakT: g.peakT, lastHitT: g.lastHitT, match: g.match,
       ball: CT.cloneBall(g.ball), predLand: g.predLand || null, lastShot: g.lastShot,
       players: g.players.map((p) => { const o = {}; for (const k of SNAP_PLAYER) o[k] = p[k]; return o; }),
@@ -761,7 +812,7 @@
 
   function applySnapshot(g, s) {
     const fresh = s.lastHitT !== g.lastHitT || s.phase !== g.phase;
-    g.time = s.time; g.phase = s.phase; g.server = s.server; g.serveBox = s.serveBox;
+    g.time = s.time; g.phase = s.phase; g.server = s.server; g.serveBox = s.serveBox; g.serveWait = s.serveWait;
     g.peakT = s.peakT; g.lastHitT = s.lastHitT; g.match = s.match;
     g.ball = s.ball; g.predLand = s.predLand; g.lastShot = s.lastShot;
     s.players.forEach((q, i) => Object.assign(g.players[i], q));
