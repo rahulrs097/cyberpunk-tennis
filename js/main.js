@@ -12,7 +12,9 @@
   let humanChar = 'octopus';
   let speedSetting = 0.8;
   // The ball speed setting is also the difficulty: how much the CPU mistimes.
-  const CPU_ERR = { 0.65: 1.3, 0.8: 1, 1: 0.7 };
+  const CPU_ERR = { 0.65: 1.3, 0.8: 1, 1: 0.65 };
+  const CPU_REACT = { 0.65: 0.3, 0.8: 0.24, 1: 0.12 };   // seconds to read a shot
+  const CPU_COVER = { 0.65: 0.15, 0.8: 0.25, 1: 0.4 };
   const SERVE_CLOCK = 20;   // seconds to start a serve in an online match
   let autoMove = true;
   try { const v = localStorage.getItem('ct.autoMove'); if (v !== null) autoMove = v === '1'; } catch (e) { /* storage is optional */ }
@@ -80,11 +82,12 @@
     for (const side of [0, 1]) {
       const p = game.players[side];
       const row = $('row' + (side === me ? 0 : 1));
-      row.querySelector('.name').textContent = p.ch.name + (side === me ? ' (you)' : '');
+      row.querySelector('.name').textContent = p.ch.name + (side === me ? ' (you)' : '') + (p.stamina < 35 ? ' · tired' : '');
       row.querySelector('.games').textContent = m.games[side];
       row.querySelector('.pts').textContent = CT.pointLabel(m, side);
       row.querySelector('.serve').style.visibility = srv === side && !m.over ? 'visible' : 'hidden';
       row.querySelector('.stam-fill').style.width = p.stamina.toFixed(1) + '%';
+      row.classList.toggle('tired', p.stamina < 35);
       row.querySelector('.stam-cap').style.left = p.cap.toFixed(1) + '%';
       row.style.setProperty('--pc', p.ch.colors.glow);
     }
@@ -200,6 +203,23 @@
     if (isGuest()) send({ t: 'in', k: 'move', x: w.x, y: w.y });
   }
 
+  // Where on the far court a swipe points: follow the swipe's direction on
+  // screen from the ball's shadow until it reaches the back of the court, so
+  // a flick towards a corner on screen goes to that corner whatever the
+  // camera's angle. Undefined (fall back to the plain angle) if it can't tell.
+  function pointAt(aim) {
+    const b = game.ball, fwd = game.players[me].fwd;
+    if (!b.active) return undefined;
+    const P = CT.project(renderer, b.pos.x, b.pos.y, 0);
+    if (P.behind) return undefined;
+    const g0 = CT.unproject(renderer, P.x, P.y);
+    const g1 = CT.unproject(renderer, P.x + 40 * Math.sin(aim), P.y - 40 * Math.cos(aim));
+    if (!g0 || !g1 || fwd * (g1.y - g0.y) < 0.05) return undefined;
+    const t = (fwd * (CT.COURT.HL - 2) - g0.y) / (g1.y - g0.y);
+    const x = g0.x + (g1.x - g0.x) * t;
+    return Number.isFinite(x) ? x : undefined;
+  }
+
   // Turn a finger path into a shot: direction = aim, speed = pace vs spin,
   // up = topspin, down = slice, a bowed path = sidespin.
   function handleSwipe(pts, dx, dy, chord, dur) {
@@ -230,7 +250,7 @@
     aim += CT.clamp(bulge * 0.45, -0.12, 0.12);
     // A slice is swiped the other way: top-left to bottom-right goes left.
     if (spinDir < 0) aim = -aim;
-    const input = { aim, pace, over, spinDir, curve, depth };
+    const input = { aim, pace, over, spinDir, curve, depth, landX: pointAt(aim) };
     if (isGuest()) {
       // judge timing here, against the ball this player saw, then send it
       const tm = CT.swipeTiming(game, me);
@@ -394,7 +414,8 @@
     }
     me = 0;
     const cpuChar = humanChar === 'octopus' ? 'philosopher' : 'octopus';
-    beginMatch({ p0: humanChar, p1: cpuChar, timeScale: speedSetting, control: ['human', 'cpu'], autoMove: [autoMove, false], cpuErr: CPU_ERR[speedSetting] || 1 });
+    beginMatch({ p0: humanChar, p1: cpuChar, timeScale: speedSetting, control: ['human', 'cpu'], autoMove: [autoMove, false], cpuErr: CPU_ERR[speedSetting] || 1,
+      cpuReact: CPU_REACT[speedSetting], cpuCover: CPU_COVER[speedSetting] });
   }
 
   function beginMatch(cfg) {

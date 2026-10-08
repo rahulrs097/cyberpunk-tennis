@@ -71,6 +71,10 @@
       serveWait: 0,
       // scales the CPU's timing errors: lower = a stronger CPU
       cpuErr: opts.cpuErr || 1,
+      // how fast the CPU reads a shot, and how far it shades its recovery
+      // towards the side the opponent can angle it to (both rise with level)
+      cpuReact: opts.cpuReact || REACT,
+      cpuCover: opts.cpuCover || 0.15,
     };
     startPoint(g, true);
     return g;
@@ -211,7 +215,7 @@
     const powerF = Math.max(0.7, 1 - 0.1 * Math.pow(Math.abs(e), 1.5));
     const pace = clamp(input.pace, 0, 1), over = clamp(input.over || 0, 0, 1);
     const capF = 0.68 + 0.32 * f;   // tired arms: up to a third less pace
-    let speed, spin, margin, minClear = 0.12, depthLine = COURT.HL;
+    let speed, spin, margin, minClear = input.clear || 0.12, depthLine = COURT.HL;
     let side = clamp(input.curve || 0, -1, 1);
 
     if (kind === 'serve') {
@@ -263,26 +267,27 @@
       // The swipe angle picks a spot between the sidelines (straight = the
       // middle), so a well-timed angled shot stays in wherever it's hit from.
       const edge = COURT.SW - 0.45;
-      const landX = input.landX !== undefined ? clamp(input.landX, -edge, edge)
+      const landX = Number.isFinite(input.landX) ? clamp(input.landX, -edge, edge)
         : fwd * edge * clamp(input.aim / AIM_FULL, -1, 1);
       const along = target - fwd * pos.y;
       // Solve the well-timed shot first: re-aim for sidespin curl, and when
       // clearing the net would carry it past the baseline, take pace off.
       let aimX = landX, spd = speed, a = 0;
-      for (let i = 0; i < 6; i++) {
+      for (let i = 0; i < 12; i++) {
         a = Math.atan2(fwd * (aimX - pos.x), along);
         sol = solve(a, spd, along, minClear);
         const land = sol.landing.land;
         let again = false;
         if (Math.abs(land.x - landX) > 0.25) { aimX -= land.x - landX; again = true; }
-        if (target <= depthLine - 0.3 && fwd * land.y > depthLine - 0.25) { spd *= 0.9; again = true; }
+        if (target <= depthLine - 0.3 && fwd * land.y > depthLine - 0.25) { spd *= 0.85; again = true; }
         if (!again) break;
       }
       // Then mistiming costs power and pushes it off line: the ball comes off
       // slower, shorter and a little lower (mostly it misses wide or long).
       if (Math.abs(drift) > 0.002 || powerF < 0.999) {
         sol = solve(a + drift, spd * powerF, along - (1 - powerF) * 9, minClear - (1 - powerF) * 0.7);
-        sol.vel.z -= (1 - powerF) * 2;
+        // (a soft ball, like a scoop off a drop shot, dips by less)
+        sol.vel.z -= (1 - powerF) * 2 * Math.min(1, spd / 25);
       }
     }
     const vel = sol.vel;
@@ -320,7 +325,7 @@
     // auto-moving players need a moment to read the shot; a human moving
     // themselves already has their own reaction time
     // (returners split-step as the server swings, so they react faster)
-    if (autoMoves(g, other.side)) { other.reactUntil = g.time + (b.isServe ? 0.08 : REACT); cpuPlan(g, other); }
+    if (autoMoves(g, other.side)) { other.reactUntil = g.time + (b.isServe ? 0.08 : g.control[other.side] === 'cpu' ? g.cpuReact : REACT); cpuPlan(g, other); }
     if (autoMoves(g, p.side)) cpuRecover(g, p);
     emit(g, 'hit', info);
   }
@@ -425,7 +430,8 @@
       return;
     }
     c.atNet = false;
-    c.tx = clamp(opp.x * 0.15, -1.5, 1.5);
+    const cover = g.control[c.side] === 'cpu' ? g.cpuCover : 0.15;
+    c.tx = clamp(opp.x * cover, -2.2, 2.2);
     c.ty = -c.fwd * c.ch.home;
   }
 
@@ -458,6 +464,8 @@
         if (g.ball.isServe) continue;
         if (z < (c.atNet ? 0.3 : 0.45) || z > ch.maxZ) continue;
         if (fwd * b.pos.y < -8 && z < ch.overheadZ) continue;   // only volley near the net
+        // a ball dropping below the tape right by the net can't be volleyed back over
+        if (z < CT.netHeight(b.pos.x) + 0.1 && fwd * b.pos.y > -2) continue;
       }
       for (const wing of ['fh', 'bh']) {
         const ws = wing === 'fh' ? 1 : -1;
@@ -499,18 +507,21 @@
     const edge = COURT.SW - 0.45;
     let pace = rand(T.pace[0], T.pace[1]);
     if (slack < 0.2) pace *= 0.75;
-    if (b.pos.z < 0.5) pace *= 0.85;
+    // a low ball (dug out of a drop shot, say) has to be lifted, not hit
+    if (b.pos.z < 0.5) pace *= 0.6;
     let spinDir = (b.pos.z < 0.42 || slack < 0.05) ? -1 : (Math.random() < T.slice ? -1 : 1);
     // the opponent's weaker wing is the one with the narrower timing window
     const weakSide = (opp.ch.window.fh < opp.ch.window.bh ? 1 : -1) * opp.fwd;
     const away = opp.x > 0 ? -1 : 1;
     const oppAtNet = -opp.fwd * opp.y < NET_ZONE;
+    // a tired opponent gets run from side to side
+    const oppTired = staminaF(opp) < 0.4;
     let tx, lob = false;
     if (oppAtNet) {
       // they're at the net: lob over them or pass them
       if (Math.random() < T.lob) { lob = true; tx = rand(-1.5, 1.5); }
       else { tx = away * edge * rand(0.75, 1); pace = Math.max(pace, 0.7); }
-    } else if (Math.abs(opp.x) > 1.8 && Math.random() < T.openCourt) {
+    } else if (Math.abs(opp.x) > (oppTired ? 1 : 1.8) && Math.random() < T.openCourt + (oppTired ? 0.3 : 0)) {
       tx = away * edge * rand(0.7, 1);            // into the open court
     } else if (Math.random() < T.weakWing) {
       tx = weakSide * edge * rand(0.55, 0.9);     // at the weaker wing
@@ -529,10 +540,11 @@
     const curve = rand(-0.25, 0.25);
     let input = null;
     for (let i = 0; i < 6; i++) {
-      input = { aim: 0, landX: tx, pace, over: 0, spinDir, curve, lob };
+      // the CPU plays with a safe margin over the net
+      input = { aim: 0, landX: tx, pace, over: 0, spinDir, curve, lob, clear: 0.4 };
       const shot = computeShot(g, c, input, 0);
-      const land = CT.flight(shot.pos, shot.vel, shot.spin, shot.side).land;
-      const safe = fwd * land.y > 0.3 && Math.abs(land.x) < COURT.SW - 0.25 && Math.abs(land.y) < COURT.HL - 0.3;
+      const fl = CT.flight(shot.pos, shot.vel, shot.spin, shot.side), land = fl.land;
+      const safe = fwd * land.y > 0.3 && fl.netClear > 0.3 && Math.abs(land.x) < COURT.SW - 0.25 && Math.abs(land.y) < COURT.HL - 0.3;
       if (safe) break;
       pace = Math.max(0.15, pace - 0.12);
       tx *= 0.7;
