@@ -30,6 +30,7 @@
       quality: (navigator.hardwareConcurrency || 8) <= 4 || (navigator.deviceMemory || 8) <= 3 ? 1 : 2,
       frames: [],
       lastT: 0,
+      anim: [],
     };
   }
 
@@ -495,6 +496,38 @@
     if (groundEllipse(ctx, r, x, y, rad)) { ctx.fillStyle = `rgba(0,0,0,${alpha})`; ctx.fill(); }
   }
 
+  // Animation-only state per player (visual, never fed back to the game):
+  // smoothed running speed, sideways lean in screen space, stride phase that
+  // advances with distance run, and a backswing as the ball comes in.
+  function playerAnim(r, g, p, pos) {
+    const a = r.anim[p.side] || (r.anim[p.side] = { t: p.anim, spd: 0, lean: 0, stride: p.side * 1.7, prep: 0, prepWing: 'fh' });
+    let dt = p.anim - a.t;
+    a.t = p.anim;
+    if (!(dt > 0 && dt < 0.2)) dt = 0;
+    const v = p.moving ? p.v : 0;
+    let side = 0;
+    if (v > 0) {
+      const q = proj(r, p.x + p.dirX, p.y + p.dirY, 0);
+      if (!q.behind) side = (q.x - pos.x) / pos.s;   // metres across the screen per metre run
+    }
+    const target = Math.min(1, v / p.ch.speed);
+    const ease = 1 - Math.exp(-dt * 10);
+    a.spd += (target - a.spd) * ease;
+    a.lean += (Math.max(-1, Math.min(1, side * target)) - a.lean) * ease;
+    a.stride += v * dt * 2.3;
+
+    let prep = 0;
+    const b = g.ball;
+    if (g.phase === 'rally' && b.active && b.inFlight && b.lastHitter !== p.side && p.swing < 0) {
+      const closing = -p.fwd * b.vel.y;
+      const dist = p.fwd * (b.pos.y - p.y);
+      if (closing > 1 && dist > -0.5) prep = Math.max(0, Math.min(1, 1 - (dist / closing - 0.08) / 0.5));
+      if (prep > 0 && a.prep === 0) a.prepWing = (b.pos.x - p.x) * p.fwd >= -0.05 ? 'fh' : 'bh';
+    }
+    a.prep = prep;
+    return a;
+  }
+
   function drawPlayer(ctx, r, g, p) {
     const pos = proj(r, p.x, p.y, 0);
     if (pos.behind) return;
@@ -505,6 +538,7 @@
     ctx.lineWidth = 1.5;
     if (groundEllipse(ctx, r, p.x, p.y, 0.6)) ctx.stroke();
     ctx.restore();
+    const a = playerAnim(r, g, p, pos);
     const pose = {
       t: p.anim,
       facing: p.side === r.human ? 'back' : 'front',
@@ -512,6 +546,9 @@
       wing: p.swingWing,
       running: p.moving,
       toss: g.phase === 'toss' && g.server === p.side && p.swing < 0,
+      speed: a.spd, lean: a.lean, stride: a.stride,
+      prep: a.prep, prepWing: a.prepWing,
+      lod: r.quality,
     };
     ctx.save();
     ctx.translate(pos.x, pos.y);
