@@ -291,7 +291,8 @@
       }
     }
     const vel = sol.vel;
-    return { pos, vel, spin, side, kind, wing, err, e, powerF };
+    const lob = !!input.lob && kind !== 'serve' && kind !== 'overhead';
+    return { pos, vel, spin, side, kind, wing, err, e, powerF, lob };
   }
 
   function applyShot(g, p, shot) {
@@ -312,7 +313,7 @@
     const kmh = Math.round(Math.hypot(b.vel.x, b.vel.y, b.vel.z) * 3.6);
     const info = {
       side: p.side, kind: shot.kind, wing: shot.wing, kmh,
-      spin: shot.spin > 0.35 ? 'Topspin' : shot.spin < -0.1 ? 'Slice' : 'Flat',
+      spin: shot.lob ? 'Lob' : shot.spin > 0.35 ? 'Topspin' : shot.spin < -0.1 ? 'Slice' : 'Flat',
       curve: Math.abs(shot.side) > 0.2 ? (shot.side * p.fwd > 0 ? 'curls right' : 'curls left') : '',
       errMs: Math.round(shot.err * 1000),
       perfect: Math.abs(shot.e) < 0.35,

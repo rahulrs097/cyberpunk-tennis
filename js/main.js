@@ -236,6 +236,8 @@
     const depth = CT.clamp((chord / Math.min(window.innerWidth, window.innerHeight) - 0.1) / 0.3, 0, 1);
     const over = CT.clamp((u - 7) / 4, 0, 1);
     const spinDir = dy < 0 ? 1 : -1;
+    // a slow, unhurried upward swipe (not a short one) lofts a topspin lob
+    const lob = spinDir > 0 && u < 0.55 && depth >= 0.5;
     let aim = Math.atan2(dx, Math.abs(dy));
     // bow of the path, measured towards screen-right
     let nx = -dy / chord, ny = dx / chord;
@@ -250,7 +252,7 @@
     aim += CT.clamp(bulge * 0.45, -0.12, 0.12);
     // A slice is swiped the other way: top-left to bottom-right goes left.
     if (spinDir < 0) aim = -aim;
-    const input = { aim, pace, over, spinDir, curve, depth, landX: pointAt(aim) };
+    const input = { aim, pace, over, spinDir, curve, depth, landX: pointAt(aim), lob };
     if (isGuest()) {
       // judge timing here, against the ball this player saw, then send it
       const tm = CT.swipeTiming(game, me);
