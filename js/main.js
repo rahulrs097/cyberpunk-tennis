@@ -116,7 +116,9 @@
       if (d.side === me) {
         const kind = { fh: 'Forehand', bh: 'Backhand' }[d.wing];
         const label = d.kind === 'serve' ? 'Serve' : d.kind === 'overhead' ? 'Overhead' : d.kind === 'volley' ? kind + ' volley' : d.kind === 'power' ? 'Power ' + kind.toLowerCase() : d.kind === 'powerVolley' ? 'Power ' + kind.toLowerCase() + ' volley' : kind;
-        const timing = d.perfect ? 'Perfect timing' : (d.errMs > 0 ? 'Late ' : 'Early ') + Math.abs(d.errMs) + ' ms';
+        const timing = d.perfect ? 'Perfect timing'
+          : d.note && Math.abs(d.errMs) < 15 ? d.note
+          : (d.errMs > 0 ? 'Late ' : 'Early ') + Math.abs(d.errMs) + ' ms' + (d.note ? ' · ' + d.note : '');
         showShot([label, timing, d.kmh + ' km/h', d.spin, d.curve].filter(Boolean).join(' · '));
         try { navigator.vibrate && navigator.vibrate(18); } catch (e) { /* optional */ }
       }

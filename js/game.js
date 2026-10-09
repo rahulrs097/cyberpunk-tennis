@@ -211,7 +211,19 @@
     else kind = 'ground';
 
     const W = windowFor(p, wing);
-    const e = clamp(err / W, -OUTER, OUTER);
+    // Where you are matters as well as when you swing: a ball jammed into
+    // your body, one at full stretch, or one hit on the run is harder to
+    // strike cleanly, so it counts as extra mistiming.
+    let balance = 0, note = '';
+    if (!isServe) {
+      const d = Math.abs(localX), far = ch.reach * 0.6;
+      if (kind !== 'overhead' && d < 0.3) { balance += ((0.3 - d) / 0.3) * 0.6; note = 'Jammed'; }
+      if (d > far) { balance += ((d - far) / (ch.reach - far)) * 0.8; note = 'Stretched'; }
+      const run = p.moving ? p.v / ch.speed : 0;
+      if (run > 0.3) { balance += ((run - 0.3) / 0.7) * 0.7; if (!note) note = 'On the run'; }
+    }
+    const e0 = err / W;
+    const e = clamp(e0 + (e0 < 0 ? -balance : balance), -OUTER, OUTER);
     // Late forehands drift to the hitter's right, late backhands to the left.
     const drift = e * 0.085 * (wing === 'fh' ? 1 : -1);
     const powerF = Math.max(0.7, 1 - 0.1 * Math.pow(Math.abs(e), 1.5));
@@ -304,13 +316,13 @@
       if (Math.abs(drift) > 0.002 || powerF < 0.999) {
         sol = isLob ? solveLob(a + drift, along - (1 - powerF) * 9, lobUp * powerF)
           : solve(a + drift, spd * powerF, along - (1 - powerF) * 9, minClear - (1 - powerF) * 0.7);
-        if (isLob) { const vel = sol.vel; return { pos, vel, spin, side, kind, wing, err, e, powerF, lob: true }; }
+        if (isLob) { const vel = sol.vel; return { pos, vel, spin, side, kind, wing, err, e, powerF, lob: true, note }; }
         // (a soft ball, like a scoop off a drop shot, dips by less)
         sol.vel.z -= (1 - powerF) * 2 * Math.min(1, spd / 25);
       }
     }
     const vel = sol.vel;
-    return { pos, vel, spin, side, kind, wing, err, e, powerF, lob: isLob };
+    return { pos, vel, spin, side, kind, wing, err, e, powerF, lob: isLob, note };
   }
 
   function applyShot(g, p, shot) {
@@ -335,6 +347,7 @@
       curve: Math.abs(shot.side) > 0.2 ? (shot.side * p.fwd > 0 ? 'curls right' : 'curls left') : '',
       errMs: Math.round(shot.err * 1000),
       perfect: Math.abs(shot.e) < 0.35,
+      note: Math.abs(shot.e) >= 0.35 ? shot.note : '',
     };
     g.lastShot = info;
     // where will it land? used for the landing marker
