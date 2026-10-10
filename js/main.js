@@ -10,11 +10,10 @@
   let game = null;
   let paused = false;
   let humanChar = 'octopus';
-  let speedSetting = 0.8;
-  // The ball speed setting is also the difficulty: how much the CPU mistimes.
-  const CPU_ERR = { 0.65: 1.3, 0.8: 1, 1: 0.65 };
-  const CPU_REACT = { 0.65: 0.3, 0.8: 0.24, 1: 0.12 };   // seconds to read a shot
-  const CPU_COVER = { 0.65: 0.15, 0.8: 0.25, 1: 0.4 };
+  // Chill / Club / Pro: ball speed and how well the CPU plays (CT.CPU_LEVELS)
+  let level = 'club';
+  try { const v = localStorage.getItem('ct.level'); if (CT.CPU_LEVELS[v]) level = v; } catch (e) { /* storage is optional */ }
+  let tut = null;      // the tutorial in progress: { i: lesson index, done: reps passed }
   const SERVE_CLOCK = 20;   // seconds to start a serve in an online match
   let autoMove = true;
   try { const v = localStorage.getItem('ct.autoMove'); if (v !== null) autoMove = v === '1'; } catch (e) { /* storage is optional */ }
@@ -23,6 +22,74 @@
   let lastFrame = performance.now();
   let msgTimer = 0;
   let shotTimer = 0;
+
+  // ---------------- tutorial ----------------
+  // A ball machine on the far side feeds easy balls. Each lesson needs `need`
+  // reps that pass `pass(d)` (d: the 'drill' event: ok, text, x/y of the
+  // bounce, and the shot the player hit).
+  const LESSONS = [
+    { title: 'Serve', serve: true, need: 2, hint: 'Tap to toss, then swipe up as the ball tops out in the ring',
+      intro: 'Tap to toss the ball, then swipe up when it tops out', pass: (d) => d.ok },
+    { title: 'Forehand', wing: 'fh', need: 3, hint: 'Swipe up as the ring around the ball closes',
+      intro: 'Swipe up as the ring around the ball closes', pass: (d) => d.ok },
+    { title: 'Backhand', wing: 'bh', need: 2, hint: 'Same swipe on your left side. Late backhands drift left',
+      intro: 'Now on your backhand side', pass: (d) => d.ok },
+    { title: 'Aim left', wing: 'fh', need: 2, hint: 'Swipe up and to the left. The ball goes where you swipe',
+      intro: 'Swipe towards the left of the court', pass: (d) => d.ok && d.x < -0.8 },
+    { title: 'Aim right', wing: 'bh', need: 2, hint: 'Swipe up and to the right',
+      intro: 'Now swipe towards the right', pass: (d) => d.ok && d.x > 0.8 },
+    { title: 'Slice', wing: 'bh', need: 2, hint: 'Swipe down for backspin. Top-left to bottom-right goes left',
+      intro: 'Swipe down to slice', pass: (d) => d.ok && d.shot && d.shot.spin === 'Slice' },
+    { title: 'Drop shot', wing: 'fh', need: 1, hint: 'A short swipe drops the ball short. Land it in front of the service line',
+      intro: 'A short swipe drops it short', pass: (d) => d.ok && d.y < CT.COURT.SL },
+    { title: 'Lob', wing: 'fh', need: 1, hint: 'Swipe up slowly and smoothly, at least half your usual length',
+      intro: 'A slow, long swipe up lobs', pass: (d) => d.ok && d.shot && d.shot.spin === 'Lob' },
+  ];
+
+  function startTutorial() {
+    me = 0;
+    tut = { i: 0, done: 0 };
+    runLesson();
+  }
+
+  function runLesson() {
+    const L = LESSONS[tut.i];
+    tut.done = 0;
+    const lv = CT.CPU_LEVELS.chill;
+    beginMatch({ p0: humanChar, p1: humanChar === 'octopus' ? 'philosopher' : 'octopus', timeScale: lv.timeScale,
+      control: ['human', 'feeder'], autoMove: [autoMove, false], drill: { serve: !!L.serve, wing: L.wing, reps: 0 } });
+    showMsg(L.title, L.intro, 'neutral');
+  }
+
+  function onDrill(d) {
+    const L = LESSONS[tut.i];
+    if (d.ok === null) return;
+    const good = L.pass(d);
+    if (good) tut.done++;
+    blip(good ? 520 : 200, 0.18, 'triangle', 0.07, good ? 780 : 120);
+    if (tut.done < L.need) {
+      showMsg(good ? 'Nice' : d.ok ? 'In, but not quite' : d.text, good ? (L.need - tut.done) + ' more' : L.hint, good ? 'good' : 'warn');
+      return;
+    }
+    if (tut.i + 1 < LESSONS.length) {
+      tut.i++;
+      tut.done = 0;
+      // the next lesson starts once the cheer has been seen
+      const g = game;
+      setTimeout(() => { if (tut && game === g) runLesson(); }, 1200);
+      showMsg('Done', 'Next: ' + LESSONS[tut.i].title.toLowerCase(), 'good');
+      return;
+    }
+    tut = null;
+    $('endTitle').textContent = 'Tutorial done';
+    $('endScore').textContent = '';
+    $('endNote').textContent = 'One more thing: running and power shots wear down the bar under your name. When it runs low you get slower and your timing gets harder. Start on Chill.';
+    $('endNote').hidden = false;
+    $('rematch').textContent = 'Play vs CPU';
+    $('end').hidden = false;
+    leaveFullscreen();
+    CT.Music.setPlaying(false);
+  }
 
   // ---------------- sound ----------------
   let audio = null, master = null, muted = false;
@@ -97,11 +164,13 @@
       const left = game.serveClock - game.serveWait;
       if (left <= 10) call = 'Serve clock ' + Math.max(0, Math.ceil(left)) + (call ? ' · ' + call : '');
     }
+    if (tut) { const L = LESSONS[tut.i]; call = `Lesson ${tut.i + 1}/${LESSONS.length} · ${L.title} · ${Math.min(tut.done, L.need)}/${L.need}`; }
     $('callout').textContent = call;
   }
 
   function hintForState() {
     if (!game) return;
+    if (tut) { setHint(LESSONS[tut.i].hint); return; }
     const humanServing = game.server === me;
     if (game.phase === 'preServe') setHint(humanServing ? 'Tap to toss the ball' : autoMove ? 'Get ready to return' : 'Tap the court to move into position');
     else if (game.phase === 'toss' && humanServing) setHint('Swipe as the ball tops out in the ring');
@@ -148,6 +217,8 @@
       endMatch(d.winner);
     } else if (type === 'toss') {
       hintForState();
+    } else if (type === 'drill') {
+      if (tut) onDrill(d);
     }
   }
 
@@ -157,6 +228,8 @@
     const score = `${m.games[winner]}–${m.games[1 - winner]}` + (m.tiebreak ? ` (${m.points[winner]}–${m.points[1 - winner]})` : '');
     $('endTitle').textContent = winner === me ? 'You win the set' : `${w} wins the set`;
     $('endScore').textContent = score;
+    $('endNote').hidden = true;
+    $('rematch').textContent = 'Rematch';
     $('end').hidden = false;
     leaveFullscreen();
     CT.Music.setPlaying(false);
@@ -400,6 +473,7 @@
   // A CPU-vs-CPU rally plays behind the menu.
   function showMenu() {
     leaveOnline(true);
+    tut = null;
     $('lobby').hidden = true;
     CT.Music.setPlaying(false);
     $('end').hidden = true;
@@ -417,9 +491,11 @@
       return;
     }
     me = 0;
+    tut = null;
     const cpuChar = humanChar === 'octopus' ? 'philosopher' : 'octopus';
-    beginMatch({ p0: humanChar, p1: cpuChar, timeScale: speedSetting, control: ['human', 'cpu'], autoMove: [autoMove, false], cpuErr: CPU_ERR[speedSetting] || 1,
-      cpuReact: CPU_REACT[speedSetting], cpuCover: CPU_COVER[speedSetting] });
+    const L = CT.CPU_LEVELS[level];
+    beginMatch({ p0: humanChar, p1: cpuChar, timeScale: L.timeScale, control: ['human', 'cpu'], autoMove: [autoMove, false],
+      cpuErr: L.err, cpuReact: L.react, cpuCover: L.cover, cpuSpeed: L.speed, cpuPace: L.pace, cpuDepth: L.depth });
   }
 
   function beginMatch(cfg) {
@@ -442,7 +518,7 @@
     layout();
     updateHud();
     hintForState();
-    showMsg('First to 6', 'Tiebreak at 6–6', 'neutral');
+    if (!cfg.drill) showMsg('First to 6', 'Tiebreak at 6–6', 'neutral');
   }
 
   function frame(now) {
@@ -520,14 +596,18 @@
     canvas.addEventListener('pointercancel', () => { touch = null; });
     window.addEventListener('resize', () => { if (game) layout(); });
     document.addEventListener('visibilitychange', () => {
-      if (document.hidden) { setPaused(true); if (audio) audio.suspend(); }
+      // (the CPU rally behind the menu isn't a match, so there's nothing to pause)
+      if (document.hidden) { if ($('menu').hidden && $('lobby').hidden) setPaused(true); if (audio) audio.suspend(); }
       else if (audio) audio.resume();
     });
     document.querySelectorAll('.pick').forEach((b) => b.addEventListener('click', () => pickChar(b.dataset.char)));
-    document.querySelectorAll('[data-speed]').forEach((b) => b.addEventListener('click', () => {
-      speedSetting = parseFloat(b.dataset.speed);
-      document.querySelectorAll('[data-speed]').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
-    }));
+    const pickLevel = (id) => {
+      level = id;
+      try { localStorage.setItem('ct.level', id); } catch (e) { /* storage is optional */ }
+      document.querySelectorAll('[data-level]').forEach((x) => x.setAttribute('aria-pressed', String(x.dataset.level === id)));
+    };
+    document.querySelectorAll('[data-level]').forEach((b) => b.addEventListener('click', () => pickLevel(b.dataset.level)));
+    pickLevel(level);
     document.querySelectorAll('[data-auto]').forEach((b) => b.addEventListener('click', () => setAutoMove(b.dataset.auto === 'on')));
     $('autoPause').addEventListener('click', () => setAutoMove(!autoMove));
     setAutoMove(autoMove);
@@ -542,6 +622,8 @@
     $('resume').addEventListener('click', () => setPaused(false));
     $('quit').addEventListener('click', () => { leaveFullscreen(); showMenu(); });
     $('howBtn').addEventListener('click', () => { $('help').hidden = false; });
+    $('tutBtn').addEventListener('click', () => { ensureAudio(); startTutorial(); });
+    $('helpTut').addEventListener('click', () => { $('help').hidden = true; ensureAudio(); startTutorial(); });
     $('helpClose').addEventListener('click', () => { $('help').hidden = true; });
     $('hostBtn').addEventListener('click', hostRoom);
     $('joinBtn').addEventListener('click', () => { leaveOnline(true); lobby('Enter the 4-letter code your friend sees.', '', true); $('codeInput').value = ''; $('codeInput').focus(); });

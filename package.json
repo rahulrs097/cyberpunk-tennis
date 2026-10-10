@@ -1,0 +1,10 @@
+{
+  "name": "cyberpunk-tennis",
+  "private": true,
+  "description": "Mobile-first tennis on an HTML canvas",
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "sim": "node tests/sim.js"
+  },
+  "engines": { "node": ">=20" }
+}

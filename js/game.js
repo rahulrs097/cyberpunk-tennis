@@ -14,9 +14,12 @@
   const ACCEL = 8;              // m/s² from a standstill to top speed
   const AIM_FULL = 0.6;         // a swipe this many radians off straight aims at the sideline
   const NET_ZONE = 7.5;
-  const STAMINA_POINT = 10;      // stamina back between points
-  const STAMINA_CHANGEOVER = 20; // and at a changeover
-  const STAMINA_STILL = 0.4;   // per second standing still mid-rally         // a player this close to the net is at the net
+  // Between points you get back this share of what you're missing (more at a
+  // changeover), so long rallies leave you tired for the next few points.
+  const STAMINA_POINT = 0.3;
+  const STAMINA_CHANGEOVER = 0.6;
+  const STAMINA_STILL = 0.4;     // per second standing still mid-rally
+  const STAMINA_SWING = 0.4;     // every shot
   // An online guest's swipe arrives a round trip after they saw the ball, so
   // the host waits this long (s) past the guest's latest swing before calling
   // a ball the guest was about to hit a winner.
@@ -39,7 +42,7 @@
       stamina: 100, cap: 100, run: 0, streak: 0,
       swing: -1, swingWing: 'fh', moving: false, anim: side * 1.7,
       prevRel: null, cross: null, pending: null, plan: null,
-      v: 0, dirX: 0, dirY: 0, reactUntil: 0,
+      v: 0, dirX: 0, dirY: 0, reactUntil: 0, speedF: 1,
     };
   }
 
@@ -77,7 +80,17 @@
       // towards the side the opponent can angle it to (both rise with level)
       cpuReact: opts.cpuReact || REACT,
       cpuCover: opts.cpuCover || 0.15,
+      // the CPU's legs, and how hard and deep it hits (1 = full; lower levels
+      // run slower and leave shorter, softer balls to attack)
+      cpuSpeed: opts.cpuSpeed || 1,
+      cpuPace: opts.cpuPace || 1,
+      cpuDepth: opts.cpuDepth || 1,
+      // Tutorial drills: side 1 is a ball machine ('feeder' control) that feeds
+      // side 0 and never returns. Each rep ends at the first bounce with a
+      // 'drill' event instead of a point. { serve: true } = side 0 serves.
+      drill: opts.drill || null,
     };
+    g.players.forEach((p, i) => { if (g.control[i] === 'cpu') p.speedF = g.cpuSpeed; });
     startPoint(g, true);
     return g;
   }
@@ -89,7 +102,7 @@
   function emit(g, type, data) { g.onEvent(type, data || {}); }
   function staminaF(p) { return p.stamina / 100; }
   // Tired legs: top speed falls to 55% on empty.
-  function moveSpeed(p) { return p.ch.speed * (0.55 + 0.45 * staminaF(p)); }
+  function moveSpeed(p) { return p.ch.speed * p.speedF * (0.55 + 0.45 * staminaF(p)); }
 
   // ---------------- point setup ----------------
   // keepClock: a re-toss, which doesn't restart the serve clock
@@ -98,6 +111,7 @@
     const server = CT.currentServer(m);
     const recv = 1 - server;
     const deuce = CT.deuceSide(m);
+    if (g.drill) { startRep(g); return; }
     const S = g.players[server], Rp = g.players[recv];
     const rs = deuce ? 1 : -1;                    // + = server's right
     S.x = S.fwd * rs * 0.7; S.y = -S.fwd * (COURT.HL + 0.3);
@@ -112,7 +126,7 @@
     for (const p of g.players) {
       p.tx = p.x; p.ty = p.y; p.swing = -1; p.pending = null; p.plan = null;
       p.cross = null; p.prevRel = null; p.streak = 0; p.v = 0; p.atNet = false; p.netSpot = null;
-      if (!fresh) p.stamina = Math.min(p.cap, p.stamina + (changeover ? STAMINA_CHANGEOVER : STAMINA_POINT));
+      if (!fresh) p.stamina = Math.min(p.cap, p.stamina + (p.cap - p.stamina) * (changeover ? STAMINA_CHANGEOVER : STAMINA_POINT));
     }
     g.serveBox = { side: recv, sign: boxSign };
     g.server = server;
@@ -125,6 +139,56 @@
     g.held = null;
     if (!keepClock) g.serveWait = 0;
     emit(g, 'serveReady', { server, first: m.firstServe });
+  }
+
+  // A tutorial rep: the player serves, or waits on the baseline for a feed.
+  function startRep(g) {
+    const m = g.match, P = g.players[0], F = g.players[1];
+    m.server = 0; m.firstServe = true;
+    for (const p of g.players) {
+      p.swing = -1; p.pending = null; p.plan = null; p.cross = null; p.prevRel = null;
+      p.streak = 0; p.v = 0; p.atNet = false; p.netSpot = null; p.stamina = 100; p.cap = 100;
+    }
+    F.x = 0; F.y = 11; F.tx = F.x; F.ty = F.y;
+    g.server = g.drill.serve ? 0 : 1;
+    g.ball = CT.makeBall();
+    g.trail = [];
+    g.peakT = null; g.peakBall = null; g.held = null; g.serveWait = 0;
+    g.phaseWall = 0;
+    if (g.drill.serve) {
+      const deuce = (g.drill.reps || 0) % 2 === 0;
+      P.x = (deuce ? 1 : -1) * 0.7; P.y = -(COURT.HL + 0.3);
+      g.serveBox = { side: 1, sign: deuce ? -1 : 1 };
+      g.phase = 'preServe';
+    } else {
+      P.x = 0; P.y = -P.ch.home;
+      g.phase = 'feed';
+    }
+    P.tx = P.x; P.ty = P.y;
+    emit(g, 'serveReady', { server: g.server, first: true });
+  }
+
+  // The ball machine feeds an easy ball to the player's `wing` side.
+  function feedBall(g) {
+    const P = g.players[0], F = g.players[1], wing = g.drill.wing || 'fh';
+    const b = CT.makeBall();
+    b.pos = { x: F.x, y: F.y - 0.5, z: 1.0 };
+    b.active = true; b.inFlight = true; b.bounces = 1;
+    g.ball = b;
+    g.phase = 'rally';
+    const landX = clamp(P.x + (wing === 'fh' ? 1 : -1) * 0.9, -3, 3);
+    const shot = computeShot(g, F, { aim: 0, landX, pace: 0.2, spinDir: 1, curve: 0, depth: 0.75, clear: 0.6 }, 0);
+    applyShot(g, F, shot);
+  }
+
+  function drillEnd(g, ok, text, at) {
+    if (g.phase === 'pointOver') return;
+    g.drill.reps = (g.drill.reps || 0) + 1;
+    g.held = null;
+    g.phase = 'pointOver';
+    g.phaseWall = 0;
+    for (const p of g.players) p.pending = null;
+    emit(g, 'drill', { ok, text, x: at ? at.x : null, y: at ? at.y : null, shot: g.lastShot && g.lastShot.side === 0 ? g.lastShot : null });
   }
 
   function requestToss(g, side) {
@@ -158,7 +222,7 @@
 
   // ---------------- hitting ----------------
   function windowFor(p, wing) {
-    return p.ch.window[wing] * (0.35 + 0.65 * staminaF(p));
+    return p.ch.window[wing] * (0.55 + 0.45 * staminaF(p));
   }
 
   function canReach(g, p) {
@@ -247,12 +311,15 @@
       speed = lerp(ch.paceMin, ch.pace[wing], pace) * capF;
       const sm = ch.spin[wing];
       spin = lerp(sm, sm * 0.12, pace);
-      if (input.spinDir < 0) spin = -spin * 0.75;
+      // A slice keeps real backspin even when swiped fast (a flat topspin
+      // drive loses its spin with pace, but a hard slice still skids and stays
+      // low), and comes off a little slower.
+      if (input.spinDir < 0) { spin = -lerp(0.55, 0.3, pace); speed *= 0.9; }
       margin = input.spinDir < 0 ? 1.8 + 2.4 * (1 - pace) : 0.7 + 2.8 * (1 - pace);
       margin -= over * 2.5;
       if (kind === 'power') {
         // A high ball can be driven down hard and flat.
-        speed *= 1.22; spin *= 0.5; margin *= 0.7;
+        speed *= 1.22; spin *= spin > 0 ? 0.5 : 0.8; margin *= 0.7;
       }
       if (kind === 'volley') { speed *= 0.72; spin *= 0.3; }
       // a volley above power height can be punched down hard
@@ -333,6 +400,7 @@
     b.lastHitter = p.side;
     b.isServe = shot.kind === 'serve';
     g.held = null;
+    p.stamina = Math.max(0, p.stamina - STAMINA_SWING);
     if (shot.kind === 'power' || shot.kind === 'powerVolley') { p.streak++; p.stamina = Math.max(0, p.stamina - 3 * p.streak); }
     else if (shot.kind === 'ground' || shot.kind === 'volley') p.streak = 0;
     p.swing = 0;
@@ -343,7 +411,7 @@
     const kmh = Math.round(Math.hypot(b.vel.x, b.vel.y, b.vel.z) * 3.6);
     const info = {
       side: p.side, kind: shot.kind, wing: shot.wing, kmh,
-      spin: shot.lob ? 'Lob' : shot.spin > 0.35 ? 'Topspin' : shot.spin < -0.1 ? 'Slice' : 'Flat',
+      spin: shot.lob ? 'Lob' : shot.spin > 0.35 ? 'Topspin' : shot.spin < 0 ? 'Slice' : 'Flat',
       curve: Math.abs(shot.side) > 0.2 ? (shot.side * p.fwd > 0 ? 'curls right' : 'curls left') : '',
       errMs: Math.round(shot.err * 1000),
       perfect: Math.abs(shot.e) < 0.35,
@@ -537,7 +605,7 @@
     const T = c.ch.tactics;
     const slack = c.plan ? c.plan.slack : 0;
     const edge = COURT.SW - 0.45;
-    let pace = rand(T.pace[0], T.pace[1]);
+    let pace = rand(T.pace[0], T.pace[1]) * g.cpuPace;
     if (slack < 0.2) pace *= 0.75;
     // a low ball (dug out of a drop shot, say) has to be lifted, not hit
     if (b.pos.z < 0.5) pace *= 0.6;
@@ -561,7 +629,7 @@
       tx = rand(-edge, edge) * 0.8;
     }
     // an easy ball with plenty of time: go for it, away from them
-    if (!lob && slack > 0.6 && b.pos.z > 0.8) { pace = Math.max(pace, T.pace[1]); tx = away * edge; }
+    if (!lob && slack > 0.6 && b.pos.z > 0.8) { pace = Math.max(pace, T.pace[1] * g.cpuPace); tx = away * edge; }
     tx *= T.safe;
     if (slack < 0.2 && !lob) tx *= 0.5;           // stretched: play it back through the middle
     // A short ball with time to spare: hit an approach and follow it in.
@@ -573,7 +641,7 @@
     let input = null;
     for (let i = 0; i < 6; i++) {
       // the CPU plays with a safe margin over the net
-      input = { aim: 0, landX: tx, pace, over: 0, spinDir, curve, lob, clear: 0.4 };
+      input = { aim: 0, landX: tx, pace, over: 0, spinDir, curve, lob, clear: 0.4, depth: approach ? 1 : g.cpuDepth };
       const shot = computeShot(g, c, input, 0);
       const fl = CT.flight(shot.pos, shot.vel, shot.spin, shot.side), land = fl.land;
       const safe = fwd * land.y > 0.3 && fl.netClear > 0.3 && Math.abs(land.x) < COURT.SW - 0.25 && Math.abs(land.y) < COURT.HL - 0.3;
@@ -587,7 +655,7 @@
 
   function cpuChooseServe(g, c) {
     const first = g.match.firstServe;
-    let pace = first ? rand(0.7, 1.0) : rand(0.35, 0.6);
+    let pace = (first ? rand(0.7, 1.0) : rand(0.35, 0.6)) * g.cpuPace;
     let aim = rand(-0.22, 0.22);
     const spinDir = first && Math.random() < 0.6 ? -1 : 1;
     const curve = rand(-0.3, 0.3);
@@ -633,6 +701,8 @@
   // ---------------- simulation ----------------
   function pointTo(g, w, text, detail) {
     if (g.phase === 'pointOver' || g.phase === 'matchOver') return;
+    // (a feed that misses the court doesn't count either way)
+    if (g.drill) { drillEnd(g, g.ball.lastHitter === 1 && w === 0 ? null : w === 0, w === 0 ? text : 'Missed'); return; }
     g.held = null;
     const res = CT.awardPoint(g.match, w);
     g.phase = 'pointOver';
@@ -643,6 +713,7 @@
 
   function fault(g, text) {
     const m = g.match;
+    if (g.drill) { drillEnd(g, false, text === 'Net' ? 'Net' : 'Fault', g.ball.pos); return; }
     if (m.firstServe) {
       m.firstServe = false;
       g.phase = 'fault';
@@ -664,11 +735,13 @@
       if (b.isServe) {
         if (b.netted || !inOppHalf) fault(g, 'Net');
         else if (!CT.inServiceBox(b.pos.x, b.pos.y, g.serveBox)) fault(g, 'Fault');
+        else if (g.drill) drillEnd(g, true, 'In', b.pos);
         else b.bounces = 1;
         return;
       }
       if (b.netted || !inOppHalf) { pointTo(g, r, 'Net'); return; }
       if (!CT.inSingles(b.pos.x, b.pos.y)) { pointTo(g, r, 'Out'); return; }
+      if (g.drill && h === 0) { drillEnd(g, true, 'In', b.pos); return; }
       b.bounces = 1;
       return;
     }
@@ -817,7 +890,8 @@
       startPoint(g, true);
       m.firstServe = false;
     }
-    if (g.phase === 'pointOver' && g.phaseWall > 1.9) {
+    if (g.phase === 'feed' && g.phaseWall > 0.9) feedBall(g);
+    if (g.phase === 'pointOver' && g.phaseWall > (g.drill ? 1.3 : 1.9)) {
       if (g.match.over) { g.phase = 'matchOver'; emit(g, 'matchOver', { winner: g.match.winner }); }
       else startPoint(g, false);
     }
@@ -867,6 +941,15 @@
     if (!c) return { whiff: 'Nothing to hit' };
     return { err: -c.t / g.timeScale };
   }
+
+  // The menu's levels: ball speed (game time per real second) and how the CPU
+  // plays. err scales its timing errors, react is how long it takes to read a
+  // shot (s), cover is how far it shades towards the angle.
+  CT.CPU_LEVELS = {
+    chill: { timeScale: 0.65, err: 1.2, react: 0.34, cover: 0.1, speed: 0.82, pace: 0.8, depth: 0.8 },
+    club: { timeScale: 0.8, err: 1.15, react: 0.3, cover: 0.15, speed: 0.87, pace: 0.82, depth: 0.85 },
+    pro: { timeScale: 1, err: 0.65, react: 0.12, cover: 0.4, speed: 1, pace: 1, depth: 1 },
+  };
 
   CT.snapshot = snapshot;
   CT.applySnapshot = applySnapshot;

@@ -5,3 +5,5 @@ wrangler.toml
 README.md
 node_modules
 .wrangler
+tests
+package.json
