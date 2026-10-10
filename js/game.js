@@ -27,6 +27,8 @@
     const dA = (sp * sp) / (2 * ACCEL);
     return dist < dA ? Math.sqrt((2 * dist) / ACCEL) : (dist - dA) / sp + sp / ACCEL;
   }
+  // running back towards your own baseline is slower than running forwards
+  const backF = (uy, fwd) => 1 - 0.35 * Math.max(0, -uy * fwd);
   const fwdOf = (side) => (side === 0 ? 1 : -1);
   const rand = (a, b) => a + Math.random() * (b - a);   // CPU shot selection only
 
@@ -209,7 +211,19 @@
     else kind = 'ground';
 
     const W = windowFor(p, wing);
-    const e = clamp(err / W, -OUTER, OUTER);
+    // Where you are matters as well as when you swing: a ball jammed into
+    // your body, one at full stretch, or one hit on the run is harder to
+    // strike cleanly, so it counts as extra mistiming.
+    let balance = 0, note = '';
+    if (!isServe) {
+      const d = Math.abs(localX), far = ch.reach * 0.6;
+      if (kind !== 'overhead' && d < 0.3) { balance += ((0.3 - d) / 0.3) * 0.6; note = 'Jammed'; }
+      if (d > far) { balance += ((d - far) / (ch.reach - far)) * 0.8; note = 'Stretched'; }
+      const run = p.moving ? p.v / ch.speed : 0;
+      if (run > 0.3) { balance += ((run - 0.3) / 0.7) * 0.7; if (!note) note = 'On the run'; }
+    }
+    const e0 = err / W;
+    const e = clamp(e0 + (e0 < 0 ? -balance : balance), -OUTER, OUTER);
     // Late forehands drift to the hitter's right, late backhands to the left.
     const drift = e * 0.085 * (wing === 'fh' ? 1 : -1);
     const powerF = Math.max(0.7, 1 - 0.1 * Math.pow(Math.abs(e), 1.5));
@@ -250,6 +264,21 @@
     // launch at angle `ang` to land `along` metres down the court
     const solve = (ang, spd, along, clear) => CT.solveLaunch(pos, { x: fwd * Math.sin(ang), y: fwd * Math.cos(ang) },
       spd, spin, side, Math.max(1.5, along) / Math.cos(ang), clear);
+    // A lob goes up first: fix how hard it's launched upward and find the
+    // forward speed that lands it `along` metres down the court.
+    const lobUp = lerp(13, 15, clamp(input.pace, 0, 1));
+    const solveLob = (ang, along, up) => {
+      const dir = { x: fwd * Math.sin(ang), y: fwd * Math.cos(ang) }, dist = Math.max(1.5, along) / Math.cos(ang);
+      let lo = 2, hi = 25, r = null;
+      for (let i = 0; i < 22; i++) {
+        const mid = (lo + hi) / 2;
+        r = CT.flight(pos, { x: dir.x * mid, y: dir.y * mid, z: up }, spin, side);
+        if ((r.land.x - pos.x) * dir.x + (r.land.y - pos.y) * dir.y < dist) lo = mid; else hi = mid;
+      }
+      const v = (lo + hi) / 2;
+      return { vel: { x: dir.x * v, y: dir.y * v, z: up }, landing: CT.flight(pos, { x: dir.x * v, y: dir.y * v, z: up }, spin, side) };
+    };
+    const isLob = !!input.lob && kind !== 'serve' && kind !== 'overhead';
     let target = depthLine - margin;
     let sol;
     if (kind === 'serve') {
@@ -275,7 +304,7 @@
       let aimX = landX, spd = speed, a = 0;
       for (let i = 0; i < 12; i++) {
         a = Math.atan2(fwd * (aimX - pos.x), along);
-        sol = solve(a, spd, along, minClear);
+        sol = isLob ? solveLob(a, along, lobUp) : solve(a, spd, along, minClear);
         const land = sol.landing.land;
         let again = false;
         if (Math.abs(land.x - landX) > 0.25) { aimX -= land.x - landX; again = true; }
@@ -285,13 +314,15 @@
       // Then mistiming costs power and pushes it off line: the ball comes off
       // slower, shorter and a little lower (mostly it misses wide or long).
       if (Math.abs(drift) > 0.002 || powerF < 0.999) {
-        sol = solve(a + drift, spd * powerF, along - (1 - powerF) * 9, minClear - (1 - powerF) * 0.7);
+        sol = isLob ? solveLob(a + drift, along - (1 - powerF) * 9, lobUp * powerF)
+          : solve(a + drift, spd * powerF, along - (1 - powerF) * 9, minClear - (1 - powerF) * 0.7);
+        if (isLob) { const vel = sol.vel; return { pos, vel, spin, side, kind, wing, err, e, powerF, lob: true, note }; }
         // (a soft ball, like a scoop off a drop shot, dips by less)
         sol.vel.z -= (1 - powerF) * 2 * Math.min(1, spd / 25);
       }
     }
     const vel = sol.vel;
-    return { pos, vel, spin, side, kind, wing, err, e, powerF };
+    return { pos, vel, spin, side, kind, wing, err, e, powerF, lob: isLob, note };
   }
 
   function applyShot(g, p, shot) {
@@ -312,10 +343,11 @@
     const kmh = Math.round(Math.hypot(b.vel.x, b.vel.y, b.vel.z) * 3.6);
     const info = {
       side: p.side, kind: shot.kind, wing: shot.wing, kmh,
-      spin: shot.spin > 0.35 ? 'Topspin' : shot.spin < -0.1 ? 'Slice' : 'Flat',
+      spin: shot.lob ? 'Lob' : shot.spin > 0.35 ? 'Topspin' : shot.spin < -0.1 ? 'Slice' : 'Flat',
       curve: Math.abs(shot.side) > 0.2 ? (shot.side * p.fwd > 0 ? 'curls right' : 'curls left') : '',
       errMs: Math.round(shot.err * 1000),
       perfect: Math.abs(shot.e) < 0.35,
+      note: Math.abs(shot.e) >= 0.35 ? shot.note : '',
     };
     g.lastShot = info;
     // where will it land? used for the landing marker
@@ -473,7 +505,7 @@
         let py = b.pos.y - fwd * CONTACT_AHEAD;
         if (fwd * py > -0.8 || fwd * py < -16.5) continue;
         const dist = Math.hypot(px - c.x, py - c.y);
-        const slack = t - ((c.reactUntil - g.time) + runTime(dist, speed) + 0.12);
+        const slack = t - ((c.reactUntil - g.time) + runTime(dist, speed * backF((py - c.y) / Math.max(dist, 1e-6), fwd)) + 0.12);
         let q = -Math.abs(z - 1.0) + (bounced ? 0.4 : 0);
         // at the net: volley it rather than backing up for the bounce
         if (c.atNet) q += bounced ? -1.5 : 0.8;
@@ -585,6 +617,8 @@
     n += Math.pow(pace, 3) * 0.8;
     n += Math.abs(g.ball.pos.z - 1.0) * 0.6;
     n += (1 - staminaF(c)) * 0.5;
+    // smashing while still backpedalling (chasing down a lob) is hard to time
+    if (g.ball.pos.z >= c.ch.overheadZ && c.moving && c.dirY * c.fwd < -0.5) n += 0.8;
     // pace on the incoming ball rushes the swing too
     const v = Math.hypot(g.ball.vel.x, g.ball.vel.y, g.ball.vel.z);
     n += Math.max(0, (v - 16) / 10) * 0.6;
@@ -663,7 +697,7 @@
         // turning sharply means slowing down first
         if (ux * p.dirX + uy * p.dirY < 0.3) p.v *= 0.3;
         p.dirX = ux; p.dirY = uy;
-        p.v = Math.min(sp, p.v + ACCEL * dt);
+        p.v = Math.min(sp * backF(uy, p.fwd), p.v + ACCEL * dt);
         const step = Math.min(d, p.v * dt);
         p.x += ux * step; p.y += uy * step;
         p.moving = true;
