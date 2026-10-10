@@ -311,12 +311,15 @@
       speed = lerp(ch.paceMin, ch.pace[wing], pace) * capF;
       const sm = ch.spin[wing];
       spin = lerp(sm, sm * 0.12, pace);
-      if (input.spinDir < 0) spin = -spin * 0.75;
+      // A slice keeps real backspin even when swiped fast (a flat topspin
+      // drive loses its spin with pace, but a hard slice still skids and stays
+      // low), and comes off a little slower.
+      if (input.spinDir < 0) { spin = -lerp(0.55, 0.3, pace); speed *= 0.9; }
       margin = input.spinDir < 0 ? 1.8 + 2.4 * (1 - pace) : 0.7 + 2.8 * (1 - pace);
       margin -= over * 2.5;
       if (kind === 'power') {
         // A high ball can be driven down hard and flat.
-        speed *= 1.22; spin *= 0.5; margin *= 0.7;
+        speed *= 1.22; spin *= spin > 0 ? 0.5 : 0.8; margin *= 0.7;
       }
       if (kind === 'volley') { speed *= 0.72; spin *= 0.3; }
       // a volley above power height can be punched down hard

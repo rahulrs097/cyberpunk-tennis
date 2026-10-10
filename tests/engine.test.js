@@ -137,6 +137,15 @@ test('a slow upward swipe lobs high and deep, and lands in', () => {
   assert.ok(CT.inSingles(fl.land.x, fl.land.y) && fl.land.y > CT.COURT.SL, 'deep and in');
 });
 
+test('a fast downward swipe still slices with real backspin', () => {
+  const CT = loadEngine();
+  for (const z of [0.8, 1.6]) {
+    const { g, p } = atContact(CT, 'octopus', 0, -12.5, z);
+    const shot = CT._computeShot(g, p, { aim: 0, landX: 0, pace: 1, spinDir: -1, curve: 0, depth: 1 }, 0);
+    assert.ok(shot.spin < -0.2, `spin ${shot.spin} at z=${z}`);
+  }
+});
+
 test('being jammed, stretched or on the run counts as mistiming', () => {
   const CT = loadEngine();
   const input = { aim: 0, landX: 0, pace: 0.7, spinDir: 1, curve: 0, depth: 1 };
