@@ -152,7 +152,6 @@
     #menu .lede, .pick dl { display: none; }
     .pick .portrait { height: 76px; }
   }
-  .btn.link { background: none; border-color: transparent; color: var(--cyan); text-decoration: underline; text-underline-offset: 4px; }
   @media (prefers-reduced-motion: reduce) { #msg.pop { animation: none; } }
 </style>
 </head>
@@ -204,11 +203,11 @@
         <button data-auto="on" aria-pressed="true">On</button>
         <button data-auto="off" aria-pressed="false">Off</button>
       </div>
-      <div class="label">Ball speed</div>
+      <div class="label">Level</div>
       <div class="seg">
-        <button data-speed="0.65" aria-pressed="false">Chill</button>
-        <button data-speed="0.8" aria-pressed="true">Club</button>
-        <button data-speed="1" aria-pressed="false">Pro</button>
+        <button data-level="chill" aria-pressed="false">Chill</button>
+        <button data-level="club" aria-pressed="true">Club</button>
+        <button data-level="pro" aria-pressed="false">Pro</button>
       </div>
       <div class="label">Music</div>
       <div class="seg">
@@ -216,7 +215,10 @@
         <button data-music="off" aria-pressed="false">Off</button>
       </div>
     </div>
-    <button class="btn link" id="howBtn">How to play</button>
+    <div class="seg">
+      <button id="tutBtn">Tutorial</button>
+      <button id="howBtn">How to play</button>
+    </div>
   </div>
 </div>
 
@@ -230,9 +232,13 @@
       <li><b>Pace</b><span>A fast flick hits hard and flat. A slow swipe adds spin and safety.</span></li>
       <li><b>Lob</b><span>Swipe up slowly and smoothly, at least half your usual length, to loft the ball over a player at the net.</span></li>
       <li><b>Timing</b><span>Swipe as the ring closes. Late forehands drift right, late backhands drift left.</span></li>
-      <li><b>Stamina</b><span>Running and repeated power shots tire you. The striped part of the bar is gone for the set.</span></li>
+      <li><b>Stamina</b><span>Running, every swing and repeated power shots tire you, and you only get part of it back between points. Tired players run slower and have less time to swing. The striped part of the bar is gone for the set.</span></li>
+      <li><b>Level</b><span>Chill is slower and the CPU covers less court. Pro is full speed against a CPU that rarely misses.</span></li>
     </ul>
-    <button class="btn primary" id="helpClose">Got it</button>
+    <div class="btns">
+      <button class="btn primary" id="helpClose">Got it</button>
+      <button class="btn" id="helpTut">Try the tutorial</button>
+    </div>
   </div>
 </div>
 
@@ -266,6 +272,7 @@
   <div class="sheet">
     <div class="title"><b id="endTitle">Set</b></div>
     <div class="end-score" id="endScore"></div>
+    <p class="lede" id="endNote" hidden></p>
     <div class="btns">
       <button class="btn primary" id="rematch">Rematch</button>
       <button class="btn" id="toMenu">Change player</button>
