@@ -22,6 +22,11 @@
     K_MAG: 0.26,       // topspin dip (per unit spin, per m/s)
     K_SIDE: 0.10,      // sidespin curve
     DT: 1 / 240,       // fixed simulation step
+    // Bounce on a medium-pace hard court (ITF court pace rating ~35).
+    E: 0.81,           // vertical coefficient of restitution
+    MU: 0.6,           // ball-court sliding friction
+    ALPHA: 0.55,       // ball moment of inertia, I / (m R^2)
+    K_AIR: 0.0363,     // rho * A / 2m: turns a lift coefficient into m^-1
   };
 
   function netHeight(x) {
@@ -49,6 +54,40 @@
       active: b.active, inFlight: b.inFlight, bounces: b.bounces, lastHitter: b.lastHitter,
       isServe: b.isServe, netted: b.netted,
     };
+  }
+
+  // Game spin is a Magnus strength (accel = K_MAG * spin * speed). Convert it
+  // to the speed of the ball's surface (omega * R) and back, through the lift
+  // coefficient a real ball would need: C_L = S / (1 + 2S), S = omega R / v.
+  function spinToSurface(spin, v) {
+    const cl = CT.clamp(PHYS.K_MAG * spin / (PHYS.K_AIR * Math.max(v, 1)), -1 / 3, 1 / 3);
+    return v * cl / (1 - 2 * Math.abs(cl));
+  }
+  function surfaceToSpin(wr, v) {
+    const S = wr / Math.max(v, 1);
+    return PHYS.K_AIR * Math.max(v, 1) * (S / (1 + 2 * Math.abs(S))) / PHYS.K_MAG;
+  }
+
+  // The bounce (Cross / Brody): the court returns E of the vertical speed,
+  // and friction at the contact patch slows the ball's bottom surface. It
+  // either slides through the bounce (losing MU * (1 + E) * vz of forward
+  // speed) or grips and leaves rolling, whichever happens first. Topspin
+  // turns the bottom backwards so the ball grips early and keeps its pace;
+  // backspin makes it slide hard, so a steep slice checks and a flat one
+  // skids through. Nearly every ball leaves the court with topspin.
+  function bounce(b) {
+    const v = b.vel;
+    const vh = Math.hypot(v.x, v.y), vzIn = -v.z;
+    const wr = spinToSurface(b.spin, vh);
+    const u = vh - wr;                                  // contact patch slip
+    const toRoll = PHYS.ALPHA * u / (1 + PHYS.ALPHA);
+    const slide = PHYS.MU * (1 + PHYS.E) * vzIn;
+    const dv = Math.abs(toRoll) <= slide ? toRoll : Math.sign(u) * slide;
+    const vhOut = Math.max(0, vh - dv);
+    if (vh > 1e-6) { v.x *= vhOut / vh; v.y *= vhOut / vh; }
+    v.z = vzIn * PHYS.E;
+    b.spin = surfaceToSpin(wr + dv / PHYS.ALPHA, vhOut);
+    b.side *= 0.3;
   }
 
   // Advance one fixed step. Returns 'bounce', 'net' or null.
@@ -82,12 +121,7 @@
     }
     if (p.z < PHYS.R && v.z < 0) {
       p.z = PHYS.R;
-      const s = b.spin;
-      const rest = s >= 0 ? 0.74 * (1 + 0.14 * s) : 0.74 * (1 + 0.32 * s);
-      v.z = -v.z * rest;
-      const keep = s >= 0 ? 0.79 + 0.07 * s : 0.73 + 0.06 * s;
-      v.x *= keep; v.y *= keep;
-      b.spin *= 0.4; b.side *= 0.3;
+      bounce(b);
       if (ev !== 'net') ev = 'bounce';
     }
     return ev;
@@ -157,6 +191,7 @@
   CT.makeBall = makeBall;
   CT.cloneBall = cloneBall;
   CT.stepBall = stepBall;
+  CT.bounce = bounce;
   CT.flight = flight;
   CT.solveLaunch = solveLaunch;
   CT.inSingles = inSingles;
