@@ -13,7 +13,7 @@ which only adds the doctype and viewport tags the artifact host normally supplie
 | `js/characters.js` | Octopus and Philosopher stats and their procedurally drawn sprites |
 | `js/match.js` | Scoring: one set, 7-point tiebreak at 6-6 |
 | `js/game.js` | Match engine: serving, hitting, timing, line calls, stamina, CPU |
-| `js/render.js` | Perspective camera and neon arena |
+| `js/render.js` | Perspective camera (chase or first person) and neon arena |
 | `js/main.js` | Touch input, HUD, sound, frame loop, tutorial lessons |
 | `tests/` | Engine tests (`npm test`) and the balance simulation (`npm run sim`) |
 
@@ -29,6 +29,7 @@ which only adds the doctype and viewport tags the artifact host normally supplie
 - **Randomness** only appears in `cpuChooseShot` / `cpuChooseServe`. CPU errors on groundstrokes are deterministic: they come from being rushed, tired, the pace of the incoming ball, and how much pace the CPU itself chose. CPU serves get a random timing error, so some miss.
 - **CPU tactics** come from each character's `tactics` block: Octopus counterpunches (steady pace, away from the lines, passes or lobs a net rusher); Philosopher attacks (aims at your weaker wing, follows short balls in, sometimes serves and volleys). The menu's level (Chill, Club, Pro) sets the ball speed and how the CPU plays (`CT.CPU_LEVELS` in `game.js`): how often it mistimes, how fast it reads a shot, how well it covers the angles, how fast it runs, and how hard and deep it hits. On Chill and Club it runs slower and leaves softer, shorter balls, so winners are possible. The CPU keeps 0.4 m over the net and lifts low balls (a dug-out drop shot) instead of driving them.
 - **Tutorial.** Eight lessons against a ball machine (`drill` in `createGame`): serve, forehand, backhand, aim left and right, slice, drop shot and lob. The machine (control `'feeder'`) never returns the ball; each rep ends at the first bounce with a `drill` event, and `LESSONS` in `main.js` decides which reps count.
+- **Camera.** Chase (behind and above you, the default) or first person (from your eyes, with your racket in the corner). Switch with the 1P/3P button in the HUD, the Camera option on the menu, or the C key; the choice is remembered (`setView` in `render.js`).
 - **Serve clock.** Online, a server has 20 seconds to toss; running out costs the serve.
 
 ## Tests

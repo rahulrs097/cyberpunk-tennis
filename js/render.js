@@ -1,6 +1,7 @@
-// Third-person renderer: a raised chase camera behind the bottom player that
-// follows them across the baseline and turns towards the ball, plus the
-// rooftop parking lot, court, net, players, ball and touch guides.
+// Renderer with two views: a raised chase camera behind the bottom player that
+// follows them across the baseline and turns towards the ball, or a
+// first-person view from the player's eyes. Plus the rooftop parking lot,
+// court, net, players, ball and touch guides.
 (function () {
   const CT = (window.CT = window.CT || {});
   const { COURT } = CT;
@@ -14,14 +15,27 @@
   const SPRITE_SCALE = 1.15;   // players a little larger than life so they read on a phone
   const NEAR = 0.4;            // near clipping distance in metres
   const LOT_EDGE = 17.5;       // far edge of the rooftop; open sky beyond it
+  const LOT_BACK = -21.5;      // the near edge, behind the bottom baseline
 
   // Chase-camera framing. Raised high enough that the ball stays visible over
   // your player's head, looking a little past the net.
   const CAM = { back: 7.2, height: 6.4, lookAhead: 13, follow: 0.75, ballPull: 0.4, ease: 3.2 };
+  // First-person framing: eyes a little behind the player's centre so the
+  // ball stays in view as it comes onto the racket. The head follows the
+  // ball all the time, on a spring so it never snaps.
+  const EYE = { back: 0.5, height: 1.65, lookAhead: 10, lookZ: 0.75, follow: 8,
+    turn: 6, tossTurn: 9,        // spring stiffness of the head (higher = quicker)
+    // serving, step the eye back so the toss isn't right in your face
+    serveBack: 2.5,
+    // while the ball can still come to you the head turns at most this far
+    // off straight ahead, so swipes keep aiming down the court; once it's
+    // past you the head is free to turn right round after it
+    maxTurn: 0.6, pastFrom: -0.3, minPitch: -0.35, ballPitch: 0.7, maxSpin: 4 };
 
   function createRenderer(canvas) {
     return {
       canvas, ctx: canvas.getContext('2d'),
+      view: 'chase',   // 'chase' or 'first'
       cam: { x: 0, y: -20, z: 6.4, lx: 0, ly: 0, lz: 0, f: 500, cx: 0, cy: 0, yaw: 0, pitch: 0, ready: false },
       W: 0, H: 0, dpr: 1, top: 92, bottom: 24, hudBottom: 0,
       sky: document.createElement('canvas'),
@@ -145,13 +159,13 @@
 
   // ---------------- camera control ----------------
   function updateCamera(r, g, human, dt) {
+    if (r.view === 'first') { updateEye(r, g, human, dt); return; }
     const c = r.cam;
     const p = g.players[human];
     const b = g.ball;
     const fwd = p.fwd;
     // follow the player across the court, staying behind them
-    const tx = p.x * CAM.follow;
-    const ty = p.y - fwd * CAM.back;
+    const tx = p.x * CAM.follow, ty = p.y - fwd * CAM.back;
     // look ahead down the court, turning towards the ball
     const bx = b.active ? b.pos.x : 0;
     const lx = CT.clamp(p.x * 0.35 + bx * CAM.ballPull, -6, 6);
@@ -161,6 +175,66 @@
     c.lx += (lx - c.lx) * k; c.ly += (ly - c.ly) * k; c.lz = 0;
     c.ready = true;
     setBasis(c);
+  }
+
+  // First person: the eyes ride with the player and the head follows the
+  // ball. Yaw and pitch run on critically damped springs, so a change of
+  // target (a hit, the toss, the ball going past) turns the head smoothly.
+  function updateEye(r, g, human, dt) {
+    const c = r.cam;
+    const p = g.players[human];
+    const b = g.ball;
+    const fwd = p.fwd;
+    const serving = (g.phase === 'preServe' || g.phase === 'toss') && g.server === human;
+    const tossing = g.phase === 'toss' && g.server === human;
+    const tx = p.x, ty = p.y - fwd * (serving ? EYE.serveBack : EYE.back);
+    const kp = c.ready ? 1 - Math.exp(-dt * EYE.follow) : 1;
+    c.x += (tx - c.x) * kp; c.y += (ty - c.y) * kp; c.z = EYE.height;
+
+    const ahead = fwd > 0 ? 0 : Math.PI;   // yaw straight down the court
+    const courtPitch = Math.atan2(EYE.lookZ - EYE.height, EYE.lookAhead);
+    let yaw = ahead, pitch = courtPitch;
+    if (b.active) {
+      const dx = b.pos.x - c.x, dy = b.pos.y - c.y;
+      const h = Math.max(2, Math.hypot(dx, dy));
+      const ballPitch = Math.atan2(b.pos.z - c.z, h);
+      yaw = Math.atan2(dx, dy);
+      const past = !serving && b.lastHitter !== human && fwd * (b.pos.y - p.y) < EYE.pastFrom;
+      if (tossing) pitch = ballPitch;
+      else {
+        // follow the ball's height only part way, so bounces don't bob the view
+        pitch = courtPitch + (ballPitch - courtPitch) * EYE.ballPitch;
+        if (!past) {
+          yaw = ahead + CT.clamp(angleDiff(yaw, ahead), -EYE.maxTurn, EYE.maxTurn);
+          pitch = Math.max(EYE.minPitch, pitch);
+        }
+      }
+    }
+    pitch = CT.clamp(pitch, -0.7, 0.9);
+    if (!c.ready) { c.eyeYaw = yaw; c.eyePitch = pitch; c.yawV = 0; c.pitchV = 0; }
+    const w = tossing ? EYE.tossTurn : EYE.turn;
+    const step = Math.min(dt, 0.05);
+    c.yawV += (w * w * angleDiff(yaw, c.eyeYaw) - 2 * w * c.yawV) * step;
+    c.yawV = CT.clamp(c.yawV, -EYE.maxSpin, EYE.maxSpin);   // even a full turn stays easy to follow
+    c.eyeYaw += c.yawV * step;
+    c.pitchV += (w * w * (pitch - c.eyePitch) - 2 * w * c.pitchV) * step;
+    c.eyePitch += c.pitchV * step;
+    c.lx = c.x + Math.sin(c.eyeYaw) * Math.cos(c.eyePitch) * 10;
+    c.ly = c.y + Math.cos(c.eyeYaw) * Math.cos(c.eyePitch) * 10;
+    c.lz = c.z + Math.sin(c.eyePitch) * 10;
+    c.ready = true;
+    setBasis(c);
+  }
+
+  // a - b wrapped to (-PI, PI]: the short way round
+  function angleDiff(a, b) {
+    const d = a - b;
+    return d - Math.round(d / (2 * Math.PI)) * 2 * Math.PI;
+  }
+
+  function setView(r, view) {
+    r.view = view === 'first' ? 'first' : 'chase';
+    r.cam.ready = false;   // cut straight to the new view
   }
 
   function resize(r, W, H, top, bottom, hudBottom) {
@@ -232,7 +306,8 @@
     const W = r.W, sw = Math.round(W * 3);
     const c = r.cam;
     // where the horizon sits for the camera's usual pitch
-    const hz = c.cy - c.f * (CAM.height / (CAM.back + CAM.lookAhead));
+    // (built tall enough for the first-person view, whose horizon sits lower)
+    const hz = Math.min(r.H, Math.max(c.cy - c.f * (CAM.height / (CAM.back + CAM.lookAhead)), c.cy + c.f * 0.3));
     const stripH = Math.max(120, r.H * 0.3), base = stripH * 0.72;
     const H = Math.round(hz + stripH - base);
     cv.width = Math.round(sw * r.dpr); cv.height = Math.round(H * r.dpr);
@@ -245,7 +320,7 @@
     sky.addColorStop(1, '#4a1d4f');
     ctx.fillStyle = sky;
     ctx.fillRect(0, 0, sw, H);
-    for (let i = 0; i < 540; i++) {
+    for (let i = 0; i < 800; i++) {
       const x = hash(i * 1.7) * sw;
       const y = hz - 12 - hash(i * 2.3 + 9) * Math.max(40, hz - 12);
       if (y < 0) continue;
@@ -254,7 +329,7 @@
     }
     const mr = Math.max(8, Math.min(W, r.H) * 0.025);
     const mx = W * 1.78;
-    const my = Math.max((r.hudBottom || 0) + mr + 10, hz - Math.max(60, hz * 0.45));
+    const my = hz - Math.max(60, r.H * 0.17);
     const halo = ctx.createRadialGradient(mx, my, mr * 0.5, mx, my, mr * 5);
     halo.addColorStop(0, 'rgba(210,220,255,0.28)');
     halo.addColorStop(1, 'rgba(210,220,255,0)');
@@ -321,18 +396,28 @@
         cars.push({ x: sx * (STALL_IN + 0.5 + 2.15 + hash(k * 1.9) * 0.3), y: y + STALL_W / 2, sx, k });
       }
     }
+    // two rows parked end to end behind the near baseline, out to the roof edge
+    for (const y of [-17.6, -20.1]) {
+      for (const x of [-5, 0, 5]) {
+        const k = 40 + Math.round(x + y * 3);
+        if (hash(k * 2.9) < 0.2) continue;
+        cars.push({ x: x + (hash(k * 1.3) - 0.5) * 0.4, y, sx: x < 0 ? -1 : 1, k });
+      }
+    }
     return cars;
   })();
 
   function drawLot(ctx, r) {
     // asphalt deck
-    fillPoly(ctx, r, [[-45, LOT_EDGE], [45, LOT_EDGE], [45, -45], [-45, -45]], '#15161e');
-    // roof edge: a low parapet with strip lights
-    fillPoly(ctx, r, [[-45, LOT_EDGE, 1], [45, LOT_EDGE, 1], [45, LOT_EDGE, 0], [-45, LOT_EDGE, 0]], '#1c1b2a');
-    ctx.save();
-    ctx.strokeStyle = 'rgba(37,217,255,0.85)'; ctx.lineWidth = 1.5;
-    strokeSeg(ctx, r, [-45, LOT_EDGE, 1], [45, LOT_EDGE, 1]);
-    ctx.restore();
+    fillPoly(ctx, r, [[-45, LOT_EDGE], [45, LOT_EDGE], [45, LOT_BACK], [-45, LOT_BACK]], '#15161e');
+    // roof edges: a low parapet with strip lights at both ends
+    for (const y of [LOT_EDGE, LOT_BACK]) {
+      fillPoly(ctx, r, [[-45, y, 1], [45, y, 1], [45, y, 0], [-45, y, 0]], '#1c1b2a');
+      ctx.save();
+      ctx.strokeStyle = 'rgba(37,217,255,0.85)'; ctx.lineWidth = 1.5;
+      strokeSeg(ctx, r, [-45, y, 1], [45, y, 1]);
+      ctx.restore();
+    }
     // oil stains
     for (let i = 0; i < 14; i++) {
       const x = (hash(i * 13.3) - 0.5) * 22, y = -16 + hash(i * 17.9) * 32;
@@ -351,7 +436,7 @@
     ctx.setLineDash([10, 10]);
     ctx.lineWidth = 1.5;
     ctx.beginPath();
-    for (const sx of [-1, 1]) pathSeg(ctx, r, [sx * 7.2, -40], [sx * 7.2, LOT_EDGE]);
+    for (const sx of [-1, 1]) pathSeg(ctx, r, [sx * 7.2, LOT_BACK], [sx * 7.2, LOT_EDGE]);
     ctx.stroke();
     ctx.restore();
   }
@@ -575,11 +660,41 @@
       }
       ctx.restore();
     }
-    const rad = Math.max(2.8, 0.075 * p.s);
+    const rad = Math.min(r.H * 0.04, Math.max(2.8, 0.075 * p.s));   // capped when it flies past your face
     const gr = rad * 4;
     ctx.drawImage(glowSprite(r, PAL.ballGlow, 0.8), p.x - gr, p.y - gr, gr * 2, gr * 2);
     ctx.fillStyle = PAL.ball;
     ctx.beginPath(); ctx.arc(p.x, p.y, rad, 0, Math.PI * 2); ctx.fill();
+  }
+
+  function ringOnBall(r, b) {
+    const c = r.cam;
+    const v = toCam(c, b.pos.x, b.pos.y, b.pos.z);
+    // a ball level with or behind the eye is pinned to the side it's on
+    const p = v.z > NEAR ? fromCamToScreen(c, v) : { x: c.cx + Math.sign(v.x || 1) * 1e4, y: c.cy };
+    const m = 40;
+    return { x: CT.clamp(p.x, m, r.W - m), y: CT.clamp(p.y, r.top + m, r.H - r.bottom - m) };
+  }
+
+  // The ring that closes as the ball reaches you: swipe as it closes.
+  // In first person the contact point is beside your head, off-screen, so
+  // the ring rides on the ball instead, kept inside the screen edges, and is
+  // drawn over the scenery.
+  function drawTimingRing(ctx, r, g, info) {
+    if (!info || info.t >= 0.9) return;
+    const first = r.view === 'first';
+    const c = first ? ringOnBall(r, g.ball) : proj(r, info.x, info.y, info.z);
+    if (c.behind) return;
+    const base = first ? 16 : Math.max(9, 0.16 * c.s);
+    const rad = base + info.t * 70;
+    ctx.save();
+    ctx.strokeStyle = info.reach ? PAL.guide : PAL.warn;
+    ctx.globalAlpha = 0.35 + 0.65 * (1 - info.t / 0.9);
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(c.x, c.y, rad, 0, Math.PI * 2); ctx.stroke();
+    ctx.globalAlpha = 0.9;
+    ctx.beginPath(); ctx.arc(c.x, c.y, base, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
   }
 
   function drawGuides(ctx, r, g, human, info) {
@@ -601,21 +716,7 @@
       strokeSeg(ctx, r, [L.x + k, L.y - k], [L.x - k, L.y + k]);
       ctx.restore();
     }
-    if (info && info.t < 0.9) {
-      const c = proj(r, info.x, info.y, info.z);
-      if (!c.behind) {
-        const base = Math.max(9, 0.16 * c.s);
-        const rad = base + info.t * 70;
-        ctx.save();
-        ctx.strokeStyle = info.reach ? PAL.guide : PAL.warn;
-        ctx.globalAlpha = 0.35 + 0.65 * (1 - info.t / 0.9);
-        ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.arc(c.x, c.y, rad, 0, Math.PI * 2); ctx.stroke();
-        ctx.globalAlpha = 0.9;
-        ctx.beginPath(); ctx.arc(c.x, c.y, base, 0, Math.PI * 2); ctx.stroke();
-        ctx.restore();
-      }
-    }
+    if (r.view !== 'first') drawTimingRing(ctx, r, g, info);
     if (g.phase === 'toss' && g.server === human) {
       const peakZ = 1.5 + (5.3 * 5.3) / (2 * 9.81);
       const c = proj(r, p.x + p.fwd * 0.25, p.y + p.fwd * 0.35, peakZ);
@@ -627,6 +728,57 @@
         ctx.restore();
       }
     }
+  }
+
+  // First person: your racket in the corner of the screen. It sits ready on
+  // the forehand side, drops back as the ball comes in, and sweeps across
+  // the bottom of the view on a groundstroke or down from above on a serve.
+  function drawRacketView(ctx, r, g, p) {
+    const a = playerAnim(r, g, p, { x: r.W / 2, s: 1 });
+    const u = Math.min(r.W, r.H - r.top);
+    const W = r.W, base = r.H;
+    let side, hx, hy, ang;   // hand position, racket angle (0 = pointing up)
+    if (p.swing >= 0) {
+      const e = 1 - Math.pow(1 - Math.min(1, p.swing), 3);
+      if (p.swingWing === 'serve' || p.swingWing === 'oh') {
+        side = 1;
+        hx = W * (0.78 - 0.4 * e); hy = base - u * (0.55 - 0.5 * e);
+        ang = 0.2 - e * 2.6;
+      } else {
+        side = p.swingWing === 'bh' ? -1 : 1;
+        const t = 1 - 2 * e;   // +1 out wide on the stroke side, -1 across the body
+        hx = W / 2 + side * W * 0.42 * t; hy = base - u * (0.1 + 0.1 * (1 - t * t));
+        ang = side * (0.9 * t - 0.2);
+      }
+    } else {
+      const prep = a.prep;
+      side = prep > 0 && a.prepWing === 'bh' ? -1 : 1;
+      const bob = Math.sin(p.anim * 7) * u * 0.006 * (1 + a.spd * 3);
+      hx = W / 2 + side * W * (0.3 + 0.15 * prep); hy = base - u * (0.12 - 0.04 * prep) + bob;
+      ang = side * (0.35 + 0.9 * prep);
+    }
+    const len = u * 0.2, rx = u * 0.085, ry = u * 0.11;
+    const col = p.ch.colors.glow;
+    ctx.save();
+    ctx.translate(hx, hy);
+    ctx.rotate(ang);
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = '#1c1b2a'; ctx.lineWidth = u * 0.032;   // grip
+    ctx.beginPath(); ctx.moveTo(0, u * 0.06); ctx.lineTo(0, -len + ry * 0.2); ctx.stroke();
+    ctx.strokeStyle = col; ctx.lineWidth = u * 0.008;
+    ctx.beginPath(); ctx.moveTo(0, -len * 0.45); ctx.lineTo(-rx * 0.5, -len - ry * 0.3); ctx.moveTo(0, -len * 0.45); ctx.lineTo(rx * 0.5, -len - ry * 0.3); ctx.stroke();
+    ctx.translate(0, -len - ry);
+    ctx.strokeStyle = hexA(PAL.line, 0.35); ctx.lineWidth = 1;   // strings
+    ctx.beginPath();
+    ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
+    ctx.save(); ctx.clip();
+    for (let i = -4; i <= 4; i++) { ctx.moveTo(i * rx / 5, -ry); ctx.lineTo(i * rx / 5, ry); ctx.moveTo(-rx, i * ry / 5); ctx.lineTo(rx, i * ry / 5); }
+    ctx.stroke();
+    ctx.restore();
+    ctx.shadowColor = col; ctx.shadowBlur = r.quality ? u * 0.03 : 0;
+    ctx.strokeStyle = col; ctx.lineWidth = u * 0.014;   // frame
+    ctx.beginPath(); ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
   }
 
   function render(r, g, human, info) {
@@ -656,15 +808,20 @@
     const items = [];
     for (const car of CARS) items.push({ d: depth(car.x, car.y), draw: () => drawCar(ctx, r, car) });
     for (const lamp of LAMPS) items.push({ d: depth(lamp[0], lamp[1]), draw: () => drawLamp(ctx, r, lamp) });
-    for (const p of g.players) items.push({ d: depth(p.x, p.y), draw: () => drawPlayer(ctx, r, g, p) });
+    for (const p of g.players) {
+      if (r.view === 'first' && p.side === human) continue;   // you are the camera
+      items.push({ d: depth(p.x, p.y), draw: () => drawPlayer(ctx, r, g, p) });
+    }
     items.push({ d: depth(0, 0), draw: () => drawNet(ctx, r) });
     if (g.ball.active) items.push({ d: depth(g.ball.pos.x, g.ball.pos.y) - 0.01, draw: () => drawBall(ctx, r, g) });
     items.sort((a, b) => b.d - a.d);
     for (const it of items) it.draw();
+    if (r.view === 'first') { drawRacketView(ctx, r, g, g.players[human]); drawTimingRing(ctx, r, g, info); }
   }
 
   CT.createRenderer = createRenderer;
   CT.resizeRenderer = resize;
+  CT.setView = setView;
   CT.renderGame = render;
   CT.unproject = unproject;
   CT.project = proj;

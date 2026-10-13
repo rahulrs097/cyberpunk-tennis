@@ -19,6 +19,8 @@
   try { const v = localStorage.getItem('ct.autoMove'); if (v !== null) autoMove = v === '1'; } catch (e) { /* storage is optional */ }
   let musicOn = true;
   try { const v = localStorage.getItem('ct.music'); if (v !== null) musicOn = v === '1'; } catch (e) { /* storage is optional */ }
+  let view = 'chase';  // camera: 'chase' (behind and above) or 'first' (your eyes)
+  try { if (localStorage.getItem('ct.view') === 'first') view = 'first'; } catch (e) { /* storage is optional */ }
   let lastFrame = performance.now();
   let msgTimer = 0;
   let shotTimer = 0;
@@ -567,6 +569,16 @@
     CT.Music.setOn(on);
   }
 
+  function setView(v) {
+    view = v;
+    try { localStorage.setItem('ct.view', v); } catch (e) { /* storage is optional */ }
+    CT.setView(renderer, v);
+    document.querySelectorAll('[data-view]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.view === v)));
+    const cb = $('camBtn');
+    cb.textContent = v === 'first' ? '3P' : '1P';
+    cb.setAttribute('aria-label', v === 'first' ? 'Switch to chase view' : 'Switch to first-person view');
+  }
+
   function setPaused(v) {
     if (!game || game.phase === 'matchOver') return;
     paused = v;
@@ -619,6 +631,12 @@
     $('rematch').addEventListener('click', startMatch);
     $('toMenu').addEventListener('click', showMenu);
     $('pauseBtn').addEventListener('click', () => setPaused(true));
+    document.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', () => setView(b.dataset.view)));
+    $('camBtn').addEventListener('click', () => setView(view === 'first' ? 'chase' : 'first'));
+    document.addEventListener('keydown', (e) => {
+      if ((e.key === 'c' || e.key === 'C') && e.target === document.body) setView(view === 'first' ? 'chase' : 'first');
+    });
+    setView(view);
     $('resume').addEventListener('click', () => setPaused(false));
     $('quit').addEventListener('click', () => { leaveFullscreen(); showMenu(); });
     $('howBtn').addEventListener('click', () => { $('help').hidden = false; });
