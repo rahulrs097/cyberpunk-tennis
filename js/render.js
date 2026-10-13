@@ -601,6 +601,36 @@
     ctx.beginPath(); ctx.arc(p.x, p.y, rad, 0, Math.PI * 2); ctx.fill();
   }
 
+  function ringOnBall(r, b) {
+    const c = r.cam;
+    const v = toCam(c, b.pos.x, b.pos.y, b.pos.z);
+    // a ball level with or behind the eye is pinned to the side it's on
+    const p = v.z > NEAR ? fromCamToScreen(c, v) : { x: c.cx + Math.sign(v.x || 1) * 1e4, y: c.cy };
+    const m = 40;
+    return { x: CT.clamp(p.x, m, r.W - m), y: CT.clamp(p.y, r.top + m, r.H - r.bottom - m) };
+  }
+
+  // The ring that closes as the ball reaches you: swipe as it closes.
+  // In first person the contact point is beside your head, off-screen, so
+  // the ring rides on the ball instead, kept inside the screen edges, and is
+  // drawn over the scenery.
+  function drawTimingRing(ctx, r, g, info) {
+    if (!info || info.t >= 0.9) return;
+    const first = r.view === 'first';
+    const c = first ? ringOnBall(r, g.ball) : proj(r, info.x, info.y, info.z);
+    if (c.behind) return;
+    const base = first ? 16 : Math.max(9, 0.16 * c.s);
+    const rad = base + info.t * 70;
+    ctx.save();
+    ctx.strokeStyle = info.reach ? PAL.guide : PAL.warn;
+    ctx.globalAlpha = 0.35 + 0.65 * (1 - info.t / 0.9);
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(c.x, c.y, rad, 0, Math.PI * 2); ctx.stroke();
+    ctx.globalAlpha = 0.9;
+    ctx.beginPath(); ctx.arc(c.x, c.y, base, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+  }
+
   function drawGuides(ctx, r, g, human, info) {
     const p = g.players[human];
     if (Math.hypot(p.tx - p.x, p.ty - p.y) > 0.3) {
@@ -620,21 +650,7 @@
       strokeSeg(ctx, r, [L.x + k, L.y - k], [L.x - k, L.y + k]);
       ctx.restore();
     }
-    if (info && info.t < 0.9) {
-      const c = proj(r, info.x, info.y, info.z);
-      if (!c.behind) {
-        const base = Math.max(9, 0.16 * c.s);
-        const rad = base + info.t * 70;
-        ctx.save();
-        ctx.strokeStyle = info.reach ? PAL.guide : PAL.warn;
-        ctx.globalAlpha = 0.35 + 0.65 * (1 - info.t / 0.9);
-        ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.arc(c.x, c.y, rad, 0, Math.PI * 2); ctx.stroke();
-        ctx.globalAlpha = 0.9;
-        ctx.beginPath(); ctx.arc(c.x, c.y, base, 0, Math.PI * 2); ctx.stroke();
-        ctx.restore();
-      }
-    }
+    if (r.view !== 'first') drawTimingRing(ctx, r, g, info);
     if (g.phase === 'toss' && g.server === human) {
       const peakZ = 1.5 + (5.3 * 5.3) / (2 * 9.81);
       const c = proj(r, p.x + p.fwd * 0.25, p.y + p.fwd * 0.35, peakZ);
@@ -734,7 +750,7 @@
     if (g.ball.active) items.push({ d: depth(g.ball.pos.x, g.ball.pos.y) - 0.01, draw: () => drawBall(ctx, r, g) });
     items.sort((a, b) => b.d - a.d);
     for (const it of items) it.draw();
-    if (r.view === 'first') drawRacketView(ctx, r, g, g.players[human]);
+    if (r.view === 'first') { drawRacketView(ctx, r, g, g.players[human]); drawTimingRing(ctx, r, g, info); }
   }
 
   CT.createRenderer = createRenderer;
