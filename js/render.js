@@ -16,7 +16,6 @@
   const NEAR = 0.4;            // near clipping distance in metres
   const LOT_EDGE = 17.5;       // far edge of the rooftop; open sky beyond it
   const LOT_BACK = -21.5;      // the near edge, behind the bottom baseline
-  const FENCE_Y = 16;          // court fences this far behind each baseline's centre line
 
   // Chase-camera framing. Raised high enough that the ball stays visible over
   // your player's head, looking a little past the net.
@@ -397,6 +396,14 @@
         cars.push({ x: sx * (STALL_IN + 0.5 + 2.15 + hash(k * 1.9) * 0.3), y: y + STALL_W / 2, sx, k });
       }
     }
+    // two rows parked end to end behind the near baseline, out to the roof edge
+    for (const y of [-17.6, -20.1]) {
+      for (const x of [-5, 0, 5]) {
+        const k = 40 + Math.round(x + y * 3);
+        if (hash(k * 2.9) < 0.2) continue;
+        cars.push({ x: x + (hash(k * 1.3) - 0.5) * 0.4, y, sx: x < 0 ? -1 : 1, k });
+      }
+    }
     return cars;
   })();
 
@@ -519,25 +526,6 @@
       }
       ctx.stroke();
     }
-  }
-
-  // Chain-link fence behind a baseline: dark mesh, posts, a neon top rail.
-  function drawFence(ctx, r, y) {
-    const X = COURT.DW + 1.2, Hf = 3;
-    fillPoly(ctx, r, [[-X, y, 0], [X, y, 0], [X, y, Hf], [-X, y, Hf]], 'rgba(20,24,48,0.55)');
-    ctx.save();
-    ctx.strokeStyle = 'rgba(122,246,255,0.12)'; ctx.lineWidth = 0.7;
-    ctx.beginPath();
-    for (let x = -X; x < X; x += 0.5) { pathSeg(ctx, r, [x, y, 0], [x + 0.5 * Hf, y, Hf]); pathSeg(ctx, r, [x + 0.5, y, 0], [x + 0.5 - 0.5 * Hf, y, Hf]); }
-    ctx.stroke();
-    ctx.strokeStyle = '#2a2a3a'; ctx.lineWidth = 2;
-    ctx.beginPath();
-    for (let x = -X; x <= X + 0.01; x += X / 4) pathSeg(ctx, r, [x, y, 0], [x, y, Hf]);
-    ctx.stroke();
-    ctx.strokeStyle = PAL.net; ctx.lineWidth = 2;
-    ctx.shadowColor = PAL.net; ctx.shadowBlur = r.quality ? 8 : 0;
-    strokeSeg(ctx, r, [-X, y, Hf], [X, y, Hf]);
-    ctx.restore();
   }
 
   // A parked car as a box, nose towards the court.
@@ -825,10 +813,6 @@
       items.push({ d: depth(p.x, p.y), draw: () => drawPlayer(ctx, r, g, p) });
     }
     items.push({ d: depth(0, 0), draw: () => drawNet(ctx, r) });
-    for (const fy of [-FENCE_Y, FENCE_Y]) {
-      if (r.view !== 'first' && fy * g.players[human].fwd < 0) continue;   // the chase camera sits behind your fence
-      items.push({ d: depth(0, fy), draw: () => drawFence(ctx, r, fy) });
-    }
     if (g.ball.active) items.push({ d: depth(g.ball.pos.x, g.ball.pos.y) - 0.01, draw: () => drawBall(ctx, r, g) });
     items.sort((a, b) => b.d - a.d);
     for (const it of items) it.draw();
