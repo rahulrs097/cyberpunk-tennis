@@ -21,7 +21,10 @@
   const CAM = { back: 7.2, height: 6.4, lookAhead: 13, follow: 0.75, ballPull: 0.4, ease: 3.2 };
   // First-person framing: eyes a little behind the player's centre so the
   // ball stays in view as it comes onto the racket, gaze turning with the ball.
-  const EYE = { back: 0.5, height: 1.65, lookAhead: 10, lookZ: 0.75, ballPull: 0.7, ease: 6 };
+  const EYE = { back: 0.5, height: 1.65, lookAhead: 10, lookZ: 0.75, ballPull: 0.7, ease: 6,
+    // serving, step the eye back so the toss isn't right in your face, and
+    // tilt up as the ball goes up so it tops out in the middle of the screen
+    serveBack: 2.5, tossZ: 2.4, tossEase: 10 };
 
   function createRenderer(canvas) {
     return {
@@ -160,19 +163,23 @@
     const bx = b.active ? b.pos.x : 0;
     if (first) {
       // eyes ride with the player; the gaze swings towards the ball
-      tx = p.x; ty = p.y - fwd * EYE.back;
+      const serving = (g.phase === 'preServe' || g.phase === 'toss') && g.server === human;
+      tx = p.x; ty = p.y - fwd * (serving ? EYE.serveBack : EYE.back);
       lx = CT.clamp(p.x + (bx - p.x) * EYE.ballPull, -8, 8);
     } else {
       // follow the player across the court, staying behind them
       tx = p.x * CAM.follow; ty = p.y - fwd * CAM.back;
       lx = CT.clamp(p.x * 0.35 + bx * CAM.ballPull, -6, 6);
     }
-    // look ahead down the court
-    const ly = p.y + fwd * V.lookAhead;
-    const k = c.ready ? 1 - Math.exp(-dt * V.ease) : 1;
-    const kp = first ? (c.ready ? 1 - Math.exp(-dt * 20) : 1) : k;   // no lag on your own head
+    // look ahead down the court; in first person, look up at your own toss
+    const tossing = first && g.phase === 'toss' && g.server === human;
+    if (tossing) lx = p.x + fwd * 0.25;   // where the toss goes up
+    const ly = p.y + fwd * (tossing ? 0.35 : V.lookAhead);
+    const lz = tossing ? EYE.tossZ : first ? EYE.lookZ : 0;
+    const k = c.ready ? 1 - Math.exp(-dt * (tossing ? EYE.tossEase : V.ease)) : 1;
+    const kp = first ? (c.ready ? 1 - Math.exp(-dt * 10) : 1) : k;   // little lag on your own head
     c.x += (tx - c.x) * kp; c.y += (ty - c.y) * kp; c.z = V.height;
-    c.lx += (lx - c.lx) * k; c.ly += (ly - c.ly) * k; c.lz = first ? EYE.lookZ : 0;
+    c.lx += (lx - c.lx) * k; c.ly += (ly - c.ly) * k; c.lz += (lz - c.lz) * k;
     c.ready = true;
     setBasis(c);
   }
