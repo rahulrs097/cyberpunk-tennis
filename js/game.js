@@ -85,6 +85,8 @@
       cpuSpeed: opts.cpuSpeed || 1,
       cpuPace: opts.cpuPace || 1,
       cpuDepth: opts.cpuDepth || 1,
+      // how often the CPU goes for a winner off an easy ball (0 = never)
+      cpuAttack: opts.cpuAttack || 0,
       // Tutorial drills: side 1 is a ball machine ('feeder' control) that feeds
       // side 0 and never returns. Each rep ends at the first bounce with a
       // 'drill' event instead of a point. { serve: true } = side 0 serves.
@@ -161,24 +163,32 @@
       g.serveBox = { side: 1, sign: deuce ? -1 : 1 };
       g.phase = 'preServe';
     } else {
-      P.x = 0; P.y = -P.ch.home;
+      // volley and smash drills start at the net
+      const net = g.drill.feed === 'volley' || g.drill.feed === 'smash';
+      P.x = 0; P.y = net ? -3.6 : -P.ch.home;
+      P.atNet = net;
       g.phase = 'feed';
     }
     P.tx = P.x; P.ty = P.y;
     emit(g, 'serveReady', { server: g.server, first: true });
   }
 
-  // The ball machine feeds an easy ball to the player's `wing` side.
+  // The ball machine feeds an easy ball to the player's `wing` side: a
+  // groundstroke by default, a ball to volley out of the air (feed 'volley'),
+  // or a short lob to smash (feed 'smash'). (Both reach a player at the net
+  // at the right height: about waist high, and about 2.7 m.)
   function feedBall(g) {
-    const P = g.players[0], F = g.players[1], wing = g.drill.wing || 'fh';
+    const P = g.players[0], F = g.players[1], wing = g.drill.wing || 'fh', feed = g.drill.feed;
     const b = CT.makeBall();
     b.pos = { x: F.x, y: F.y - 0.5, z: 1.0 };
     b.active = true; b.inFlight = true; b.bounces = 1;
     g.ball = b;
     g.phase = 'rally';
     const landX = clamp(P.x + (wing === 'fh' ? 1 : -1) * 0.9, -3, 3);
-    const shot = computeShot(g, F, { aim: 0, landX, pace: 0.2, spinDir: 1, curve: 0, depth: 0.75, clear: 0.6 }, 0);
-    applyShot(g, F, shot);
+    const input = feed === 'volley' ? { aim: 0, landX, pace: 0.2, spinDir: 1, curve: 0, depth: 0.45, clear: 0.6 }
+      : feed === 'smash' ? { aim: 0, landX: P.x, pace: 0, spinDir: 1, curve: 0, depth: 0.32, lob: true }
+      : { aim: 0, landX, pace: 0.2, spinDir: 1, curve: 0, depth: 0.75, clear: 0.6 };
+    applyShot(g, F, computeShot(g, F, input, 0));
   }
 
   function drillEnd(g, ok, text, at) {
@@ -629,8 +639,16 @@
       tx = rand(-edge, edge) * 0.8;
     }
     // an easy ball with plenty of time: go for it, away from them
-    if (!lob && slack > 0.6 && b.pos.z > 0.8) { pace = Math.max(pace, T.pace[1] * g.cpuPace); tx = away * edge; }
-    tx *= T.safe;
+    let goFor = !lob && slack > 0.6 && b.pos.z > 0.8;
+    if (goFor) { pace = Math.max(pace, T.pace[1] * g.cpuPace); tx = away * edge; }
+    // Stronger levels also finish points: a ball with time to set up, or an
+    // opponent pulled out of position, gets hit near the line away from them.
+    if (!lob && !goFor && slack > 0.3 && b.pos.z > 0.6 && Math.random() < g.cpuAttack * (Math.abs(opp.x) > 1.8 ? 1.5 : 1)) {
+      goFor = true;
+      pace = Math.max(pace, Math.min(1, T.pace[1] + 0.15));
+      tx = away * edge * rand(0.85, 1);
+    }
+    if (!goFor) tx *= T.safe;
     if (slack < 0.2 && !lob) tx *= 0.5;           // stretched: play it back through the middle
     // A short ball with time to spare: hit an approach and follow it in.
     const fromNet = -fwd * c.y;
@@ -692,6 +710,31 @@
     n += Math.max(0, (v - 16) / 10) * 0.6;
     // g.cpuErr sets the difficulty (1 = Club)
     return Math.min(n, 1.6) * g.cpuErr * windowFor(c, wing);
+  }
+
+  // Hit the CPU's chosen shot. A mistimed shot that would miss doesn't
+  // always go long or wide: some go into the net, and some are shanked short
+  // into the middle of the court, a sitter for the opponent to attack.
+  function cpuHit(g, c) {
+    const input = cpuChooseShot(g, c);
+    const wing = (g.ball.pos.x - c.x) * c.fwd >= -0.05 ? 'fh' : 'bh';
+    const err = cpuTimingError(g, c, wing, input.pace);
+    let shot = computeShot(g, c, input, err);
+    const fl = CT.flight(shot.pos, shot.vel, shot.spin, shot.side);
+    const goesIn = fl.netClear > 0 && c.fwd * fl.land.y > 0 && CT.inSingles(fl.land.x, fl.land.y);
+    const r = goesIn || input.lob ? 1 : Math.random();
+    if (r < 0.3) {
+      // into the net: drop the launch until it catches the tape or below
+      let lo = shot.vel.z - 12, hi = shot.vel.z;
+      for (let i = 0; i < 20; i++) {
+        const mid = (lo + hi) / 2;
+        if (CT.flight(shot.pos, { ...shot.vel, z: mid }, shot.spin, shot.side).netClear < -0.12) lo = mid; else hi = mid;
+      }
+      shot.vel = { ...shot.vel, z: lo };
+    } else if (r < 0.55) {
+      shot = computeShot(g, c, { ...input, depth: 0.45, pace: input.pace * 0.6, landX: input.landX * 0.3 }, err * 0.3);
+    }
+    applyShot(g, c, shot);
   }
 
   function cpuThink(g, c) {
@@ -799,9 +842,7 @@
         p.cross = { t: g.time, x: b.pos.x, y: b.pos.y, z: b.pos.z, ball: CT.cloneBall(b), px: p.x, py: p.y };
         if (g.control[p.side] === 'cpu') {
           if (c_hasPlan(p) && canReach(g, p)) {
-            const input = cpuChooseShot(g, p);
-            const wing = (b.pos.x - p.x) * p.fwd >= -0.05 ? 'fh' : 'bh';
-            tryHit(g, p, input, cpuTimingError(g, p, wing, input.pace));
+            cpuHit(g, p);
             return;
           }
         } else if (p.pending) {
@@ -944,11 +985,19 @@
 
   // The menu's levels: ball speed (game time per real second) and how the CPU
   // plays. err scales its timing errors, react is how long it takes to read a
-  // shot (s), cover is how far it shades towards the angle.
+  // shot (s), cover is how far it shades towards the angle, attack is how often
+  // it goes for a winner off an easy ball. Tuned with `npm run sim` so a
+  // loose player beats Chill, an average one usually beats Club, and Pro
+  // takes sharp timing.
   CT.CPU_LEVELS = {
-    chill: { timeScale: 0.65, err: 1.2, react: 0.34, cover: 0.1, speed: 0.82, pace: 0.8, depth: 0.8 },
-    club: { timeScale: 0.8, err: 1.15, react: 0.3, cover: 0.15, speed: 0.87, pace: 0.82, depth: 0.85 },
-    pro: { timeScale: 1, err: 0.65, react: 0.12, cover: 0.4, speed: 1, pace: 1, depth: 1 },
+    chill: { timeScale: 0.65, err: 1.3, react: 0.36, cover: 0.1, speed: 0.8, pace: 0.75, depth: 0.75, attack: 0 },
+    club: { timeScale: 0.8, err: 1.05, react: 0.26, cover: 0.2, speed: 0.9, pace: 0.86, depth: 0.88, attack: 0.15 },
+    pro: { timeScale: 1, err: 0.68, react: 0.14, cover: 0.38, speed: 1, pace: 1, depth: 1, attack: 0.3 },
+  };
+  CT.levelOpts = (level) => {
+    const L = CT.CPU_LEVELS[level];
+    return { timeScale: L.timeScale, cpuErr: L.err, cpuReact: L.react, cpuCover: L.cover, cpuSpeed: L.speed,
+      cpuPace: L.pace, cpuDepth: L.depth, cpuAttack: L.attack };
   };
 
   CT.snapshot = snapshot;

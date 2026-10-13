@@ -34,8 +34,7 @@ function loadEngine(seed = 1) {
 
 // The CPU levels, as main.js picks them from the menu.
 function levelOpts(CT, level) {
-  const L = CT.CPU_LEVELS[level];
-  return { timeScale: L.timeScale, cpuErr: L.err, cpuReact: L.react, cpuCover: L.cover, cpuSpeed: L.speed, cpuPace: L.pace, cpuDepth: L.depth };
+  return CT.levelOpts(level);
 }
 
 // A scripted player on `side`. skill = timing spread in timing windows

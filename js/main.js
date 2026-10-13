@@ -44,8 +44,14 @@
       intro: 'Swipe down to slice', pass: (d) => d.ok && d.shot && d.shot.spin === 'Slice' },
     { title: 'Drop shot', wing: 'fh', need: 1, hint: 'A short swipe drops the ball short. Land it in front of the service line',
       intro: 'A short swipe drops it short', pass: (d) => d.ok && d.y < CT.COURT.SL },
-    { title: 'Lob', wing: 'fh', need: 1, hint: 'Swipe up slowly and smoothly, at least half your usual length',
+    { title: 'Lob', wing: 'fh', need: 1, hint: 'Swipe up slowly over a third of the screen or more, taking about half a second',
       intro: 'A slow, long swipe up lobs', pass: (d) => d.ok && d.shot && d.shot.spin === 'Lob' },
+    { title: 'Volley', feed: 'volley', wing: 'fh', need: 2, hint: 'At the net, swipe as the ring closes, before the ball bounces',
+      intro: 'You\'re at the net: hit it out of the air', pass: (d) => d.ok && d.shot && /volley/i.test(d.shot.kind) },
+    { title: 'Smash', feed: 'smash', need: 1, hint: 'Wait under the lob and swipe up hard as the ring closes',
+      intro: 'A lob is coming: smash it', pass: (d) => d.ok && d.shot && d.shot.kind === 'overhead' },
+    { title: 'Play a point', rally: true, need: 1, hint: 'Rally with the CPU. Move it side to side and win one point',
+      intro: 'Now win a point against the CPU', pass: (d) => d.ok },
   ];
 
   function startTutorial() {
@@ -57,9 +63,11 @@
   function runLesson() {
     const L = LESSONS[tut.i];
     tut.done = 0;
-    const lv = CT.CPU_LEVELS.chill;
-    beginMatch({ p0: humanChar, p1: humanChar === 'octopus' ? 'philosopher' : 'octopus', timeScale: lv.timeScale,
-      control: ['human', 'feeder'], autoMove: [autoMove, false], drill: { serve: !!L.serve, wing: L.wing, reps: 0 } });
+    const chars = { p0: humanChar, p1: humanChar === 'octopus' ? 'philosopher' : 'octopus' };
+    // the last lesson is a real point against the easiest CPU
+    if (L.rally) beginMatch({ ...chars, control: ['human', 'cpu'], autoMove: [autoMove, false], ...CT.levelOpts('chill') });
+    else beginMatch({ ...chars, timeScale: CT.CPU_LEVELS.chill.timeScale, control: ['human', 'feeder'], autoMove: [autoMove, false],
+      drill: { serve: !!L.serve, wing: L.wing, feed: L.feed, reps: 0 } });
     showMsg(L.title, L.intro, 'neutral');
   }
 
@@ -205,6 +213,7 @@
       showMsg(d.text === 'Net' || d.text === 'Serve clock' ? d.text : 'Fault', 'Second serve', 'warn');
       blip(160, 0.2, 'sawtooth', 0.05, 90);
     } else if (type === 'point') {
+      if (tut) { onDrill({ ok: d.winner === me, text: d.winner === me ? 'Point' : d.text }); updateHud(); return; }
       const youWon = d.winner === me;
       let sub = names[d.winner] + ' wins the point';
       if (d.result === 'game') sub = names[d.winner] + ' takes the game';
@@ -243,7 +252,7 @@
     ensureAudio();
     if (audio && audio.state === 'suspended') audio.resume();
     if (!game || paused || touch) return;
-    canvas.setPointerCapture && canvas.setPointerCapture(e.pointerId);
+    try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* capture is optional: the swipe still works without it */ }
     touch = { id: e.pointerId, pts: [{ x: e.clientX, y: e.clientY, t: performance.now() }] };
     e.preventDefault();
   }
@@ -313,8 +322,11 @@
     const depth = CT.clamp((chord / Math.min(window.innerWidth, window.innerHeight) - 0.1) / 0.3, 0, 1);
     const over = CT.clamp((u - 7) / 4, 0, 1);
     const spinDir = dy < 0 ? 1 : -1;
-    // a slow, unhurried upward swipe (not a short one) lofts a topspin lob
-    const lob = spinDir > 0 && u < 0.55 && depth >= 0.5;
+    // A slow, long upward swipe lofts a topspin lob. Judged on the whole
+    // swipe, not its tail: fingers speed up as they let go, so a deliberate
+    // slow swipe still ends with a flick.
+    const dim = Math.min(window.innerWidth, window.innerHeight);
+    const lob = spinDir > 0 && (chord / dur) * 1000 / dim < 1.0 && chord / dim >= 0.3;
     let aim = Math.atan2(dx, Math.abs(dy));
     // bow of the path, measured towards screen-right
     let nx = -dy / chord, ny = dx / chord;
@@ -495,9 +507,7 @@
     me = 0;
     tut = null;
     const cpuChar = humanChar === 'octopus' ? 'philosopher' : 'octopus';
-    const L = CT.CPU_LEVELS[level];
-    beginMatch({ p0: humanChar, p1: cpuChar, timeScale: L.timeScale, control: ['human', 'cpu'], autoMove: [autoMove, false],
-      cpuErr: L.err, cpuReact: L.react, cpuCover: L.cover, cpuSpeed: L.speed, cpuPace: L.pace, cpuDepth: L.depth });
+    beginMatch({ p0: humanChar, p1: cpuChar, control: ['human', 'cpu'], autoMove: [autoMove, false], ...CT.levelOpts(level) });
   }
 
   function beginMatch(cfg) {

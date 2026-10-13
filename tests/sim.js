@@ -10,11 +10,12 @@ const levels = lv ? [lv] : ['chill', 'club', 'pro'];
 const skills = sk ? [+sk] : [0.4, 0.7, 1.0];
 const sets = +n || 6;
 
-console.log('level  skill  sets won  games    lowest stamina (you/CPU)  tired at point end  shots/point');
+console.log('level  skill  sets won  games    lowest stamina (you/CPU)  tired at point end  shots/point  CPU winners / out / net');
 for (const level of levels) {
   for (const skill of skills) {
     const won = [0, 0], games = [0, 0], low = [0, 0];
     let tired = 0, points = 0, shots = 0;
+    const end = {};
     for (let i = 0; i < sets; i++) {
       const CT = loadEngine(100 + i);
       const chars = i % 2 ? ['octopus', 'philosopher'] : ['philosopher', 'octopus'];
@@ -23,8 +24,10 @@ for (const level of levels) {
       games[0] += r.games[0]; games[1] += r.games[1];
       low[0] += r.stats.minStamina[0] / sets; low[1] += r.stats.minStamina[1] / sets;
       tired += r.stats.tiredPoints[0]; points += r.stats.points; shots += r.stats.shots;
+      for (const k in r.stats.endings) end[k] = (end[k] || 0) + r.stats.endings[k];
     }
     console.log([level.padEnd(6), String(skill).padEnd(6), `${won[0]}-${won[1]}`.padEnd(9), `${games[0]}-${games[1]}`.padEnd(8),
-      `${Math.round(low[0])}/${Math.round(low[1])}`.padEnd(25), `${Math.round((100 * tired) / points)}%`.padEnd(19), (shots / points).toFixed(1)].join(' '));
+      `${Math.round(low[0])}/${Math.round(low[1])}`.padEnd(25), `${Math.round((100 * tired) / points)}%`.padEnd(19), (shots / points).toFixed(1).padEnd(12),
+      `${(end['Winner:1'] || 0) + (end['Ace:1'] || 0)} / ${end['Out:0'] || 0} / ${end['Net:0'] || 0}`].join(' '));
   }
 }
