@@ -25,10 +25,12 @@
       returnDepth: 14.2,
       // How the CPU plays him: a counterpuncher. Steady pace, keeps the ball
       // away from the lines, makes you hit one more, and passes or lobs
-      // anyone who comes in. Takes the ball late and likes his backhand.
+      // anyone who comes in. Takes the ball late and likes his backhand, and
+      // has the touch for drop shots and short angles.
       tactics: {
         pace: [0.45, 0.8], safe: 0.8, slice: 0.1, weakWing: 0.12, openCourt: 0.5,
         approach: 0, serveVolley: 0, lob: 0.4, fhPref: -0.05, late: 0.05,
+        drop: 0.18, angle: 0.25, serveWide: 0.3,
       },
       colors: { main: '#8f5bff', glow: '#28f0d6', dark: '#2a1257', accent: '#ff3fa4' },
     },
@@ -52,10 +54,11 @@
       returnDepth: 13.3,
       // How the CPU plays him: an attacker. Runs around his backhand to hit
       // forehands, hits at your weaker wing, follows short balls to the net and
-      // sometimes serves and volleys.
+      // sometimes serves and volleys. Likes the wide serve.
       tactics: {
         pace: [0.45, 0.8], safe: 0.8, slice: 0.06, weakWing: 0.45, openCourt: 0.5,
         approach: 0.6, serveVolley: 0.2, lob: 0.1, fhPref: 0.08, late: 0,
+        drop: 0.08, angle: 0.15, serveWide: 0.5,
       },
       colors: { main: '#ece6ff', glow: '#ffc23d', dark: '#3a2f63', accent: '#3fd2ff' },
     },
