@@ -24,7 +24,10 @@
   const EYE = { back: 0.5, height: 1.65, lookAhead: 10, lookZ: 0.75, ballPull: 0.7, ease: 6,
     // serving, step the eye back so the toss isn't right in your face, and
     // tilt up as the ball goes up so it tops out in the middle of the screen
-    serveBack: 2.5, tossZ: 2.4, tossEase: 10 };
+    serveBack: 2.5, tossZ: 2.4, tossEase: 10,
+    // a ball that has got past you is followed with the head (only once it's
+    // behind you, so the view never turns while you can still hit it)
+    trackFrom: -0.3, trackEase: 7, trackMin: 2 };
 
   function createRenderer(canvas) {
     return {
@@ -153,33 +156,60 @@
 
   // ---------------- camera control ----------------
   function updateCamera(r, g, human, dt) {
+    if (r.view === 'first') { updateEye(r, g, human, dt); return; }
     const c = r.cam;
     const p = g.players[human];
     const b = g.ball;
     const fwd = p.fwd;
-    const first = r.view === 'first';
-    const V = first ? EYE : CAM;
-    let tx, ty, lx;
+    // follow the player across the court, staying behind them
+    const tx = p.x * CAM.follow, ty = p.y - fwd * CAM.back;
+    // look ahead down the court, turning towards the ball
     const bx = b.active ? b.pos.x : 0;
-    if (first) {
-      // eyes ride with the player; the gaze swings towards the ball
-      const serving = (g.phase === 'preServe' || g.phase === 'toss') && g.server === human;
-      tx = p.x; ty = p.y - fwd * (serving ? EYE.serveBack : EYE.back);
-      lx = CT.clamp(p.x + (bx - p.x) * EYE.ballPull, -8, 8);
-    } else {
-      // follow the player across the court, staying behind them
-      tx = p.x * CAM.follow; ty = p.y - fwd * CAM.back;
-      lx = CT.clamp(p.x * 0.35 + bx * CAM.ballPull, -6, 6);
+    const lx = CT.clamp(p.x * 0.35 + bx * CAM.ballPull, -6, 6);
+    const ly = p.y + fwd * CAM.lookAhead;
+    const k = c.ready ? 1 - Math.exp(-dt * CAM.ease) : 1;
+    c.x += (tx - c.x) * k; c.y += (ty - c.y) * k; c.z = CAM.height;
+    c.lx += (lx - c.lx) * k; c.ly += (ly - c.ly) * k; c.lz = 0;
+    c.ready = true;
+    setBasis(c);
+  }
+
+  // First person: the eyes ride with the player and the head turns. The
+  // gaze is eased as angles (not as a look-at point) so it can swing right
+  // round to follow a ball that has gone past you without flipping.
+  function updateEye(r, g, human, dt) {
+    const c = r.cam;
+    const p = g.players[human];
+    const b = g.ball;
+    const fwd = p.fwd;
+    const serving = (g.phase === 'preServe' || g.phase === 'toss') && g.server === human;
+    const tossing = g.phase === 'toss' && g.server === human;
+    const tx = p.x, ty = p.y - fwd * (serving ? EYE.serveBack : EYE.back);
+    const kp = c.ready ? 1 - Math.exp(-dt * 10) : 1;   // little lag on your own head
+    c.x += (tx - c.x) * kp; c.y += (ty - c.y) * kp; c.z = EYE.height;
+
+    // where to look: up at your own toss, after a ball that has got past
+    // you, or down the court leaning towards the ball
+    let lx, ly, lz, ease = EYE.ease;
+    const past = b.active && !serving && b.lastHitter !== human && fwd * (b.pos.y - p.y) < EYE.trackFrom;
+    if (tossing) { lx = p.x + fwd * 0.25; ly = p.y + fwd * 0.35; lz = EYE.tossZ; ease = EYE.tossEase; }
+    else if (past) { lx = b.pos.x; ly = b.pos.y; lz = b.pos.z; ease = EYE.trackEase; }
+    else {
+      lx = CT.clamp(p.x + ((b.active ? b.pos.x : 0) - p.x) * EYE.ballPull, -8, 8);
+      ly = p.y + fwd * EYE.lookAhead; lz = EYE.lookZ;
     }
-    // look ahead down the court; in first person, look up at your own toss
-    const tossing = first && g.phase === 'toss' && g.server === human;
-    if (tossing) lx = p.x + fwd * 0.25;   // where the toss goes up
-    const ly = p.y + fwd * (tossing ? 0.35 : V.lookAhead);
-    const lz = tossing ? EYE.tossZ : first ? EYE.lookZ : 0;
-    const k = c.ready ? 1 - Math.exp(-dt * (tossing ? EYE.tossEase : V.ease)) : 1;
-    const kp = first ? (c.ready ? 1 - Math.exp(-dt * 10) : 1) : k;   // little lag on your own head
-    c.x += (tx - c.x) * kp; c.y += (ty - c.y) * kp; c.z = V.height;
-    c.lx += (lx - c.lx) * k; c.ly += (ly - c.ly) * k; c.lz += (lz - c.lz) * k;
+    const h = Math.max(EYE.trackMin, Math.hypot(lx - c.x, ly - c.y));
+    const yaw = Math.atan2(lx - c.x, ly - c.y);
+    const pitch = CT.clamp(Math.atan2(lz - c.z, h), -0.7, 0.7);
+    if (!c.ready) { c.eyeYaw = yaw; c.eyePitch = pitch; }
+    const k = c.ready ? 1 - Math.exp(-dt * ease) : 1;
+    let dy = yaw - c.eyeYaw;
+    dy -= Math.round(dy / (2 * Math.PI)) * 2 * Math.PI;   // turn the short way round
+    c.eyeYaw += dy * k;
+    c.eyePitch += (pitch - c.eyePitch) * k;
+    c.lx = c.x + Math.sin(c.eyeYaw) * Math.cos(c.eyePitch) * 10;
+    c.ly = c.y + Math.cos(c.eyeYaw) * Math.cos(c.eyePitch) * 10;
+    c.lz = c.z + Math.sin(c.eyePitch) * 10;
     c.ready = true;
     setBasis(c);
   }
