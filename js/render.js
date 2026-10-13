@@ -1,6 +1,7 @@
-// Third-person renderer: a raised chase camera behind the bottom player that
-// follows them across the baseline and turns towards the ball, plus the
-// rooftop parking lot, court, net, players, ball and touch guides.
+// Renderer with two views: a raised chase camera behind the bottom player that
+// follows them across the baseline and turns towards the ball, or a
+// first-person view from the player's eyes. Plus the rooftop parking lot,
+// court, net, players, ball and touch guides.
 (function () {
   const CT = (window.CT = window.CT || {});
   const { COURT } = CT;
@@ -18,10 +19,14 @@
   // Chase-camera framing. Raised high enough that the ball stays visible over
   // your player's head, looking a little past the net.
   const CAM = { back: 7.2, height: 6.4, lookAhead: 13, follow: 0.75, ballPull: 0.4, ease: 3.2 };
+  // First-person framing: eyes a little behind the player's centre so the
+  // ball stays in view as it comes onto the racket, gaze turning with the ball.
+  const EYE = { back: 0.5, height: 1.65, lookAhead: 10, lookZ: 0.75, ballPull: 0.7, ease: 6 };
 
   function createRenderer(canvas) {
     return {
       canvas, ctx: canvas.getContext('2d'),
+      view: 'chase',   // 'chase' or 'first'
       cam: { x: 0, y: -20, z: 6.4, lx: 0, ly: 0, lz: 0, f: 500, cx: 0, cy: 0, yaw: 0, pitch: 0, ready: false },
       W: 0, H: 0, dpr: 1, top: 92, bottom: 24, hudBottom: 0,
       sky: document.createElement('canvas'),
@@ -149,18 +154,32 @@
     const p = g.players[human];
     const b = g.ball;
     const fwd = p.fwd;
-    // follow the player across the court, staying behind them
-    const tx = p.x * CAM.follow;
-    const ty = p.y - fwd * CAM.back;
-    // look ahead down the court, turning towards the ball
+    const first = r.view === 'first';
+    const V = first ? EYE : CAM;
+    let tx, ty, lx;
     const bx = b.active ? b.pos.x : 0;
-    const lx = CT.clamp(p.x * 0.35 + bx * CAM.ballPull, -6, 6);
-    const ly = p.y + fwd * CAM.lookAhead;
-    const k = c.ready ? 1 - Math.exp(-dt * CAM.ease) : 1;
-    c.x += (tx - c.x) * k; c.y += (ty - c.y) * k; c.z = CAM.height;
-    c.lx += (lx - c.lx) * k; c.ly += (ly - c.ly) * k; c.lz = 0;
+    if (first) {
+      // eyes ride with the player; the gaze swings towards the ball
+      tx = p.x; ty = p.y - fwd * EYE.back;
+      lx = CT.clamp(p.x + (bx - p.x) * EYE.ballPull, -8, 8);
+    } else {
+      // follow the player across the court, staying behind them
+      tx = p.x * CAM.follow; ty = p.y - fwd * CAM.back;
+      lx = CT.clamp(p.x * 0.35 + bx * CAM.ballPull, -6, 6);
+    }
+    // look ahead down the court
+    const ly = p.y + fwd * V.lookAhead;
+    const k = c.ready ? 1 - Math.exp(-dt * V.ease) : 1;
+    const kp = first ? (c.ready ? 1 - Math.exp(-dt * 20) : 1) : k;   // no lag on your own head
+    c.x += (tx - c.x) * kp; c.y += (ty - c.y) * kp; c.z = V.height;
+    c.lx += (lx - c.lx) * k; c.ly += (ly - c.ly) * k; c.lz = first ? EYE.lookZ : 0;
     c.ready = true;
     setBasis(c);
+  }
+
+  function setView(r, view) {
+    r.view = view === 'first' ? 'first' : 'chase';
+    r.cam.ready = false;   // cut straight to the new view
   }
 
   function resize(r, W, H, top, bottom, hudBottom) {
@@ -575,7 +594,7 @@
       }
       ctx.restore();
     }
-    const rad = Math.max(2.8, 0.075 * p.s);
+    const rad = Math.min(r.H * 0.04, Math.max(2.8, 0.075 * p.s));   // capped when it flies past your face
     const gr = rad * 4;
     ctx.drawImage(glowSprite(r, PAL.ballGlow, 0.8), p.x - gr, p.y - gr, gr * 2, gr * 2);
     ctx.fillStyle = PAL.ball;
@@ -629,6 +648,57 @@
     }
   }
 
+  // First person: your racket in the corner of the screen. It sits ready on
+  // the forehand side, drops back as the ball comes in, and sweeps across
+  // the bottom of the view on a groundstroke or down from above on a serve.
+  function drawRacketView(ctx, r, g, p) {
+    const a = playerAnim(r, g, p, { x: r.W / 2, s: 1 });
+    const u = Math.min(r.W, r.H - r.top);
+    const W = r.W, base = r.H;
+    let side, hx, hy, ang;   // hand position, racket angle (0 = pointing up)
+    if (p.swing >= 0) {
+      const e = 1 - Math.pow(1 - Math.min(1, p.swing), 3);
+      if (p.swingWing === 'serve' || p.swingWing === 'oh') {
+        side = 1;
+        hx = W * (0.78 - 0.4 * e); hy = base - u * (0.55 - 0.5 * e);
+        ang = 0.2 - e * 2.6;
+      } else {
+        side = p.swingWing === 'bh' ? -1 : 1;
+        const t = 1 - 2 * e;   // +1 out wide on the stroke side, -1 across the body
+        hx = W / 2 + side * W * 0.42 * t; hy = base - u * (0.1 + 0.1 * (1 - t * t));
+        ang = side * (0.9 * t - 0.2);
+      }
+    } else {
+      const prep = a.prep;
+      side = prep > 0 && a.prepWing === 'bh' ? -1 : 1;
+      const bob = Math.sin(p.anim * 7) * u * 0.006 * (1 + a.spd * 3);
+      hx = W / 2 + side * W * (0.3 + 0.15 * prep); hy = base - u * (0.12 - 0.04 * prep) + bob;
+      ang = side * (0.35 + 0.9 * prep);
+    }
+    const len = u * 0.2, rx = u * 0.085, ry = u * 0.11;
+    const col = p.ch.colors.glow;
+    ctx.save();
+    ctx.translate(hx, hy);
+    ctx.rotate(ang);
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = '#1c1b2a'; ctx.lineWidth = u * 0.032;   // grip
+    ctx.beginPath(); ctx.moveTo(0, u * 0.06); ctx.lineTo(0, -len + ry * 0.2); ctx.stroke();
+    ctx.strokeStyle = col; ctx.lineWidth = u * 0.008;
+    ctx.beginPath(); ctx.moveTo(0, -len * 0.45); ctx.lineTo(-rx * 0.5, -len - ry * 0.3); ctx.moveTo(0, -len * 0.45); ctx.lineTo(rx * 0.5, -len - ry * 0.3); ctx.stroke();
+    ctx.translate(0, -len - ry);
+    ctx.strokeStyle = hexA(PAL.line, 0.35); ctx.lineWidth = 1;   // strings
+    ctx.beginPath();
+    ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
+    ctx.save(); ctx.clip();
+    for (let i = -4; i <= 4; i++) { ctx.moveTo(i * rx / 5, -ry); ctx.lineTo(i * rx / 5, ry); ctx.moveTo(-rx, i * ry / 5); ctx.lineTo(rx, i * ry / 5); }
+    ctx.stroke();
+    ctx.restore();
+    ctx.shadowColor = col; ctx.shadowBlur = r.quality ? u * 0.03 : 0;
+    ctx.strokeStyle = col; ctx.lineWidth = u * 0.014;   // frame
+    ctx.beginPath(); ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+  }
+
   function render(r, g, human, info) {
     const now = performance.now();
     const dt = r.lastT ? Math.min(0.1, (now - r.lastT) / 1000) : 0;
@@ -656,15 +726,20 @@
     const items = [];
     for (const car of CARS) items.push({ d: depth(car.x, car.y), draw: () => drawCar(ctx, r, car) });
     for (const lamp of LAMPS) items.push({ d: depth(lamp[0], lamp[1]), draw: () => drawLamp(ctx, r, lamp) });
-    for (const p of g.players) items.push({ d: depth(p.x, p.y), draw: () => drawPlayer(ctx, r, g, p) });
+    for (const p of g.players) {
+      if (r.view === 'first' && p.side === human) continue;   // you are the camera
+      items.push({ d: depth(p.x, p.y), draw: () => drawPlayer(ctx, r, g, p) });
+    }
     items.push({ d: depth(0, 0), draw: () => drawNet(ctx, r) });
     if (g.ball.active) items.push({ d: depth(g.ball.pos.x, g.ball.pos.y) - 0.01, draw: () => drawBall(ctx, r, g) });
     items.sort((a, b) => b.d - a.d);
     for (const it of items) it.draw();
+    if (r.view === 'first') drawRacketView(ctx, r, g, g.players[human]);
   }
 
   CT.createRenderer = createRenderer;
   CT.resizeRenderer = resize;
+  CT.setView = setView;
   CT.renderGame = render;
   CT.unproject = unproject;
   CT.project = proj;
