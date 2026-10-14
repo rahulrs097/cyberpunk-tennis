@@ -27,6 +27,12 @@
   // How long (wall seconds) the guest keeps its own predicted shot while the
   // host's snapshots still show the ball before it, before giving up on it.
   const PREDICT_HOLD = 1;
+  // Online, the ball as drawn (g.view): while a ball waits at the far
+  // player's racket for their swipe to arrive it runs at this share of its
+  // speed, and when the real ball jumps (a late shot arriving) the drawn one
+  // glides onto it over about this many seconds instead.
+  const VIEW_SLOW = 0.12;
+  const VIEW_GLIDE = 0.15;
 
   // Seconds to run `dist` metres from a standstill at top speed `sp`.
   function runTime(dist, sp) {
@@ -885,7 +891,7 @@
       if (!incomingTo(g, p) || p.fwd * b.pos.y > 0) { p.prevRel = null; continue; }
       const rel = p.fwd * b.pos.y - (p.fwd * p.y + CONTACT_AHEAD);
       if (p.prevRel !== null && p.prevRel > 0 && rel <= 0) {
-        p.cross = { t: g.time, x: b.pos.x, y: b.pos.y, z: b.pos.z };
+        p.cross = { t: g.time, x: b.pos.x, y: b.pos.y, z: b.pos.z, ball: CT.cloneBall(b), px: p.x };
         // an early swipe, waiting for the ball
         if (p.pending) { const pd = p.pending; p.pending = null; predictHit(g, p, pd.input, pd.err); return; }
       }
@@ -934,8 +940,9 @@
     while (g.acc >= PHYS.DT) { stepOnce(g, PHYS.DT); g.acc -= PHYS.DT; }
     for (const mk of g.marks) mk.age += wallDt;
     g.marks = g.marks.filter((mk) => mk.age < 1.2);
+    updateView(g, wallDt);
     if (g.ball.active) {
-      g.trail.push({ ...g.ball.pos });
+      g.trail.push({ ...g.view.pos });
       if (g.trail.length > 10) g.trail.shift();
     }
     if (g.remote) return;
@@ -952,6 +959,51 @@
       if (g.match.over) { g.phase = 'matchOver'; emit(g, 'matchOver', { winner: g.match.winner }); }
       else startPoint(g, false);
     }
+  }
+
+  // Where the ball is drawn. Offline that's simply where it is. Online, the
+  // other phone's shots arrive a trip late, so:
+  // - a ball that reaches the other player (where they could hit it) slows
+  //   down at their racket while their swipe is on its way, instead of
+  //   flying on past them;
+  // - when the real ball jumps (their shot arrived, or the host's state did),
+  //   the drawn ball glides onto it in a fraction of a second instead of
+  //   teleporting.
+  function updateView(g, wallDt) {
+    const b = g.ball;
+    const v = g.view || (g.view = { pos: { ...b.pos }, o: { x: 0, y: 0, z: 0 }, last: null, step: null, hold: null });
+    let target = b.pos;
+    const online = g.remote || g.control.includes('remote');
+    if (online && g.phase === 'rally' && wallDt > 0) {
+      const rp = g.players.find((p) => g.control[p.side] === 'remote' && incomingTo(g, p) && p.cross && p.cross.ball && p.cross.t >= g.lastHitT);
+      const c = rp && rp.cross;
+      const Wout = rp && OUTER * Math.max(windowFor(rp, 'fh'), windowFor(rp, 'bh'));
+      if (c && g.time < c.t + (Wout + LAG_ALLOW) * g.timeScale &&
+        Math.abs(c.x - c.px) <= rp.ch.reach + 0.5 && c.z <= rp.ch.maxZ) {
+        if (!v.hold || v.hold.t !== c.t) v.hold = { t: c.t, ball: CT.cloneBall(c.ball), acc: (g.time - c.t) * VIEW_SLOW };
+        else v.hold.acc += wallDt * g.timeScale * VIEW_SLOW;
+        while (v.hold.acc >= PHYS.DT) { CT.stepBall(v.hold.ball, PHYS.DT); v.hold.acc -= PHYS.DT; }
+        target = v.hold.ball.pos;
+      } else v.hold = null;
+      // did the target jump, beyond carrying on as it was going?
+      if (v.last && v.step) {
+        const k = wallDt / v.step.dt;
+        const miss = Math.hypot(target.x - (v.last.x + v.step.x * k), target.y - (v.last.y + v.step.y * k), target.z - (v.last.z + v.step.z * k));
+        if (miss > 0.15) v.o = { x: v.pos.x - target.x, y: v.pos.y - target.y, z: v.pos.z - target.z };
+      }
+      if (v.last) v.step = { x: target.x - v.last.x, y: target.y - v.last.y, z: target.z - v.last.z, dt: wallDt };
+      const f = Math.exp(-wallDt / VIEW_GLIDE);
+      v.o = { x: v.o.x * f, y: v.o.y * f, z: v.o.z * f };
+    } else {
+      v.hold = null; v.step = null; v.o = { x: 0, y: 0, z: 0 };
+    }
+    v.last = { ...target };
+    v.pos = { x: target.x + v.o.x, y: target.y + v.o.y, z: target.z + v.o.z };
+  }
+
+  // The ball to draw: the real one, or where it is drawn online (g.view).
+  function viewBall(g) {
+    return g.view ? { ...g.ball, pos: { ...g.view.pos } } : g.ball;
   }
 
   // Data the HUD needs about the human's incoming ball.
@@ -1026,6 +1078,7 @@
   CT.applySnapshot = applySnapshot;
   CT.swipeTiming = swipeTiming;
   CT.predictSwipe = predictSwipe;
+  CT.viewBall = viewBall;
   CT.cancelPrediction = cancelPrediction;
   CT.createGame = createGame;
   CT._computeShot = computeShot;   // for tests

@@ -542,7 +542,12 @@
       if (msgTimer > 0) { msgTimer -= dt; if (msgTimer <= 0) $('msg').hidden = true; }
       if (shotTimer > 0) { shotTimer -= dt; if (shotTimer <= 0) $('shot').hidden = true; }
     }
-    if (game) CT.renderGame(renderer, game, me, paused ? null : CT.incomingInfo(game, me));
+    if (game) {
+      // draw the ball where it's shown (online it can lag the real one briefly)
+      const info = paused ? null : CT.incomingInfo(game, me), ball = game.ball;
+      game.ball = CT.viewBall(game);
+      try { CT.renderGame(renderer, game, me, info); } finally { game.ball = ball; }
+    }
     requestAnimationFrame(frame);
   }
 
