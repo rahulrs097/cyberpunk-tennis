@@ -640,9 +640,9 @@
     return clamp(mood, -1, 1) * g.cpuSmart;
   }
 
-  // A plan for the point: work the weak wing then switch to the open court,
-  // run them side to side, or hit behind them as they recover.
-  const PATTERNS = ['pressure', 'sideToSide', 'behind'];
+  // A plan for the point (each character has its own, `tactics.patterns`):
+  // work the weak wing then switch to the open court, run them side to side,
+  // or hit behind them as they recover.
 
   // The CPU picks a shot the way its character plays (`ch.tactics`).
   function cpuChooseShot(g, c) {
@@ -666,7 +666,7 @@
     const fromNet = -fwd * c.y;
     // a tired opponent gets run from side to side
     const oppTired = staminaF(opp) < 0.4;
-    if (c.pattern === null) c.pattern = Math.random() < smart * 0.8 ? PATTERNS[Math.floor(Math.random() * 3)] : '';
+    if (c.pattern === null) c.pattern = Math.random() < smart * 0.8 ? T.patterns[Math.floor(Math.random() * T.patterns.length)] : '';
     const sc = g.scout[opp.side];
     // someone who keeps coming in gets lobbed more
     const netRate = sc.points > 4 ? sc.net / sc.points : 0;
@@ -697,14 +697,14 @@
     }
     // an easy ball with plenty of time: go for it, away from them
     let goFor = !lob && !touch && slack > 0.6 && b.pos.z > 0.8;
-    if (goFor) { pace = Math.max(pace, T.pace[1] * g.cpuPace); tx = away * edge; }
+    if (goFor) { pace = Math.max(pace, T.pace[1] * g.cpuPace); tx = away * edge * 0.85; }
     // Stronger levels also finish points: a ball with time to set up, or an
     // opponent pulled out of position, gets hit near the line away from them.
-    const attack = g.cpuAttack * (Math.abs(opp.x) > 1.8 ? 1.5 : 1) * (1 + 0.3 * mood);
+    const attack = g.cpuAttack * T.attack * (Math.abs(opp.x) > 1.8 ? 1.5 : 1) * (1 + 0.3 * mood);
     if (!lob && !touch && !goFor && slack > 0.3 && b.pos.z > 0.6 && Math.random() < attack) {
       goFor = true;
       pace = Math.max(pace, Math.min(1, T.pace[1] + 0.15));
-      tx = away * edge * rand(0.85, 1);
+      tx = away * edge * rand(0.75, 0.9);
     }
     // well ahead: a bit more margin
     if (!goFor && !touch) tx *= T.safe * (1 + 0.1 * Math.min(0, mood));
@@ -791,7 +791,7 @@
     const v = Math.hypot(g.ball.vel.x, g.ball.vel.y, g.ball.vel.z);
     n += Math.max(0, (v - 16) / 10) * 0.6;
     // g.cpuErr sets the difficulty (1 = Club)
-    return Math.min(n, 1.6) * g.cpuErr * windowFor(c, wing);
+    return Math.min(n, 1.6) * g.cpuErr * c.ch.tactics.err * windowFor(c, wing);
   }
 
   // Hit the CPU's chosen shot. A mistimed shot that would miss doesn't
@@ -805,7 +805,7 @@
     const fl = CT.flight(shot.pos, shot.vel, shot.spin, shot.side);
     const goesIn = fl.netClear > 0 && c.fwd * fl.land.y > 0 && CT.inSingles(fl.land.x, fl.land.y);
     const r = goesIn || input.lob ? 1 : Math.random();
-    if (r < 0.3) {
+    if (r < 0.15) {
       // into the net: drop the launch until it catches the tape or below
       let lo = shot.vel.z - 12, hi = shot.vel.z;
       for (let i = 0; i < 20; i++) {
@@ -813,7 +813,7 @@
         if (CT.flight(shot.pos, { ...shot.vel, z: mid }, shot.spin, shot.side).netClear < -0.12) lo = mid; else hi = mid;
       }
       shot.vel = { ...shot.vel, z: lo };
-    } else if (r < 0.55) {
+    } else if (r < 0.3) {
       shot = computeShot(g, c, { ...input, depth: 0.45, pace: input.pace * 0.6, landX: input.landX * 0.3 }, err * 0.3);
     }
     applyShot(g, c, shot);
@@ -1077,9 +1077,9 @@
   // loose player beats Chill, an average one usually beats Club, and Pro
   // takes sharp timing.
   CT.CPU_LEVELS = {
-    chill: { timeScale: 0.65, err: 1.3, react: 0.36, cover: 0.1, speed: 0.8, pace: 0.75, depth: 0.75, attack: 0, smart: 0.15 },
-    club: { timeScale: 0.8, err: 1.05, react: 0.26, cover: 0.2, speed: 0.9, pace: 0.86, depth: 0.88, attack: 0.15, smart: 0.55 },
-    pro: { timeScale: 1, err: 0.62, react: 0.14, cover: 0.38, speed: 1, pace: 1, depth: 1, attack: 0.3, smart: 1 },
+    chill: { timeScale: 0.65, err: 1.5, react: 0.36, cover: 0.1, speed: 0.8, pace: 0.75, depth: 0.75, attack: 0, smart: 0.15 },
+    club: { timeScale: 0.8, err: 1.08, react: 0.26, cover: 0.2, speed: 0.9, pace: 0.86, depth: 0.88, attack: 0.15, smart: 0.55 },
+    pro: { timeScale: 1, err: 0.72, react: 0.14, cover: 0.38, speed: 1, pace: 1, depth: 1, attack: 0.3, smart: 1 },
   };
   CT.levelOpts = (level) => {
     const L = CT.CPU_LEVELS[level];
