@@ -316,7 +316,7 @@ test("online: the guest's shots leave its racket at once on both phones, with no
     assert.ok(hostShots.length >= 3);
     for (const s of hostShots) {
       assert.ok(s.past < 1.6, `lag ${lag}: host drew the ball ${s.past.toFixed(2)} m past the guest`);
-      assert.ok(s.step < 1.7, `lag ${lag}: host's ball jumped ${s.step.toFixed(2)} m in one frame`);
+      assert.ok(s.step < 1.2, `lag ${lag}: host's ball jumped ${s.step.toFixed(2)} m in one frame`);
     }
   }
 });

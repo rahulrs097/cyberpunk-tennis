@@ -39,6 +39,9 @@
   // flies, on both phones.
   const SHOT_SHARE = 0.08;
   const VIEW_GLIDE = 0.15;
+  // A guest shot the host plays on from a moment ago is drawn from the racket
+  // at this many times its speed until it has caught up, instead of jumping.
+  const VIEW_WARP = 1.7;
 
   // Seconds to run `dist` metres from a standstill at top speed `sp`.
   function runTime(dist, sp) {
@@ -538,6 +541,7 @@
   // rest.
   function catchUp(g, dt) {
     g.ballWait = Math.max(0, -dt);
+    g.warp = dt > 0 ? { t: g.lastHitT, ball: CT.cloneBall(g.ball), acc: 0, behind: dt } : null;
     flyOn(g, dt);
   }
 
@@ -1000,16 +1004,33 @@
         Math.abs(c.x - c.px) <= rp.ch.reach + 0.5 && c.z <= rp.ch.maxZ) {
         if (!v.hold || v.hold.t !== c.t) v.hold = { t: c.t, ball: CT.cloneBall(c.ball), acc: (g.time - c.t) * VIEW_SLOW };
         else v.hold.acc += wallDt * g.timeScale * VIEW_SLOW;
-        while (v.hold.acc >= PHYS.DT) { CT.stepBall(v.hold.ball, PHYS.DT); v.hold.acc -= PHYS.DT; }
-        target = v.hold.ball.pos;
+        target = flown(v.hold);
       } else v.hold = null;
+      // a guest shot catching up from the racket
+      const w = g.warp;
+      if (w && w.t === g.lastHitT && !v.hold) {
+        const gdt = wallDt * g.timeScale;
+        w.acc += gdt * VIEW_WARP;
+        w.behind -= gdt * (VIEW_WARP - 1);
+        if (w.behind > 0) target = flown(w);
+        else {
+          // caught up: back to the real ball, which moves at normal speed
+          g.warp = null;
+          if (v.step) v.step = { x: v.step.x / VIEW_WARP, y: v.step.y / VIEW_WARP, z: v.step.z / VIEW_WARP, dt: v.step.dt };
+        }
+      } else if (w && w.t !== g.lastHitT) g.warp = null;
       // did the target jump, beyond carrying on as it was going?
+      let jumped = false;
       if (v.last && v.step) {
         const k = wallDt / v.step.dt;
-        const miss = Math.hypot(target.x - (v.last.x + v.step.x * k), target.y - (v.last.y + v.step.y * k), target.z - (v.last.z + v.step.z * k));
-        if (miss > 0.15) v.o = { x: v.pos.x - target.x, y: v.pos.y - target.y, z: v.pos.z - target.z };
+        const ex = { x: v.last.x + v.step.x * k, y: v.last.y + v.step.y * k, z: v.last.z + v.step.z * k };
+        // keep drawing it carrying on as it was, and glide from there
+        if (Math.hypot(target.x - ex.x, target.y - ex.y, target.z - ex.z) > 0.15) {
+          v.o = { x: v.o.x + ex.x - target.x, y: v.o.y + ex.y - target.y, z: v.o.z + ex.z - target.z };
+          jumped = true;
+        }
       }
-      if (v.last) v.step = { x: target.x - v.last.x, y: target.y - v.last.y, z: target.z - v.last.z, dt: wallDt };
+      v.step = v.last && !jumped ? { x: target.x - v.last.x, y: target.y - v.last.y, z: target.z - v.last.z, dt: wallDt } : null;
       const f = Math.exp(-wallDt / VIEW_GLIDE);
       v.o = { x: v.o.x * f, y: v.o.y * f, z: v.o.z * f };
     } else {
@@ -1017,6 +1038,17 @@
     }
     v.last = { ...target };
     v.pos = { x: target.x + v.o.x, y: target.y + v.o.y, z: target.z + v.o.z };
+  }
+
+  // Where a drawn ball { ball, acc } is after `acc` seconds of flight: whole
+  // steps move the ball on for good, and the rest is stepped on a copy, so
+  // it glides rather than ticking forward a step at a time.
+  function flown(d) {
+    while (d.acc >= PHYS.DT) { CT.stepBall(d.ball, PHYS.DT); d.acc -= PHYS.DT; }
+    if (d.acc <= 0) return d.ball.pos;
+    const c = CT.cloneBall(d.ball);
+    CT.stepBall(c, d.acc);
+    return c.pos;
   }
 
   // The ball to draw: the real one, or where it is drawn online (g.view).
