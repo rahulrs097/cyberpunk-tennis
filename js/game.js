@@ -32,6 +32,12 @@
   // speed, and when the real ball jumps (a late shot arriving) the drawn one
   // glides onto it over about this many seconds instead.
   const VIEW_SLOW = 0.12;
+  // The guest's swipe reaches the host a round trip late, so the host plays
+  // the shot on from where it would be by now, which leaves the host that
+  // much less time to see it coming. The guest's shots give some of that
+  // back: the ball stays on the racket this long (game seconds) before it
+  // flies, on both phones.
+  const SHOT_SHARE = 0.08;
   const VIEW_GLIDE = 0.15;
 
   // Seconds to run `dist` metres from a standstill at top speed `sp`.
@@ -470,7 +476,7 @@
         if (tb) { g.ball = tb; contactT = g.peakT + Math.max(0, err) * g.timeScale; }
       }
       applyShot(g, p, computeShot(g, p, input, err));
-      if (contactT !== null) catchUp(g, g.time - contactT);
+      if (contactT !== null) catchUp(g, g.time - contactT - SHOT_SHARE);
       return;
     }
     if (!incomingTo(g, p)) return;
@@ -524,12 +530,20 @@
     // keep running from where they really are
     p.x = x; p.y = y;
     if (!hit) { g.ball = now; return; }
-    catchUp(g, g.time - contactT);
+    catchUp(g, g.time - contactT - SHOT_SHARE);
+  }
+
+  // Fly the guest's shot on to where it is by now, SHOT_SHARE behind
+  // schedule; if it arrived quicker than that, hold it on the racket for the
+  // rest.
+  function catchUp(g, dt) {
+    g.ballWait = Math.max(0, -dt);
+    flyOn(g, dt);
   }
 
   // Fly the ball `dt` seconds of game time on the spot (a rewound shot
   // catching up to the present), with the usual net and bounce calls.
-  function catchUp(g, dt) {
+  function flyOn(g, dt) {
     dt = Math.min(dt, 1);
     for (let t = PHYS.DT; t <= dt + 1e-9 && g.phase === 'rally' && g.ball.active; t += PHYS.DT) {
       const ev = CT.stepBall(g.ball, PHYS.DT);
@@ -563,6 +577,7 @@
     const was = { lastHitT: g.lastHitT, phase: g.phase, wall: g.wall };
     applyShot(g, p, computeShot(g, p, input, err));
     g.predicted = was;
+    g.ballWait = SHOT_SHARE;
   }
 
   // The host turned the guest's swipe down after all: go back to its state.
@@ -884,6 +899,8 @@
     const b = g.ball;
     if (!b.active) return;
     const vz = b.vel.z;
+    // this phone's own shot waiting on the racket (SHOT_SHARE)
+    if (g.ballWait > 0) { g.ballWait -= dt; return; }
     const ev = CT.stepBall(b, dt);
     if (g.phase === 'toss' && vz > 0 && b.vel.z <= 0) g.peakT = g.time;
     if (ev === 'bounce' && g.phase === 'rally') b.bounces++;
@@ -904,7 +921,8 @@
     g.time += dt;
     updatePlayers(g, dt);
     const b = g.ball;
-    if (b.active) {
+    if (g.ballWait > 0) g.ballWait -= dt;   // the guest's shot waiting on the racket (SHOT_SHARE)
+    else if (b.active) {
       const vzBefore = b.vel.z;
       const ev = CT.stepBall(b, dt);
       if (g.phase === 'toss') {
@@ -1021,7 +1039,7 @@
   function snapshot(g) {
     return {
       time: g.time, phase: g.phase, server: g.server, serveBox: g.serveBox, serveWait: g.serveWait,
-      peakT: g.peakT, lastHitT: g.lastHitT, match: g.match,
+      peakT: g.peakT, lastHitT: g.lastHitT, match: g.match, ballWait: g.ballWait || 0,
       ball: CT.cloneBall(g.ball), predLand: g.predLand || null, lastShot: g.lastShot,
       players: g.players.map((p) => { const o = {}; for (const k of SNAP_PLAYER) o[k] = p[k]; return o; }),
     };
@@ -1042,6 +1060,7 @@
       return;
     }
     g.predicted = null;
+    g.ballWait = s.ballWait || 0;
     const fresh = s.lastHitT !== g.lastHitT || s.phase !== g.phase;
     g.time = s.time; g.phase = s.phase; g.server = s.server; g.serveBox = s.serveBox; g.serveWait = s.serveWait;
     g.peakT = s.peakT; g.lastHitT = s.lastHitT; g.match = s.match;
