@@ -24,6 +24,9 @@
   // the host waits this long (s) past the guest's latest swing before calling
   // a ball the guest was about to hit a winner.
   const LAG_ALLOW = 0.3;
+  // How long (wall seconds) the guest keeps its own predicted shot while the
+  // host's snapshots still show the ball before it, before giving up on it.
+  const PREDICT_HOLD = 1;
 
   // Seconds to run `dist` metres from a standstill at top speed `sp`.
   function runTime(dist, sp) {
@@ -283,7 +286,8 @@
       const d = Math.abs(localX), far = ch.reach * 0.6;
       if (kind !== 'overhead' && d < 0.3) { balance += ((0.3 - d) / 0.3) * 0.6; note = 'Jammed'; }
       if (d > far) { balance += ((d - far) / (ch.reach - far)) * 0.8; note = 'Stretched'; }
-      const run = p.moving ? p.v / ch.speed : 0;
+      // (an online guest's swipe brings the run it saw on its own phone)
+      const run = Number.isFinite(input.run) ? input.run : p.moving ? p.v / ch.speed : 0;
       if (run > 0.3) { balance += ((run - 0.3) / 0.7) * 0.7; if (!note) note = 'On the run'; }
     }
     const e0 = err / W;
@@ -454,11 +458,13 @@
         return;
       }
       // the guest hit the toss where they saw it, which is higher than it is here by now
+      let contactT = null;
       if (given && g.peakBall) {
         const tb = rewound(g.peakBall, err * g.timeScale);
-        if (tb) g.ball = tb;
+        if (tb) { g.ball = tb; contactT = g.peakT + Math.max(0, err) * g.timeScale; }
       }
       applyShot(g, p, computeShot(g, p, input, err));
+      if (contactT !== null) catchUp(g, g.time - contactT);
       return;
     }
     if (!incomingTo(g, p)) return;
@@ -498,9 +504,12 @@
   // An online guest's swipe for a ball that has already reached them on this
   // phone. They saw the ball a trip late and the swipe took another trip to
   // arrive, so hit it from where they met it: the contact plane plus their
-  // lateness, with the player where they were then.
+  // lateness, with the player where they were then. Then fly the shot on to
+  // where it is by now, which is where the guest's phone (which played the
+  // shot the moment they swiped) already shows it.
   function hitAsSeen(g, p, input, err) {
     const at = p.cross;
+    const contactT = at.t + Math.max(0, err) * g.timeScale;
     const b = rewound(at.ball, Math.max(0, err) * g.timeScale);
     if (!b) { emit(g, 'whiff', { side: p.side, reason: 'Too late' }); return; }
     const x = p.x, y = p.y, now = g.ball;
@@ -508,7 +517,51 @@
     const hit = tryHit(g, p, input, err);
     // keep running from where they really are
     p.x = x; p.y = y;
-    if (!hit) g.ball = now;
+    if (!hit) { g.ball = now; return; }
+    catchUp(g, g.time - contactT);
+  }
+
+  // Fly the ball `dt` seconds of game time on the spot (a rewound shot
+  // catching up to the present), with the usual net and bounce calls.
+  function catchUp(g, dt) {
+    dt = Math.min(dt, 1);
+    for (let t = PHYS.DT; t <= dt + 1e-9 && g.phase === 'rally' && g.ball.active; t += PHYS.DT) {
+      const ev = CT.stepBall(g.ball, PHYS.DT);
+      if (ev === 'net') emit(g, 'net', {});
+      if (ev === 'bounce') onBounce(g);
+    }
+  }
+
+  // On the guest: play its own swipe at once instead of waiting a round trip
+  // for the host to send the shot back, so the ball leaves the racket when
+  // they swing. The host makes the same call against the same ball (shots
+  // are deterministic), and its snapshots take over once they include it.
+  // Sets input.run, so call it before sending the swipe.
+  function predictSwipe(g, side, input, err) {
+    if (!g.remote) return;
+    const p = g.players[side];
+    input.run = p.moving ? p.v / p.ch.speed : 0;
+    if (g.phase === 'toss' && g.server === side) {
+      if (Math.abs(err) <= OUTER * windowFor(p, 'fh')) predictHit(g, p, input, err);
+      return;
+    }
+    if (!incomingTo(g, p)) return;
+    const Wout = OUTER * Math.max(windowFor(p, 'fh'), windowFor(p, 'bh'));
+    if (Math.abs(err) > Wout) return;
+    if (p.cross && p.cross.t >= g.lastHitT) predictHit(g, p, input, err);
+    else p.pending = { t: g.time, input, err };   // hit it as it reaches them (stepRemote)
+  }
+
+  function predictHit(g, p, input, err) {
+    if (g.phase !== 'toss' && !canReach(g, p)) return;   // the host will say why
+    const was = { lastHitT: g.lastHitT, phase: g.phase, wall: g.wall };
+    applyShot(g, p, computeShot(g, p, input, err));
+    g.predicted = was;
+  }
+
+  // The host turned the guest's swipe down after all: go back to its state.
+  function cancelPrediction(g) {
+    if (g.predicted) g.predicted.wall = -Infinity;
   }
 
   // ---------------- CPU ----------------
@@ -831,7 +884,11 @@
     for (const p of g.players) {
       if (!incomingTo(g, p) || p.fwd * b.pos.y > 0) { p.prevRel = null; continue; }
       const rel = p.fwd * b.pos.y - (p.fwd * p.y + CONTACT_AHEAD);
-      if (p.prevRel !== null && p.prevRel > 0 && rel <= 0) p.cross = { t: g.time, x: b.pos.x, y: b.pos.y, z: b.pos.z };
+      if (p.prevRel !== null && p.prevRel > 0 && rel <= 0) {
+        p.cross = { t: g.time, x: b.pos.x, y: b.pos.y, z: b.pos.z };
+        // an early swipe, waiting for the ball
+        if (p.pending) { const pd = p.pending; p.pending = null; predictHit(g, p, pd.input, pd.err); return; }
+      }
       p.prevRel = rel;
     }
   }
@@ -919,12 +976,26 @@
   }
 
   function applySnapshot(g, s) {
+    // While the guest's own shot is on its way to the host, snapshots still
+    // show the ball before it: keep the predicted ball (and the swing) until
+    // one includes the shot or the point moves on.
+    const pr = g.predicted;
+    if (pr && s.lastHitT === pr.lastHitT && s.phase === pr.phase && g.wall - pr.wall < PREDICT_HOLD) {
+      g.match = s.match; g.serveWait = s.serveWait;
+      s.players.forEach((q, i) => {
+        const p = g.players[i], { swing, swingWing } = p;
+        Object.assign(p, q);
+        if (i === g.ball.lastHitter) { p.swing = swing; p.swingWing = swingWing; }
+      });
+      return;
+    }
+    g.predicted = null;
     const fresh = s.lastHitT !== g.lastHitT || s.phase !== g.phase;
     g.time = s.time; g.phase = s.phase; g.server = s.server; g.serveBox = s.serveBox; g.serveWait = s.serveWait;
     g.peakT = s.peakT; g.lastHitT = s.lastHitT; g.match = s.match;
     g.ball = s.ball; g.predLand = s.predLand; g.lastShot = s.lastShot;
     s.players.forEach((q, i) => Object.assign(g.players[i], q));
-    if (fresh) for (const p of g.players) { p.cross = null; p.prevRel = null; }
+    if (fresh) for (const p of g.players) { p.cross = null; p.prevRel = null; p.pending = null; }
   }
 
   // On the guest: how early (-) or late (+) a swipe is right now, judged
@@ -954,6 +1025,8 @@
   CT.snapshot = snapshot;
   CT.applySnapshot = applySnapshot;
   CT.swipeTiming = swipeTiming;
+  CT.predictSwipe = predictSwipe;
+  CT.cancelPrediction = cancelPrediction;
   CT.createGame = createGame;
   CT._computeShot = computeShot;   // for tests
   CT.updateGame = update;
