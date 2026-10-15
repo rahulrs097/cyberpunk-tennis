@@ -343,10 +343,12 @@
     if (spinDir < 0) aim = -aim;
     const input = { aim, pace, over, spinDir, curve, depth, landX: pointAt(aim), lob };
     if (isGuest()) {
-      // judge timing here, against the ball this player saw, then send it
+      // judge timing here, against the ball this player saw, play the shot
+      // on this screen straight away, then send it to the host
       const tm = CT.swipeTiming(game, me);
       if (!tm) return;
       if (tm.whiff) { showShot(tm.whiff); return; }
+      CT.predictSwipe(game, me, input, tm.err);
       send({ t: 'in', k: 'swipe', input, err: tm.err });
     } else CT.requestSwipe(game, me, input);
   }
@@ -407,6 +409,9 @@
         // is worked out again once that state is here
         if (game.phase + game.server !== was) hintForState();
       } else if (m.t === 'ev' && game && game.remote) {
+        // this phone already played its own shot when the swipe was made
+        if (m.type === 'hit' && m.d.side === me && game.predicted) return;
+        if (m.type === 'whiff' && m.d.side === me) CT.cancelPrediction(game);
         onEvent(m.type, m.d);
       }
     }
@@ -547,7 +552,12 @@
       if (msgTimer > 0) { msgTimer -= dt; if (msgTimer <= 0) $('msg').hidden = true; }
       if (shotTimer > 0) { shotTimer -= dt; if (shotTimer <= 0) $('shot').hidden = true; }
     }
-    if (game) CT.renderGame(renderer, game, me, paused ? null : CT.incomingInfo(game, me));
+    if (game) {
+      // draw the ball where it's shown (online it can lag the real one briefly)
+      const info = paused ? null : CT.incomingInfo(game, me), ball = game.ball;
+      game.ball = CT.viewBall(game);
+      try { CT.renderGame(renderer, game, me, info); } finally { game.ball = ball; }
+    }
     requestAnimationFrame(frame);
   }
 

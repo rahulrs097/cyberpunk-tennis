@@ -24,6 +24,24 @@
   // the host waits this long (s) past the guest's latest swing before calling
   // a ball the guest was about to hit a winner.
   const LAG_ALLOW = 0.3;
+  // How long (wall seconds) the guest keeps its own predicted shot while the
+  // host's snapshots still show the ball before it, before giving up on it.
+  const PREDICT_HOLD = 1;
+  // Online, the ball as drawn (g.view): while a ball waits at the far
+  // player's racket for their swipe to arrive it runs at this share of its
+  // speed, and when the real ball jumps (a late shot arriving) the drawn one
+  // glides onto it over about this many seconds instead.
+  const VIEW_SLOW = 0.12;
+  // The guest's swipe reaches the host a round trip late, so the host plays
+  // the shot on from where it would be by now, which leaves the host that
+  // much less time to see it coming. The guest's shots give some of that
+  // back: the ball stays on the racket this long (game seconds) before it
+  // flies, on both phones.
+  const SHOT_SHARE = 0.08;
+  const VIEW_GLIDE = 0.15;
+  // A guest shot the host plays on from a moment ago is drawn from the racket
+  // at this many times its speed until it has caught up, instead of jumping.
+  const VIEW_WARP = 1.7;
 
   // Seconds to run `dist` metres from a standstill at top speed `sp`.
   function runTime(dist, sp) {
@@ -301,7 +319,8 @@
       const d = Math.abs(localX), far = ch.reach * 0.6;
       if (kind !== 'overhead' && d < 0.3) { balance += ((0.3 - d) / 0.3) * 0.6; note = 'Jammed'; }
       if (d > far) { balance += ((d - far) / (ch.reach - far)) * 0.8; note = 'Stretched'; }
-      const run = p.moving ? p.v / ch.speed : 0;
+      // (an online guest's swipe brings the run it saw on its own phone)
+      const run = Number.isFinite(input.run) ? input.run : p.moving ? p.v / ch.speed : 0;
       if (run > 0.3) { balance += ((run - 0.3) / 0.7) * 0.7; if (!note) note = 'On the run'; }
     }
     const e0 = err / W;
@@ -476,11 +495,13 @@
         return;
       }
       // the guest hit the toss where they saw it, which is higher than it is here by now
+      let contactT = null;
       if (given && g.peakBall) {
         const tb = rewound(g.peakBall, err * g.timeScale);
-        if (tb) g.ball = tb;
+        if (tb) { g.ball = tb; contactT = g.peakT + Math.max(0, err) * g.timeScale; }
       }
       applyShot(g, p, computeShot(g, p, input, err));
+      if (contactT !== null) catchUp(g, g.time - contactT - SHOT_SHARE);
       return;
     }
     if (!incomingTo(g, p)) return;
@@ -520,9 +541,12 @@
   // An online guest's swipe for a ball that has already reached them on this
   // phone. They saw the ball a trip late and the swipe took another trip to
   // arrive, so hit it from where they met it: the contact plane plus their
-  // lateness, with the player where they were then.
+  // lateness, with the player where they were then. Then fly the shot on to
+  // where it is by now, which is where the guest's phone (which played the
+  // shot the moment they swiped) already shows it.
   function hitAsSeen(g, p, input, err) {
     const at = p.cross;
+    const contactT = at.t + Math.max(0, err) * g.timeScale;
     const b = rewound(at.ball, Math.max(0, err) * g.timeScale);
     if (!b) { emit(g, 'whiff', { side: p.side, reason: 'Too late' }); return; }
     const x = p.x, y = p.y, now = g.ball;
@@ -530,7 +554,61 @@
     const hit = tryHit(g, p, input, err);
     // keep running from where they really are
     p.x = x; p.y = y;
-    if (!hit) g.ball = now;
+    if (!hit) { g.ball = now; return; }
+    catchUp(g, g.time - contactT - SHOT_SHARE);
+  }
+
+  // Fly the guest's shot on to where it is by now, SHOT_SHARE behind
+  // schedule; if it arrived quicker than that, hold it on the racket for the
+  // rest.
+  function catchUp(g, dt) {
+    g.ballWait = Math.max(0, -dt);
+    g.warp = dt > 0 ? { t: g.lastHitT, ball: CT.cloneBall(g.ball), acc: 0, behind: dt } : null;
+    flyOn(g, dt);
+  }
+
+  // Fly the ball `dt` seconds of game time on the spot (a rewound shot
+  // catching up to the present), with the usual net and bounce calls.
+  function flyOn(g, dt) {
+    dt = Math.min(dt, 1);
+    for (let t = PHYS.DT; t <= dt + 1e-9 && g.phase === 'rally' && g.ball.active; t += PHYS.DT) {
+      const ev = CT.stepBall(g.ball, PHYS.DT);
+      if (ev === 'net') emit(g, 'net', {});
+      if (ev === 'bounce') onBounce(g);
+    }
+  }
+
+  // On the guest: play its own swipe at once instead of waiting a round trip
+  // for the host to send the shot back, so the ball leaves the racket when
+  // they swing. The host makes the same call against the same ball (shots
+  // are deterministic), and its snapshots take over once they include it.
+  // Sets input.run, so call it before sending the swipe.
+  function predictSwipe(g, side, input, err) {
+    if (!g.remote) return;
+    const p = g.players[side];
+    input.run = p.moving ? p.v / p.ch.speed : 0;
+    if (g.phase === 'toss' && g.server === side) {
+      if (Math.abs(err) <= OUTER * windowFor(p, 'fh')) predictHit(g, p, input, err);
+      return;
+    }
+    if (!incomingTo(g, p)) return;
+    const Wout = OUTER * Math.max(windowFor(p, 'fh'), windowFor(p, 'bh'));
+    if (Math.abs(err) > Wout) return;
+    if (p.cross && p.cross.t >= g.lastHitT) predictHit(g, p, input, err);
+    else p.pending = { t: g.time, input, err };   // hit it as it reaches them (stepRemote)
+  }
+
+  function predictHit(g, p, input, err) {
+    if (g.phase !== 'toss' && !canReach(g, p)) return;   // the host will say why
+    const was = { lastHitT: g.lastHitT, phase: g.phase, wall: g.wall };
+    applyShot(g, p, computeShot(g, p, input, err));
+    g.predicted = was;
+    g.ballWait = SHOT_SHARE;
+  }
+
+  // The host turned the guest's swipe down after all: go back to its state.
+  function cancelPrediction(g) {
+    if (g.predicted) g.predicted.wall = -Infinity;
   }
 
   // ---------------- CPU ----------------
@@ -952,13 +1030,19 @@
     const b = g.ball;
     if (!b.active) return;
     const vz = b.vel.z;
+    // this phone's own shot waiting on the racket (SHOT_SHARE)
+    if (g.ballWait > 0) { g.ballWait -= dt; return; }
     const ev = CT.stepBall(b, dt);
     if (g.phase === 'toss' && vz > 0 && b.vel.z <= 0) g.peakT = g.time;
     if (ev === 'bounce' && g.phase === 'rally') b.bounces++;
     for (const p of g.players) {
       if (!incomingTo(g, p) || p.fwd * b.pos.y > 0) { p.prevRel = null; continue; }
       const rel = p.fwd * b.pos.y - (p.fwd * p.y + CONTACT_AHEAD);
-      if (p.prevRel !== null && p.prevRel > 0 && rel <= 0) p.cross = { t: g.time, x: b.pos.x, y: b.pos.y, z: b.pos.z };
+      if (p.prevRel !== null && p.prevRel > 0 && rel <= 0) {
+        p.cross = { t: g.time, x: b.pos.x, y: b.pos.y, z: b.pos.z, ball: CT.cloneBall(b), px: p.x };
+        // an early swipe, waiting for the ball
+        if (p.pending) { const pd = p.pending; p.pending = null; predictHit(g, p, pd.input, pd.err); return; }
+      }
       p.prevRel = rel;
     }
   }
@@ -968,7 +1052,8 @@
     g.time += dt;
     updatePlayers(g, dt);
     const b = g.ball;
-    if (b.active) {
+    if (g.ballWait > 0) g.ballWait -= dt;   // the guest's shot waiting on the racket (SHOT_SHARE)
+    else if (b.active) {
       const vzBefore = b.vel.z;
       const ev = CT.stepBall(b, dt);
       if (g.phase === 'toss') {
@@ -1004,8 +1089,9 @@
     while (g.acc >= PHYS.DT) { stepOnce(g, PHYS.DT); g.acc -= PHYS.DT; }
     for (const mk of g.marks) mk.age += wallDt;
     g.marks = g.marks.filter((mk) => mk.age < 1.2);
+    updateView(g, wallDt);
     if (g.ball.active) {
-      g.trail.push({ ...g.ball.pos });
+      g.trail.push({ ...g.view.pos });
       if (g.trail.length > 10) g.trail.shift();
     }
     if (g.remote) return;
@@ -1024,6 +1110,79 @@
     }
   }
 
+  // Where the ball is drawn. Offline that's simply where it is. Online, the
+  // other phone's shots arrive a trip late, so:
+  // - a ball that reaches the other player (where they could hit it) slows
+  //   down at their racket while their swipe is on its way, instead of
+  //   flying on past them;
+  // - when the real ball jumps (their shot arrived, or the host's state did),
+  //   the drawn ball glides onto it in a fraction of a second instead of
+  //   teleporting.
+  function updateView(g, wallDt) {
+    const b = g.ball;
+    const v = g.view || (g.view = { pos: { ...b.pos }, o: { x: 0, y: 0, z: 0 }, last: null, step: null, hold: null });
+    let target = b.pos;
+    const online = g.remote || g.control.includes('remote');
+    if (online && g.phase === 'rally' && wallDt > 0) {
+      const rp = g.players.find((p) => g.control[p.side] === 'remote' && incomingTo(g, p) && p.cross && p.cross.ball && p.cross.t >= g.lastHitT);
+      const c = rp && rp.cross;
+      const Wout = rp && OUTER * Math.max(windowFor(rp, 'fh'), windowFor(rp, 'bh'));
+      if (c && g.time < c.t + (Wout + LAG_ALLOW) * g.timeScale &&
+        Math.abs(c.x - c.px) <= rp.ch.reach + 0.5 && c.z <= rp.ch.maxZ) {
+        if (!v.hold || v.hold.t !== c.t) v.hold = { t: c.t, ball: CT.cloneBall(c.ball), acc: (g.time - c.t) * VIEW_SLOW };
+        else v.hold.acc += wallDt * g.timeScale * VIEW_SLOW;
+        target = flown(v.hold);
+      } else v.hold = null;
+      // a guest shot catching up from the racket
+      const w = g.warp;
+      if (w && w.t === g.lastHitT && !v.hold) {
+        const gdt = wallDt * g.timeScale;
+        w.acc += gdt * VIEW_WARP;
+        w.behind -= gdt * (VIEW_WARP - 1);
+        if (w.behind > 0) target = flown(w);
+        else {
+          // caught up: back to the real ball, which moves at normal speed
+          g.warp = null;
+          if (v.step) v.step = { x: v.step.x / VIEW_WARP, y: v.step.y / VIEW_WARP, z: v.step.z / VIEW_WARP, dt: v.step.dt };
+        }
+      } else if (w && w.t !== g.lastHitT) g.warp = null;
+      // did the target jump, beyond carrying on as it was going?
+      let jumped = false;
+      if (v.last && v.step) {
+        const k = wallDt / v.step.dt;
+        const ex = { x: v.last.x + v.step.x * k, y: v.last.y + v.step.y * k, z: v.last.z + v.step.z * k };
+        // keep drawing it carrying on as it was, and glide from there
+        if (Math.hypot(target.x - ex.x, target.y - ex.y, target.z - ex.z) > 0.15) {
+          v.o = { x: v.o.x + ex.x - target.x, y: v.o.y + ex.y - target.y, z: v.o.z + ex.z - target.z };
+          jumped = true;
+        }
+      }
+      v.step = v.last && !jumped ? { x: target.x - v.last.x, y: target.y - v.last.y, z: target.z - v.last.z, dt: wallDt } : null;
+      const f = Math.exp(-wallDt / VIEW_GLIDE);
+      v.o = { x: v.o.x * f, y: v.o.y * f, z: v.o.z * f };
+    } else {
+      v.hold = null; v.step = null; v.o = { x: 0, y: 0, z: 0 };
+    }
+    v.last = { ...target };
+    v.pos = { x: target.x + v.o.x, y: target.y + v.o.y, z: target.z + v.o.z };
+  }
+
+  // Where a drawn ball { ball, acc } is after `acc` seconds of flight: whole
+  // steps move the ball on for good, and the rest is stepped on a copy, so
+  // it glides rather than ticking forward a step at a time.
+  function flown(d) {
+    while (d.acc >= PHYS.DT) { CT.stepBall(d.ball, PHYS.DT); d.acc -= PHYS.DT; }
+    if (d.acc <= 0) return d.ball.pos;
+    const c = CT.cloneBall(d.ball);
+    CT.stepBall(c, d.acc);
+    return c.pos;
+  }
+
+  // The ball to draw: the real one, or where it is drawn online (g.view).
+  function viewBall(g) {
+    return g.view ? { ...g.ball, pos: { ...g.view.pos } } : g.ball;
+  }
+
   // Data the HUD needs about the human's incoming ball.
   function incomingInfo(g, side) {
     const p = g.players[side];
@@ -1039,19 +1198,34 @@
   function snapshot(g) {
     return {
       time: g.time, phase: g.phase, server: g.server, serveBox: g.serveBox, serveWait: g.serveWait,
-      peakT: g.peakT, lastHitT: g.lastHitT, match: g.match,
+      peakT: g.peakT, lastHitT: g.lastHitT, match: g.match, ballWait: g.ballWait || 0,
       ball: CT.cloneBall(g.ball), predLand: g.predLand || null, lastShot: g.lastShot,
       players: g.players.map((p) => { const o = {}; for (const k of SNAP_PLAYER) o[k] = p[k]; return o; }),
     };
   }
 
   function applySnapshot(g, s) {
+    // While the guest's own shot is on its way to the host, snapshots still
+    // show the ball before it: keep the predicted ball (and the swing) until
+    // one includes the shot or the point moves on.
+    const pr = g.predicted;
+    if (pr && s.lastHitT === pr.lastHitT && s.phase === pr.phase && g.wall - pr.wall < PREDICT_HOLD) {
+      g.match = s.match; g.serveWait = s.serveWait;
+      s.players.forEach((q, i) => {
+        const p = g.players[i], { swing, swingWing } = p;
+        Object.assign(p, q);
+        if (i === g.ball.lastHitter) { p.swing = swing; p.swingWing = swingWing; }
+      });
+      return;
+    }
+    g.predicted = null;
+    g.ballWait = s.ballWait || 0;
     const fresh = s.lastHitT !== g.lastHitT || s.phase !== g.phase;
     g.time = s.time; g.phase = s.phase; g.server = s.server; g.serveBox = s.serveBox; g.serveWait = s.serveWait;
     g.peakT = s.peakT; g.lastHitT = s.lastHitT; g.match = s.match;
     g.ball = s.ball; g.predLand = s.predLand; g.lastShot = s.lastShot;
     s.players.forEach((q, i) => Object.assign(g.players[i], q));
-    if (fresh) for (const p of g.players) { p.cross = null; p.prevRel = null; }
+    if (fresh) for (const p of g.players) { p.cross = null; p.prevRel = null; p.pending = null; }
   }
 
   // On the guest: how early (-) or late (+) a swipe is right now, judged
@@ -1090,6 +1264,9 @@
   CT.snapshot = snapshot;
   CT.applySnapshot = applySnapshot;
   CT.swipeTiming = swipeTiming;
+  CT.predictSwipe = predictSwipe;
+  CT.viewBall = viewBall;
+  CT.cancelPrediction = cancelPrediction;
   CT.createGame = createGame;
   CT._computeShot = computeShot;   // for tests
   CT.updateGame = update;

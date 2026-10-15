@@ -239,3 +239,93 @@ test('a snapshot carries the match to the guest', () => {
   assert.deepEqual(plain(guest.ball.pos), plain(host.ball.pos));
   assert.equal(guest.players[1].x, host.players[1].x);
 });
+
+// An online match over a link with `lag` seconds each way: the host runs the
+// match and sends a snapshot every 50 ms; the guest (side 1, automove on)
+// swings as the ball reaches its contact plane, the way a person on the guest
+// phone would. Returns what the guest saw of each of its shots (how far the
+// ball carried on past the swing, and the biggest correction a snapshot
+// made), and what the host saw of them (how far the drawn ball got past the
+// guest's racket, and its biggest move in one frame).
+function onlineRally(CT, lag, frames) {
+  const host = CT.createGame({ p0: 'octopus', p1: 'philosopher', timeScale: 1, control: ['cpu', 'remote'], autoMove: [false, true] });
+  const guest = CT.createGame({ p0: 'octopus', p1: 'philosopher', timeScale: 1, control: ['remote', 'human'], remote: true, onEvent: () => {} });
+  const toGuest = [], toHost = [];
+  const dt = 1 / 60;
+  let now = 0, swungAt = -1, swing = null, latest = null, hostHits = 0;
+  const shots = [];
+  const hostShots = [];
+  let onHost = null, hostDrawn = null;
+  host.onEvent = (type, d) => {
+    if (type === 'hit' && d.side === 1) { hostHits++; if (latest) latest.hit = true; if (onHost) onHost.hitAt = now; }
+    toGuest.push({ at: now + lag, ev: { type, d } });
+  };
+  for (let f = 0; f < frames; f++) {
+    now += dt;
+    const hv = hostDrawn, hPhase = host.phase;
+    CT.updateGame(host, dt);
+    while (toHost.length && toHost[0].at <= now) { const m = toHost.shift(); CT.requestSwipe(host, 1, m.input, m.err); }
+    hostDrawn = { ...CT.viewBall(host).pos };
+    // the host's drawn ball around each of the guest's shots: how far it gets
+    // past the guest's racket, and its biggest move in one frame
+    if (hPhase === 'rally' && host.phase === 'rally') {
+      const q = hostDrawn;
+      if (host.ball.lastHitter === 0) {
+        if (!onHost) onHost = { past: 0, step: 0 };
+        onHost.past = Math.max(onHost.past, q.y - (host.players[1].y - 0.35));
+      }
+      if (onHost) onHost.step = Math.max(onHost.step, Math.hypot(q.x - hv.x, q.y - hv.y, q.z - hv.z));
+      if (onHost && onHost.hitAt !== undefined && now - onHost.hitAt > 0.4) { hostShots.push(onHost); onHost = null; }
+    } else onHost = null;
+    if (f % 3 === 0) toGuest.push({ at: now + lag, s: JSON.parse(JSON.stringify(CT.snapshot(host))) });
+    CT.updateGame(guest, dt);
+    while (toGuest.length && toGuest[0].at <= now) {
+      const m = toGuest.shift();
+      if (m.s) {
+        const was = { ...guest.ball.pos };
+        CT.applySnapshot(guest, m.s);
+        const q = guest.ball.pos;
+        if (swing) swing.jump = Math.max(swing.jump, Math.hypot(q.x - was.x, q.y - was.y, q.z - was.z));
+      }
+      else if (m.ev.type === 'whiff' && m.ev.d.side === 1 && CT.cancelPrediction) CT.cancelPrediction(guest);
+    }
+    const p = guest.players[1], b = guest.ball;
+    // how far the guest's ball carries on past the swing point, towards the
+    // back of their court
+    if (swing) {
+      swing.over = Math.max(swing.over, b.pos.y - swing.y);
+      if (now - swing.t > 0.6) { shots.push(swing); swing = null; }
+    }
+    if (!swing && guest.phase === 'rally' && guest.lastHitT !== swungAt && b.lastHitter === 0 && p.cross && p.cross.t >= guest.lastHitT) {
+      const tm = CT.swipeTiming(guest, 1);
+      if (!tm || tm.whiff) continue;
+      swungAt = guest.lastHitT;
+      const input = { aim: 0, pace: 0.6, spinDir: 1, curve: 0, depth: 0.8 };
+      if (CT.predictSwipe) CT.predictSwipe(guest, 1, input, tm.err);
+      toHost.push({ at: now + lag, input, err: tm.err });
+      swing = latest = { t: now, y: b.pos.y, over: 0, jump: 0, hit: false };
+    }
+  }
+  return { shots, hostHits, hostShots };
+}
+
+test("online: the guest's shots leave its racket at once on both phones, with no jumps", () => {
+  for (const lag of [0.05, 0.12, 0.2]) {
+    const CT = loadEngine(7);
+    const { shots, hostHits, hostShots } = onlineRally(CT, lag, 60 * 40);
+    assert.ok(hostHits >= 3, `the host counted the guest's hits (${hostHits})`);
+    const hit = shots.filter((s) => s.hit);
+    assert.ok(hit.length >= 3);
+    for (const s of hit) {
+      assert.ok(s.over < 0.4, `lag ${lag}: ball carried ${s.over.toFixed(2)} m past the guest after the swing`);
+      assert.ok(s.jump < 0.5, `lag ${lag}: ball jumped ${s.jump.toFixed(2)} m when the host's state arrived`);
+    }
+    // On the host, the ball waits at the guest's racket for their swipe and
+    // then glides out, instead of flying on past them and teleporting back.
+    assert.ok(hostShots.length >= 3);
+    for (const s of hostShots) {
+      assert.ok(s.past < 1.6, `lag ${lag}: host drew the ball ${s.past.toFixed(2)} m past the guest`);
+      assert.ok(s.step < 1.2, `lag ${lag}: host's ball jumped ${s.step.toFixed(2)} m in one frame`);
+    }
+  }
+});
