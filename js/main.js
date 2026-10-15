@@ -19,6 +19,8 @@
   try { const v = localStorage.getItem('ct.autoMove'); if (v !== null) autoMove = v === '1'; } catch (e) { /* storage is optional */ }
   let musicOn = true;
   try { const v = localStorage.getItem('ct.music'); if (v !== null) musicOn = v === '1'; } catch (e) { /* storage is optional */ }
+  let view = 'chase';  // camera: 'chase' (behind and above) or 'first' (your eyes)
+  try { if (localStorage.getItem('ct.view') === 'first') view = 'first'; } catch (e) { /* storage is optional */ }
   let lastFrame = performance.now();
   let msgTimer = 0;
   let shotTimer = 0;
@@ -42,8 +44,14 @@
       intro: 'Swipe down to slice', pass: (d) => d.ok && d.shot && d.shot.spin === 'Slice' },
     { title: 'Drop shot', wing: 'fh', need: 1, hint: 'A short swipe drops the ball short. Land it in front of the service line',
       intro: 'A short swipe drops it short', pass: (d) => d.ok && d.y < CT.COURT.SL },
-    { title: 'Lob', wing: 'fh', need: 1, hint: 'Swipe up slowly and smoothly, at least half your usual length',
+    { title: 'Lob', wing: 'fh', need: 1, hint: 'Swipe up slowly over a third of the screen or more, taking about half a second',
       intro: 'A slow, long swipe up lobs', pass: (d) => d.ok && d.shot && d.shot.spin === 'Lob' },
+    { title: 'Volley', feed: 'volley', wing: 'fh', need: 2, hint: 'At the net, swipe as the ring closes, before the ball bounces',
+      intro: 'You\'re at the net: hit it out of the air', pass: (d) => d.ok && d.shot && /volley/i.test(d.shot.kind) },
+    { title: 'Smash', feed: 'smash', need: 1, hint: 'Wait under the lob and swipe up hard as the ring closes',
+      intro: 'A lob is coming: smash it', pass: (d) => d.ok && d.shot && d.shot.kind === 'overhead' },
+    { title: 'Play a point', rally: true, need: 1, hint: 'Rally with the CPU. Move it side to side and win one point',
+      intro: 'Now win a point against the CPU', pass: (d) => d.ok },
   ];
 
   function startTutorial() {
@@ -55,9 +63,11 @@
   function runLesson() {
     const L = LESSONS[tut.i];
     tut.done = 0;
-    const lv = CT.CPU_LEVELS.chill;
-    beginMatch({ p0: humanChar, p1: humanChar === 'octopus' ? 'philosopher' : 'octopus', timeScale: lv.timeScale,
-      control: ['human', 'feeder'], autoMove: [autoMove, false], drill: { serve: !!L.serve, wing: L.wing, reps: 0 } });
+    const chars = { p0: humanChar, p1: humanChar === 'octopus' ? 'philosopher' : 'octopus' };
+    // the last lesson is a real point against the easiest CPU
+    if (L.rally) beginMatch({ ...chars, control: ['human', 'cpu'], autoMove: [autoMove, false], ...CT.levelOpts('chill') });
+    else beginMatch({ ...chars, timeScale: CT.CPU_LEVELS.chill.timeScale, control: ['human', 'feeder'], autoMove: [autoMove, false],
+      drill: { serve: !!L.serve, wing: L.wing, feed: L.feed, reps: 0 } });
     showMsg(L.title, L.intro, 'neutral');
   }
 
@@ -203,6 +213,7 @@
       showMsg(d.text === 'Net' || d.text === 'Serve clock' ? d.text : 'Fault', 'Second serve', 'warn');
       blip(160, 0.2, 'sawtooth', 0.05, 90);
     } else if (type === 'point') {
+      if (tut) { onDrill({ ok: d.winner === me, text: d.winner === me ? 'Point' : d.text }); updateHud(); return; }
       const youWon = d.winner === me;
       let sub = names[d.winner] + ' wins the point';
       if (d.result === 'game') sub = names[d.winner] + ' takes the game';
@@ -241,7 +252,7 @@
     ensureAudio();
     if (audio && audio.state === 'suspended') audio.resume();
     if (!game || paused || touch) return;
-    canvas.setPointerCapture && canvas.setPointerCapture(e.pointerId);
+    try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* capture is optional: the swipe still works without it */ }
     touch = { id: e.pointerId, pts: [{ x: e.clientX, y: e.clientY, t: performance.now() }] };
     e.preventDefault();
   }
@@ -311,8 +322,11 @@
     const depth = CT.clamp((chord / Math.min(window.innerWidth, window.innerHeight) - 0.1) / 0.3, 0, 1);
     const over = CT.clamp((u - 7) / 4, 0, 1);
     const spinDir = dy < 0 ? 1 : -1;
-    // a slow, unhurried upward swipe (not a short one) lofts a topspin lob
-    const lob = spinDir > 0 && u < 0.55 && depth >= 0.5;
+    // A slow, long upward swipe lofts a topspin lob. Judged on the whole
+    // swipe, not its tail: fingers speed up as they let go, so a deliberate
+    // slow swipe still ends with a flick.
+    const dim = Math.min(window.innerWidth, window.innerHeight);
+    const lob = spinDir > 0 && (chord / dur) * 1000 / dim < 1.0 && chord / dim >= 0.3;
     let aim = Math.atan2(dx, Math.abs(dy));
     // bow of the path, measured towards screen-right
     let nx = -dy / chord, ny = dx / chord;
@@ -329,10 +343,12 @@
     if (spinDir < 0) aim = -aim;
     const input = { aim, pace, over, spinDir, curve, depth, landX: pointAt(aim), lob };
     if (isGuest()) {
-      // judge timing here, against the ball this player saw, then send it
+      // judge timing here, against the ball this player saw, play the shot
+      // on this screen straight away, then send it to the host
       const tm = CT.swipeTiming(game, me);
       if (!tm) return;
       if (tm.whiff) { showShot(tm.whiff); return; }
+      CT.predictSwipe(game, me, input, tm.err);
       send({ t: 'in', k: 'swipe', input, err: tm.err });
     } else CT.requestSwipe(game, me, input);
   }
@@ -393,6 +409,9 @@
         // is worked out again once that state is here
         if (game.phase + game.server !== was) hintForState();
       } else if (m.t === 'ev' && game && game.remote) {
+        // this phone already played its own shot when the swipe was made
+        if (m.type === 'hit' && m.d.side === me && game.predicted) return;
+        if (m.type === 'whiff' && m.d.side === me) CT.cancelPrediction(game);
         onEvent(m.type, m.d);
       }
     }
@@ -493,9 +512,7 @@
     me = 0;
     tut = null;
     const cpuChar = humanChar === 'octopus' ? 'philosopher' : 'octopus';
-    const L = CT.CPU_LEVELS[level];
-    beginMatch({ p0: humanChar, p1: cpuChar, timeScale: L.timeScale, control: ['human', 'cpu'], autoMove: [autoMove, false],
-      cpuErr: L.err, cpuReact: L.react, cpuCover: L.cover, cpuSpeed: L.speed, cpuPace: L.pace, cpuDepth: L.depth });
+    beginMatch({ p0: humanChar, p1: cpuChar, control: ['human', 'cpu'], autoMove: [autoMove, false], ...CT.levelOpts(level) });
   }
 
   function beginMatch(cfg) {
@@ -535,7 +552,12 @@
       if (msgTimer > 0) { msgTimer -= dt; if (msgTimer <= 0) $('msg').hidden = true; }
       if (shotTimer > 0) { shotTimer -= dt; if (shotTimer <= 0) $('shot').hidden = true; }
     }
-    if (game) CT.renderGame(renderer, game, me, paused ? null : CT.incomingInfo(game, me));
+    if (game) {
+      // draw the ball where it's shown (online it can lag the real one briefly)
+      const info = paused ? null : CT.incomingInfo(game, me), ball = game.ball;
+      game.ball = CT.viewBall(game);
+      try { CT.renderGame(renderer, game, me, info); } finally { game.ball = ball; }
+    }
     requestAnimationFrame(frame);
   }
 
@@ -565,6 +587,16 @@
     pb.textContent = on ? 'Music on' : 'Music off';
     ensureAudio();
     CT.Music.setOn(on);
+  }
+
+  function setView(v) {
+    view = v;
+    try { localStorage.setItem('ct.view', v); } catch (e) { /* storage is optional */ }
+    CT.setView(renderer, v);
+    document.querySelectorAll('[data-view]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.view === v)));
+    const cb = $('camBtn');
+    cb.textContent = v === 'first' ? '3P' : '1P';
+    cb.setAttribute('aria-label', v === 'first' ? 'Switch to chase view' : 'Switch to first-person view');
   }
 
   function setPaused(v) {
@@ -619,6 +651,12 @@
     $('rematch').addEventListener('click', startMatch);
     $('toMenu').addEventListener('click', showMenu);
     $('pauseBtn').addEventListener('click', () => setPaused(true));
+    document.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', () => setView(b.dataset.view)));
+    $('camBtn').addEventListener('click', () => setView(view === 'first' ? 'chase' : 'first'));
+    document.addEventListener('keydown', (e) => {
+      if ((e.key === 'c' || e.key === 'C') && e.target === document.body) setView(view === 'first' ? 'chase' : 'first');
+    });
+    setView(view);
     $('resume').addEventListener('click', () => setPaused(false));
     $('quit').addEventListener('click', () => { leaveFullscreen(); showMenu(); });
     $('howBtn').addEventListener('click', () => { $('help').hidden = false; });
