@@ -23,12 +23,15 @@
       capDrain: 0.03,      // hard-cap loss per metre run
       home: 13.4,          // rally depth (distance from the net)
       returnDepth: 14.2,
-      // How the CPU plays him: a counterpuncher. Steady pace, keeps the ball
-      // away from the lines, makes you hit one more, and passes or lobs
-      // anyone who comes in. Takes the ball late and likes his backhand.
+      // How the CPU plays him: steady pressure. Deep, heavy, safe balls with
+      // big margins, worked into your weaker wing until something breaks, and
+      // very few unforced errors. Rarely goes for broke; passes or lobs anyone
+      // who comes in. Takes the ball late and likes his backhand.
       tactics: {
-        pace: [0.45, 0.8], safe: 0.8, slice: 0.1, weakWing: 0.12, openCourt: 0.5,
-        approach: 0, serveVolley: 0, lob: 0.4, fhPref: -0.05, late: 0.05,
+        pace: [0.6, 0.8], safe: 0.75, slice: 0.08, weakWing: 0.35, openCourt: 0.4,
+        approach: 0, serveVolley: 0, lob: 0.35, fhPref: -0.05, late: 0.05,
+        drop: 0.03, angle: 0.08, serveWide: 0.25,
+        patterns: ['pressure', 'pressure', 'sideToSide'], attack: 0.6, err: 0.9,
       },
       colors: { main: '#8f5bff', glow: '#28f0d6', dark: '#2a1257', accent: '#ff3fa4' },
     },
@@ -50,12 +53,15 @@
       capDrain: 0.036,
       home: 12.7,
       returnDepth: 13.3,
-      // How the CPU plays him: an attacker. Runs around his backhand to hit
-      // forehands, hits at your weaker wing, follows short balls to the net and
-      // sometimes serves and volleys.
+      // How the CPU plays him: aggressive and creative. Big forehands (he runs
+      // around his backhand), goes for winners early, follows short balls to
+      // the net and serves and volleys, and mixes in drop shots, short angles
+      // and hitting behind you. More winners, and more errors.
       tactics: {
-        pace: [0.45, 0.8], safe: 0.8, slice: 0.06, weakWing: 0.45, openCourt: 0.5,
-        approach: 0.6, serveVolley: 0.2, lob: 0.1, fhPref: 0.08, late: 0,
+        pace: [0.55, 0.9], safe: 0.85, slice: 0.12, weakWing: 0.3, openCourt: 0.6,
+        approach: 0.7, serveVolley: 0.3, lob: 0.15, fhPref: 0.08, late: 0,
+        drop: 0.2, angle: 0.3, serveWide: 0.5,
+        patterns: ['behind', 'sideToSide', 'pressure'], attack: 1.4, err: 0.8,
       },
       colors: { main: '#ece6ff', glow: '#ffc23d', dark: '#3a2f63', accent: '#3fd2ff' },
     },

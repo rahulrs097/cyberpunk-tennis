@@ -208,6 +208,15 @@ test('the machine never returns a ball, and missing it is a failed rep', () => {
   assert.equal(g.match.games[0] + g.match.games[1], 0, 'the score never moves');
 });
 
+test('volley and smash drills: the player at the net hits the ball out of the air', () => {
+  const CT = loadEngine();
+  for (const [feed, kinds] of [['volley', ['volley', 'powerVolley']], ['smash', ['overhead']]]) {
+    const { ends } = drill(CT, { feed, wing: 'fh' }, true);
+    assert.equal(ends.length, 4);
+    assert.ok(ends.every((e) => e.ok === true && e.shot && kinds.includes(e.shot.kind)), feed + ' ' + JSON.stringify(ends));
+  }
+});
+
 test('serve drill: the player always serves, alternating courts', () => {
   const CT = loadEngine();
   const { ends } = drill(CT, { serve: true }, true);
