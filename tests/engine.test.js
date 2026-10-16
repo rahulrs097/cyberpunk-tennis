@@ -240,6 +240,40 @@ test('a snapshot carries the match to the guest', () => {
   assert.equal(guest.players[1].x, host.players[1].x);
 });
 
+// ---------------- bounce ----------------
+// One bounce of a ball arriving at `speed` m/s, `deg` below horizontal.
+function bounceOf(CT, speed, deg, spin) {
+  const a = (deg * Math.PI) / 180;
+  const b = Object.assign(CT.makeBall(), { vel: { x: 0, y: speed * Math.cos(a), z: -speed * Math.sin(a) }, spin });
+  CT.bounce(b);
+  return { keep: b.vel.y / (speed * Math.cos(a)), rest: b.vel.z / (speed * Math.sin(a)), spin: b.spin };
+}
+
+test('a flat ball bounces like a medium hard court (ITF test: 30 m/s at 16 degrees)', () => {
+  const CT = loadEngine();
+  const r = bounceOf(CT, 30, 16, 0);
+  assert.ok(r.rest > 0.78 && r.rest < 0.86, `vertical restitution ${r.rest}`);
+  assert.ok(r.keep > 0.62 && r.keep < 0.75, `keeps ${r.keep} of its pace`);
+});
+
+test('spin changes how much pace a bounce keeps, not how high it rebounds', () => {
+  const CT = loadEngine();
+  for (const [speed, deg] of [[25, 12], [18, 20], [9, 40]]) {
+    const top = bounceOf(CT, speed, deg, 0.8), flat = bounceOf(CT, speed, deg, 0), slice = bounceOf(CT, speed, deg, -0.5);
+    // (a fast, shallow ball slides right through, so slice and flat match there)
+    assert.ok(top.keep > flat.keep && flat.keep >= slice.keep && top.keep > slice.keep, `${speed} m/s at ${deg}: ${top.keep} ${flat.keep} ${slice.keep}`);
+    assert.equal(top.rest.toFixed(6), slice.rest.toFixed(6));
+  }
+});
+
+test('a steep slice checks, a steep topspin ball kicks on, and both leave with topspin', () => {
+  const CT = loadEngine();
+  const slice = bounceOf(CT, 9, 40, -0.55), top = bounceOf(CT, 9, 40, 1.3);
+  assert.ok(slice.keep < 0.4, `slice drop shot keeps ${slice.keep}`);
+  assert.ok(top.keep > 0.95, `topspin lob keeps ${top.keep}`);
+  for (const r of [slice, top, bounceOf(CT, 22, 11, -0.4)]) assert.ok(r.spin >= 0, `spin after the bounce ${r.spin}`);
+});
+
 // An online match over a link with `lag` seconds each way: the host runs the
 // match and sends a snapshot every 50 ms; the guest (side 1, automove on)
 // swings as the ball reaches its contact plane, the way a person on the guest
