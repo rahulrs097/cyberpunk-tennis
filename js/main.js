@@ -176,9 +176,9 @@
       put(row, 'games', String(m.games[side]), (v) => { q('.games').textContent = v; });
       put(row, 'pts', CT.pointLabel(m, side), (v) => { q('.pts').textContent = v; });
       put(row, 'serve', srv === side && !m.over ? 'visible' : 'hidden', (v) => { q('.serve').style.visibility = v; });
-      put(row, 'stam', p.stamina.toFixed(1) + '%', (v) => { q('.stam-fill').style.width = v; });
+      put(row, 'stam', Math.round(p.stamina), (v) => { q('.stam-fill').style.transform = `scaleX(${v / 100})`; });
       put(row, 'tired', p.stamina < 35, (v) => row.classList.toggle('tired', v));
-      put(row, 'cap', p.cap.toFixed(1) + '%', (v) => { q('.stam-cap').style.left = v; });
+      put(row, 'cap', Math.round(p.cap) + '%', (v) => { q('.stam-cap').style.left = v; });
       put(row, 'pc', p.ch.colors.glow, (v) => row.style.setProperty('--pc', v));
     }
     let call = CT.matchCallout(m) || (m.firstServe ? '' : 'Second serve');
