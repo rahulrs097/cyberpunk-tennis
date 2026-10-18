@@ -34,7 +34,7 @@
 
   function createRenderer(canvas) {
     return {
-      canvas, ctx: canvas.getContext('2d'),
+      canvas, ctx: canvas.getContext('2d', { alpha: false }),   // opaque: the sky covers every pixel, and the browser can skip blending the canvas
       view: 'chase',   // 'chase' or 'first'
       cam: { x: 0, y: -20, z: 6.4, lx: 0, ly: 0, lz: 0, f: 500, cx: 0, cy: 0, yaw: 0, pitch: 0, ready: false },
       W: 0, H: 0, dpr: 1, top: 92, bottom: 24, hudBottom: 0,

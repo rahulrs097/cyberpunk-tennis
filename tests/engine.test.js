@@ -137,6 +137,30 @@ test('a slow upward swipe lobs high and deep, and lands in', () => {
   assert.ok(CT.inSingles(fl.land.x, fl.land.y) && fl.land.y > CT.COURT.SL, 'deep and in');
 });
 
+// Swipe a lob `late` seconds after the ball reaches the contact plane.
+function lobLate(CT, input, late) {
+  let hit = null;
+  const g = CT.createGame({ p0: 'octopus', p1: 'philosopher', control: ['human', 'feeder'], autoMove: [true, false], timeScale: 0.65,
+    drill: { reps: 0, wing: 'fh' }, onEvent: (t, e) => { if (t === 'hit' && e.side === 0) hit = e; } });
+  const p = g.players[0];
+  let crossedAt = null;
+  for (let i = 0; i < 60 * 10 && !hit; i++) {
+    CT.updateGame(g, 1 / 60);
+    if (crossedAt === null && p.cross) crossedAt = g.wall;
+    if (crossedAt !== null && g.wall - crossedAt >= late) { CT.requestSwipe(g, 0, input); break; }
+  }
+  return hit;
+}
+
+test('a lob is timed from the middle of the slow swipe, so lifting the finger after contact is on time', () => {
+  const CT = loadEngine();
+  const lob = { aim: 0, pace: 0.2, spinDir: 1, curve: 0, depth: 1, lob: true };
+  const timed = lobLate(CT, { ...lob, lead: 0.15 }, 0.15);
+  assert.ok(timed && timed.spin === 'Lob' && timed.perfect, JSON.stringify(timed));
+  const noLead = lobLate(CT, lob, 0.15);
+  assert.ok(!noLead || !noLead.perfect, 'without the lead the same swipe is late');
+});
+
 test('a fast downward swipe still slices with real backspin', () => {
   const CT = loadEngine();
   for (const z of [0.8, 1.6]) {
