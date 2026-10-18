@@ -22,6 +22,8 @@
   let view = 'chase';  // camera: 'chase' (behind and above) or 'first' (your eyes)
   try { if (localStorage.getItem('ct.view') === 'first') view = 'first'; } catch (e) { /* storage is optional */ }
   let lastFrame = performance.now();
+  const FRAME_MS = 1000 / 60;
+  let frameDue = 0;
   let msgTimer = 0;
   let shotTimer = 0;
 
@@ -44,7 +46,7 @@
       intro: 'Swipe down to slice', pass: (d) => d.ok && d.shot && d.shot.spin === 'Slice' },
     { title: 'Drop shot', wing: 'fh', need: 1, hint: 'A short swipe drops the ball short. Land it in front of the service line',
       intro: 'A short swipe drops it short', pass: (d) => d.ok && d.y < CT.COURT.SL },
-    { title: 'Lob', wing: 'fh', need: 1, hint: 'Swipe up slowly over a third of the screen or more, taking about half a second',
+    { title: 'Lob', wing: 'fh', need: 1, hint: 'Swipe up slowly over a quarter of the screen or more, as the ball arrives',
       intro: 'A slow, long swipe up lobs', pass: (d) => d.ok && d.shot && d.shot.spin === 'Lob' },
     { title: 'Volley', feed: 'volley', wing: 'fh', need: 2, hint: 'At the net, swipe as the ring closes, before the ball bounces',
       intro: 'You\'re at the net: hit it out of the air', pass: (d) => d.ok && d.shot && /volley/i.test(d.shot.kind) },
@@ -153,20 +155,31 @@
 
   function setHint(text) { $('hint').textContent = text; }
 
+  // The HUD is refreshed every frame, but only what changed is written: a
+  // DOM write each frame makes the browser restyle the HUD each frame too.
+  const hudCache = new Map();
+  function put(el, key, value, write) {
+    const k = el.id + '|' + key;
+    if (hudCache.get(k) === value) return;
+    hudCache.set(k, value);
+    write(value);
+  }
+
   function updateHud() {
     const m = game.match;
     const srv = game.phase === 'preServe' || game.phase === 'toss' ? game.server : CT.currentServer(m);
     for (const side of [0, 1]) {
       const p = game.players[side];
       const row = $('row' + (side === me ? 0 : 1));
-      row.querySelector('.name').textContent = p.ch.name + (side === me ? ' (you)' : '') + (p.stamina < 35 ? ' · tired' : '');
-      row.querySelector('.games').textContent = m.games[side];
-      row.querySelector('.pts').textContent = CT.pointLabel(m, side);
-      row.querySelector('.serve').style.visibility = srv === side && !m.over ? 'visible' : 'hidden';
-      row.querySelector('.stam-fill').style.width = p.stamina.toFixed(1) + '%';
-      row.classList.toggle('tired', p.stamina < 35);
-      row.querySelector('.stam-cap').style.left = p.cap.toFixed(1) + '%';
-      row.style.setProperty('--pc', p.ch.colors.glow);
+      const q = (sel) => row.querySelector(sel);
+      put(row, 'name', p.ch.name + (side === me ? ' (you)' : '') + (p.stamina < 35 ? ' · tired' : ''), (v) => { q('.name').textContent = v; });
+      put(row, 'games', String(m.games[side]), (v) => { q('.games').textContent = v; });
+      put(row, 'pts', CT.pointLabel(m, side), (v) => { q('.pts').textContent = v; });
+      put(row, 'serve', srv === side && !m.over ? 'visible' : 'hidden', (v) => { q('.serve').style.visibility = v; });
+      put(row, 'stam', p.stamina.toFixed(1) + '%', (v) => { q('.stam-fill').style.width = v; });
+      put(row, 'tired', p.stamina < 35, (v) => row.classList.toggle('tired', v));
+      put(row, 'cap', p.cap.toFixed(1) + '%', (v) => { q('.stam-cap').style.left = v; });
+      put(row, 'pc', p.ch.colors.glow, (v) => row.style.setProperty('--pc', v));
     }
     let call = CT.matchCallout(m) || (m.firstServe ? '' : 'Second serve');
     // the serve clock shows for its last 10 seconds
@@ -175,7 +188,7 @@
       if (left <= 10) call = 'Serve clock ' + Math.max(0, Math.ceil(left)) + (call ? ' · ' + call : '');
     }
     if (tut) { const L = LESSONS[tut.i]; call = `Lesson ${tut.i + 1}/${LESSONS.length} · ${L.title} · ${Math.min(tut.done, L.need)}/${L.need}`; }
-    $('callout').textContent = call;
+    put($('callout'), 'text', call, (v) => { $('callout').textContent = v; });
   }
 
   function hintForState() {
@@ -308,6 +321,10 @@
 
   // Turn a finger path into a shot: direction = aim, speed = pace vs spin,
   // up = topspin, down = slice, a bowed path = sidespin.
+  // A lob: an upward swipe at least LOB_LEN screens long, averaging under
+  // LOB_SPEED screens a second.
+  const LOB_LEN = 0.22, LOB_SPEED = 1.4;
+
   function handleSwipe(pts, dx, dy, chord, dur) {
     const end = pts[pts.length - 1];
     let k = pts.length - 1;
@@ -326,7 +343,7 @@
     // swipe, not its tail: fingers speed up as they let go, so a deliberate
     // slow swipe still ends with a flick.
     const dim = Math.min(window.innerWidth, window.innerHeight);
-    const lob = spinDir > 0 && (chord / dur) * 1000 / dim < 1.0 && chord / dim >= 0.3;
+    const lob = spinDir > 0 && (chord / dur) * 1000 / dim < LOB_SPEED && chord / dim >= LOB_LEN;
     let aim = Math.atan2(dx, Math.abs(dy));
     // bow of the path, measured towards screen-right
     let nx = -dy / chord, ny = dx / chord;
@@ -342,6 +359,11 @@
     // A slice is swiped the other way: top-left to bottom-right goes left.
     if (spinDir < 0) aim = -aim;
     const input = { aim, pace, over, spinDir, curve, depth, landX: pointAt(aim), lob };
+    // A slow swipe is still going when the ball arrives: its timing counts
+    // from partway through, not from when the finger lifts.
+    // And it always goes deep, however long the swipe: a short lob is just a
+    // smash for them.
+    if (lob) { input.lead = dur / 2000; input.depth = 1; }
     if (isGuest()) {
       // judge timing here, against the ball this player saw, play the shot
       // on this screen straight away, then send it to the host
@@ -539,6 +561,10 @@
   }
 
   function frame(now) {
+    // 60 frames a second at most: a 90 or 120 Hz phone would otherwise draw
+    // the whole scene up to twice as often for little gain
+    if (now < frameDue - 2) { requestAnimationFrame(frame); return; }
+    frameDue = now - frameDue > 50 ? now + FRAME_MS : frameDue + FRAME_MS;
     const dt = Math.min(0.05, (now - lastFrame) / 1000);
     lastFrame = now;
     // an online match can't be paused: the pause menu just sits over it

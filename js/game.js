@@ -2,7 +2,7 @@
 // Side 0 plays from the bottom of the screen (y < 0), side 1 from the top.
 // Inputs come in through requestMove / requestToss / requestSwipe so a network
 // controller can drive either side later; the CPU uses the same shot pipeline.
-// The only randomness in the game is in cpuChooseShot / cpuChooseServe.
+// The only randomness in the game is in the CPU (cpuChooseShot, cpuChooseServe, cpuHit).
 (function () {
   const CT = (window.CT = window.CT || {});
   const { COURT, PHYS, clamp, lerp } = CT;
@@ -14,6 +14,11 @@
   const ACCEL = 8;              // m/s² from a standstill to top speed
   const AIM_FULL = 0.6;         // a swipe this many radians off straight aims at the sideline
   const NET_ZONE = 7.5;
+  // A lob is a slow swipe: its timing is judged up to LOB_LEAD seconds before
+  // the finger lifts (input.lead), and it forgives LOB_EASE times as much mistiming.
+  const LOB_LEAD = 0.18;
+  const LOB_EASE = 1.5;
+  const CPU_EARLY = 0.45;        // share of the CPU's mistimed shots that are early rather than late
   // Between points you get back this share of what you're missing (more at a
   // changeover), so long rallies leave you tired for the next few points.
   const STAMINA_POINT = 0.3;
@@ -261,6 +266,15 @@
     return p.ch.window[wing] * (0.55 + 0.45 * staminaF(p));
   }
 
+  // How much earlier than the finger lifted a swipe's timing counts from.
+  function swingLead(input) {
+    return input && input.lob && Number.isFinite(input.lead) ? clamp(input.lead, 0, LOB_LEAD) : 0;
+  }
+  // The widest timing window p has for this swipe (more for a lob).
+  function outerWindow(p, input) {
+    return OUTER * Math.max(windowFor(p, 'fh'), windowFor(p, 'bh')) * (input && input.lob ? LOB_EASE : 1);
+  }
+
   function canReach(g, p) {
     const b = g.ball;
     return Math.abs(b.pos.x - p.x) <= p.ch.reach &&
@@ -310,7 +324,8 @@
     else if (pos.z >= POWER_Z) kind = 'power';
     else kind = 'ground';
 
-    const W = windowFor(p, wing);
+    const isLob = !!input.lob && kind !== 'serve' && kind !== 'overhead';
+    const W = windowFor(p, wing) * (isLob ? LOB_EASE : 1);
     // Where you are matters as well as when you swing: a ball jammed into
     // your body, one at full stretch, or one hit on the run is harder to
     // strike cleanly, so it counts as extra mistiming.
@@ -373,16 +388,12 @@
     const lobUp = lerp(13, 15, clamp(input.pace, 0, 1));
     const solveLob = (ang, along, up) => {
       const dir = { x: fwd * Math.sin(ang), y: fwd * Math.cos(ang) }, dist = Math.max(1.5, along) / Math.cos(ang);
-      let lo = 2, hi = 25, r = null;
-      for (let i = 0; i < 22; i++) {
-        const mid = (lo + hi) / 2;
-        r = CT.flight(pos, { x: dir.x * mid, y: dir.y * mid, z: up }, spin, side);
-        if ((r.land.x - pos.x) * dir.x + (r.land.y - pos.y) * dir.y < dist) lo = mid; else hi = mid;
-      }
-      const v = (lo + hi) / 2;
-      return { vel: { x: dir.x * v, y: dir.y * v, z: up }, landing: CT.flight(pos, { x: dir.x * v, y: dir.y * v, z: up }, spin, side) };
+      const s = CT.findRoot((v) => {
+        const r = CT.flight(pos, { x: dir.x * v, y: dir.y * v, z: up }, spin, side);
+        return { f: (r.land.x - pos.x) * dir.x + (r.land.y - pos.y) * dir.y - dist, r };
+      }, 2, 25, 0.01, true);
+      return { vel: { x: dir.x * s.x, y: dir.y * s.x, z: up }, landing: s.r };
     };
-    const isLob = !!input.lob && kind !== 'serve' && kind !== 'overhead';
     let target = depthLine - margin;
     let sol;
     if (kind === 'serve') {
@@ -505,8 +516,9 @@
       return;
     }
     if (!incomingTo(g, p)) return;
-    const Wout = OUTER * Math.max(windowFor(p, 'fh'), windowFor(p, 'bh'));
+    const Wout = outerWindow(p, input), lead = swingLead(input);
     if (given) {
+      errOverride -= lead;
       if (errOverride > Wout) { emit(g, 'whiff', { side, reason: 'Too late' }); return; }
       if (errOverride < -Wout) { emit(g, 'whiff', { side, reason: 'Too early' }); return; }
       // the ball may already have reached them here while the swipe was in flight
@@ -515,15 +527,16 @@
       return;
     }
     if (p.cross && p.cross.t >= g.lastHitT) {
-      const err = (g.time - p.cross.t) / g.timeScale;
+      const err = (g.time - p.cross.t) / g.timeScale - lead;
       if (err <= Wout) { tryHit(g, p, input, err); return; }
       emit(g, 'whiff', { side, reason: 'Too late' });
       return;
     }
     const c = predictCross(g, p, 3);
     if (!c) { emit(g, 'whiff', { side, reason: 'Nothing to hit' }); return; }
-    if (c.t / g.timeScale > Wout) { emit(g, 'whiff', { side, reason: 'Too early' }); return; }
-    p.pending = { t: g.time, input };
+    if (c.t / g.timeScale + lead > Wout) { emit(g, 'whiff', { side, reason: 'Too early' }); return; }
+    // (timed from `lead` before now, so the lateness worked out at contact counts from then)
+    p.pending = { t: g.time - lead * g.timeScale, input };
   }
 
   // The ball `dt` seconds of game time after state `b`, or null if it bounces
@@ -592,7 +605,8 @@
       return;
     }
     if (!incomingTo(g, p)) return;
-    const Wout = OUTER * Math.max(windowFor(p, 'fh'), windowFor(p, 'bh'));
+    const Wout = outerWindow(p, input);
+    err -= swingLead(input);
     if (Math.abs(err) > Wout) return;
     if (p.cross && p.cross.t >= g.lastHitT) predictHit(g, p, input, err);
     else p.pending = { t: g.time, input, err };   // hit it as it reaches them (stepRemote)
@@ -770,6 +784,10 @@
       tx = -Math.sign(opp.dirX) * edge * rand(0.5, 0.75);   // back where they came from
     } else if (Math.random() < T.weakWing + smart * 0.2) {
       tx = weakSide * edge * rand(0.55, 0.9);     // at the weaker wing
+    } else if (Math.abs(c.x) > 0.8 && Math.random() < T.cross) {
+      // the rally ball: cross-court, over the low middle of the net and
+      // into the longest stretch of court
+      tx = -Math.sign(c.x) * edge * rand(0.45, 0.9);
     } else {
       tx = rand(-edge, edge) * 0.8;
     }
@@ -834,11 +852,15 @@
     let input = null;
     for (let i = 0; i < 8; i++) {
       // the aim that lands closest to the target, among those that land in
-      let best = null;
-      for (let aim = -0.8; aim <= 0.81; aim += 0.1) {
+      // (the landing moves steadily with the aim, so home in on it rather
+      // than trying every aim: a few solves instead of seventeen)
+      let best = null, lo = -0.8, hi = 0.8;
+      for (let k = 0; k < 7; k++) {
+        const aim = (lo + hi) / 2;
         const inp = { aim, pace, over: 0, spinDir, curve };
         const shot = computeShot(g, c, inp, 0);
         const land = CT.flight(shot.pos, shot.vel, shot.spin, shot.side).land;
+        if (c.fwd * (land.x - target) < 0) lo = aim; else hi = aim;
         if (!inBox(land)) continue;
         const d = Math.abs(land.x - target);
         if (!best || d < best.d) best = { d, inp };
@@ -855,7 +877,8 @@
     return input;
   }
 
-  // Deterministic lateness from being rushed or tired, in seconds.
+  // How far off its timing the CPU is from being rushed or tired, in seconds
+  // (cpuHit picks whether that's early or late).
   // `pace` is the pace the CPU chose for this shot: going big is riskier.
   function cpuTimingError(g, c, wing, pace) {
     const slack = c.plan ? c.plan.slack : 0;
@@ -878,7 +901,10 @@
   function cpuHit(g, c) {
     const input = cpuChooseShot(g, c);
     const wing = (g.ball.pos.x - c.x) * c.fwd >= -0.05 ? 'fh' : 'bh';
-    const err = cpuTimingError(g, c, wing, input.pace);
+    // Mistiming goes both ways: a late forehand is pushed to the hitter's
+    // right and an early one pulled across to the left (the other way round
+    // on the backhand). Always late, every rally ball drifted back down the line.
+    const err = cpuTimingError(g, c, wing, input.pace) * (Math.random() < CPU_EARLY ? -1 : 1);
     let shot = computeShot(g, c, input, err);
     const fl = CT.flight(shot.pos, shot.vel, shot.spin, shot.side);
     const goesIn = fl.netClear > 0 && c.fwd * fl.land.y > 0 && CT.inSingles(fl.land.x, fl.land.y);
@@ -1251,9 +1277,9 @@
   // loose player beats Chill, an average one usually beats Club, and Pro
   // takes sharp timing.
   CT.CPU_LEVELS = {
-    chill: { timeScale: 0.65, err: 1.5, react: 0.36, cover: 0.1, speed: 0.8, pace: 0.75, depth: 0.75, attack: 0, smart: 0.15 },
-    club: { timeScale: 0.8, err: 1.08, react: 0.26, cover: 0.2, speed: 0.9, pace: 0.86, depth: 0.88, attack: 0.15, smart: 0.55 },
-    pro: { timeScale: 1, err: 0.72, react: 0.14, cover: 0.38, speed: 1, pace: 1, depth: 1, attack: 0.3, smart: 1 },
+    chill: { timeScale: 0.65, err: 1.9, react: 0.36, cover: 0.1, speed: 0.8, pace: 0.75, depth: 0.75, attack: 0, smart: 0.15 },
+    club: { timeScale: 0.8, err: 1.3, react: 0.26, cover: 0.2, speed: 0.9, pace: 0.86, depth: 0.88, attack: 0.15, smart: 0.55 },
+    pro: { timeScale: 1, err: 0.85, react: 0.14, cover: 0.38, speed: 1, pace: 1, depth: 1, attack: 0.3, smart: 1 },
   };
   CT.levelOpts = (level) => {
     const L = CT.CPU_LEVELS[level];

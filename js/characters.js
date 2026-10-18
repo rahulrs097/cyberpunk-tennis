@@ -30,7 +30,7 @@
       tactics: {
         pace: [0.6, 0.8], safe: 0.75, slice: 0.08, weakWing: 0.35, openCourt: 0.4,
         approach: 0, serveVolley: 0, lob: 0.35, fhPref: -0.05, late: 0.05,
-        drop: 0.03, angle: 0.08, serveWide: 0.25,
+        drop: 0.03, angle: 0.08, serveWide: 0.25, cross: 0.85,
         patterns: ['pressure', 'pressure', 'sideToSide'], attack: 0.6, err: 0.9,
       },
       colors: { main: '#8f5bff', glow: '#28f0d6', dark: '#2a1257', accent: '#ff3fa4' },
@@ -60,7 +60,7 @@
       tactics: {
         pace: [0.55, 0.9], safe: 0.85, slice: 0.12, weakWing: 0.3, openCourt: 0.6,
         approach: 0.7, serveVolley: 0.3, lob: 0.15, fhPref: 0.08, late: 0,
-        drop: 0.2, angle: 0.3, serveWide: 0.5,
+        drop: 0.2, angle: 0.3, serveWide: 0.5, cross: 0.75,
         patterns: ['behind', 'sideToSide', 'pressure'], attack: 1.4, err: 0.8,
       },
       colors: { main: '#ece6ff', glow: '#ffc23d', dark: '#3a2f63', accent: '#3fd2ff' },

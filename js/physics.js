@@ -77,7 +77,7 @@
   // skids through. Nearly every ball leaves the court with topspin.
   function bounce(b) {
     const v = b.vel;
-    const vh = Math.hypot(v.x, v.y), vzIn = -v.z;
+    const vh = Math.sqrt(v.x * v.x + v.y * v.y), vzIn = -v.z;
     const wr = spinToSurface(b.spin, vh);
     const u = vh - wr;                                  // contact patch slip
     const toRoll = PHYS.ALPHA * u / (1 + PHYS.ALPHA);
@@ -93,8 +93,10 @@
   // Advance one fixed step. Returns 'bounce', 'net' or null.
   function stepBall(b, dt, opts) {
     const v = b.vel, p = b.pos;
-    const sp = Math.hypot(v.x, v.y, v.z);
-    const vh = Math.hypot(v.x, v.y);
+    // (sqrt, not Math.hypot: this runs thousands of times per shot solved,
+    // and hypot is several times slower)
+    const h2 = v.x * v.x + v.y * v.y;
+    const vh = Math.sqrt(h2), sp = Math.sqrt(h2 + v.z * v.z);
     let ax = -PHYS.K_DRAG * sp * v.x;
     let ay = -PHYS.K_DRAG * sp * v.y;
     let az = -PHYS.G - PHYS.K_DRAG * sp * v.z;
@@ -147,31 +149,41 @@
     return { land: { x: b.pos.x, y: b.pos.y }, t, netClear };
   }
 
+  // Find x in [lo, hi] where an increasing f(x) crosses zero, by regula
+  // falsi (Illinois): a handful of flights instead of a long bisection.
+  // fr(x) returns { f, r }. It stops once 0 <= f < tol (or |f| < tol when
+  // `either` is set), and returns the point found with its result r. When
+  // there's no crossing it returns the nearer end, as a bisection would.
+  function findRoot(fr, lo, hi, tol, either) {
+    let A = fr(lo), B = fr(hi);
+    if (A.f >= 0) return { x: lo, r: A.r };
+    if (B.f < 0) return { x: hi, r: B.r };
+    let a = lo, b = hi, fa = A.f, fb = B.f, last = 0;
+    for (let i = 0; i < 40 && b - a > 1e-6; i++) {
+      let x = (a * fb - b * fa) / (fb - fa);
+      if (!(x > a && x < b)) x = (a + b) / 2;
+      const X = fr(x);
+      if (X.f >= 0 ? X.f < tol : either && -X.f < tol) return { x, r: X.r };
+      if (X.f < 0) { a = x; fa = X.f; if (last < 0) fb /= 2; last = -1; } else { b = x; fb = X.f; B = X; if (last > 0) fa /= 2; last = 1; }
+    }
+    return { x: b, r: B.r };
+  }
+
   // Find the vertical launch speed that sends a ball with horizontal speed
-  // `speedH` along `dir` to land `dist` metres away, clearing the net by at
-  // least `minClear`. If the net forces a higher launch the ball lands longer.
+  // `speedH` along `dir` to land `dist` metres away (to within a centimetre),
+  // clearing the net by at least `minClear`. If the net forces a higher
+  // launch the ball lands longer.
   function solveLaunch(pos, dir, speedH, spin, side, dist, minClear) {
     const vx = dir.x * speedH, vy = dir.y * speedH;
     const along = (r) => (r.land.x - pos.x) * dir.x + (r.land.y - pos.y) * dir.y;
-    let lo = -15, hi = Math.max(2, Math.min(20, speedH * 0.95));
-    for (let i = 0; i < 24; i++) {
-      const mid = (lo + hi) / 2;
-      const r = flight(pos, { x: vx, y: vy, z: mid }, spin, side);
-      if (along(r) < dist) lo = mid; else hi = mid;
+    const fly = (vz) => flight(pos, { x: vx, y: vy, z: vz }, spin, side);
+    let s = findRoot((vz) => { const r = fly(vz); return { f: along(r) - dist, r }; },
+      -15, Math.max(2, Math.min(20, speedH * 0.95)), 0.01, true);
+    if (s.r.netClear < minClear) {
+      s = findRoot((vz) => { const r = fly(vz); return { f: r.netClear - minClear, r }; },
+        s.x, Math.max(s.x + 0.01, Math.min(24, speedH * 1.1)), 0.002, false);
     }
-    let vz = (lo + hi) / 2;
-    let r = flight(pos, { x: vx, y: vy, z: vz }, spin, side);
-    if (r.netClear < minClear) {
-      let a = vz, bTop = Math.max(vz + 0.01, Math.min(24, speedH * 1.1));
-      for (let i = 0; i < 22; i++) {
-        const mid = (a + bTop) / 2;
-        const rr = flight(pos, { x: vx, y: vy, z: mid }, spin, side);
-        if (rr.netClear < minClear) a = mid; else bTop = mid;
-      }
-      vz = bTop;
-      r = flight(pos, { x: vx, y: vy, z: vz }, spin, side);
-    }
-    return { vel: { x: vx, y: vy, z: vz }, landing: r };
+    return { vel: { x: vx, y: vy, z: s.x }, landing: s.r };
   }
 
   function inSingles(x, y) {
@@ -194,6 +206,7 @@
   CT.bounce = bounce;
   CT.flight = flight;
   CT.solveLaunch = solveLaunch;
+  CT.findRoot = findRoot;
   CT.inSingles = inSingles;
   CT.inServiceBox = inServiceBox;
   CT.clamp = (v, a, b) => Math.max(a, Math.min(b, v));
