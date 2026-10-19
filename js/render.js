@@ -385,10 +385,10 @@
   }
 
   // ---------------- sky billboard ----------------
-  // A neon sign floating over the far left of the skyline. It shows a photo
-  // and the player's tag, and flashes a word when something happens
-  // (CT.showBillboard).
-  const BOARD = { x: -21, y: 40, z: 4, w: 17, h: 5.2, tag: 'HHORNS' };
+  // A neon sign over the middle of the skyline, above the far player, so it
+  // sits in the open sky on a phone held upright. It shows a photo and the
+  // player's tag, and flashes a word when something happens (CT.showBillboard).
+  const BOARD = { x: 0, y: 40, z: 5.5, w: 17, h: 5.2, tag: 'HHORNS' };
   const BOARD_TEX = { w: 520, h: 168 };
 
   // Between words the sign shows a photo that slowly slides up and down.
