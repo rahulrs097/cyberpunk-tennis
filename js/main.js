@@ -202,7 +202,7 @@
 
   // ---------------- game events ----------------
   // the sky billboard's word for a point, by how it ended
-  const BOARD_WORDS = { Ace: ['ACE', '#e4ff4a'], Winner: ['WINNER', '#e4ff4a'], Out: ['OOPS', '#ff3f6c'], Net: ['OOPS', '#ff3f6c'], 'Double fault': ['OOPS', '#ff3f6c'] };
+  const BOARD_WORDS = { Ace: ['YEAH!!', '#e4ff4a'], Winner: ['OMG!!', '#e4ff4a'], Out: ['OOPS', '#ff3f6c'], Net: ['OOPS', '#ff3f6c'], 'Double fault': ['OOPS', '#ff3f6c'] };
   const LONG_RALLY = 8;   // shots in a rally that get a WOW
   let rallyShots = 0;
 
