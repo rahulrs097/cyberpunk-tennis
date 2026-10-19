@@ -384,6 +384,77 @@
     for (; ox < r.W; ox += sw) ctx.drawImage(r.sky, ox, oy, sw, r.skyH);
   }
 
+  // ---------------- sky billboard ----------------
+  // A neon sign floating over the far left of the skyline. It shows the
+  // player's tag and flashes a word when something happens (CT.showBillboard).
+  const BOARD = { x: -21, y: 40, z: 4, w: 17, h: 5.2, tag: 'HHORNS' };
+  const BOARD_TEX = { w: 520, h: 168 };
+
+  // what the sign says now: the latest word until it expires, else the tag
+  function boardText(r, now) {
+    const b = r.board;
+    return b && now < b.until ? b : { text: BOARD.tag, color: '#25d9ff', from: 0 };
+  }
+
+  function boardTexture(r, text, color) {
+    const t = r.boardTex || (r.boardTex = document.createElement('canvas'));
+    // rebuilt once the display font has loaded
+    const key = text + color + (document.fonts && document.fonts.check('900 20px Tektur') ? 1 : 0);
+    if (t.key === key) return t;
+    t.key = key;
+    const W = BOARD_TEX.w, H = BOARD_TEX.h;
+    t.width = W; t.height = H;
+    const ctx = t.getContext('2d');
+    ctx.fillStyle = 'rgba(8,6,22,0.82)';
+    ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = '#ff3fb4'; ctx.lineWidth = 6;
+    ctx.shadowColor = '#ff3fb4'; ctx.shadowBlur = 14;
+    ctx.strokeRect(8, 8, W - 16, H - 16);
+    let size = 104;
+    ctx.font = `900 ${size}px Tektur, sans-serif`;
+    const fit = (W - 70) / ctx.measureText(text).width;
+    if (fit < 1) { size = Math.floor(size * fit); ctx.font = `900 ${size}px Tektur, sans-serif`; }
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.shadowColor = color; ctx.shadowBlur = 22;
+    ctx.fillStyle = color;
+    ctx.fillText(text, W / 2, H / 2 + 4);
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = 'rgba(255,255,255,0.75)';   // hot core of the neon
+    ctx.fillText(text, W / 2, H / 2 + 4);
+    return t;
+  }
+
+  function drawBillboard(ctx, r) {
+    const B = BOARD, x0 = B.x - B.w / 2, x1 = B.x + B.w / 2, z1 = B.z + B.h;
+    const tl = proj(r, x0, B.y, z1), tr = proj(r, x1, B.y, z1), bl = proj(r, x0, B.y, B.z);
+    if (tl.behind || tr.behind || bl.behind) return;
+    if (Math.max(tl.x, tr.x) < 0 || Math.min(tl.x, tr.x) > r.W) return;
+    const now = performance.now() / 1000;
+    const cur = boardText(r, now);
+    // a new word flickers on, then hums
+    const age = now - cur.from;
+    const on = age < 0.35 ? (Math.floor(age * 24) % 2 ? 0.25 : 1) : 0.88 + 0.12 * Math.sin(now * 3);
+    // the pylon it stands on, down into the skyline
+    const pb = proj(r, B.x, B.y, 0), pt = proj(r, B.x, B.y, B.z);
+    ctx.strokeStyle = '#1c1b2a'; ctx.lineWidth = Math.max(2, (bl.s || 0) * 0.5);
+    ctx.beginPath(); ctx.moveTo(pb.x, pb.y); ctx.lineTo(pt.x, pt.y); ctx.stroke();
+    const tex = boardTexture(r, cur.text, cur.color);
+    const d = r.dpr, W = BOARD_TEX.w, H = BOARD_TEX.h;
+    ctx.save();
+    ctx.globalAlpha = on;
+    ctx.imageSmoothingQuality = 'high';
+    // the sign is far off and faces the court, so an affine map from its
+    // three corners is close enough to true perspective
+    ctx.setTransform(d * (tr.x - tl.x) / W, d * (tr.y - tl.y) / W, d * (bl.x - tl.x) / H, d * (bl.y - tl.y) / H, d * tl.x, d * tl.y);
+    ctx.drawImage(tex, 0, 0);
+    ctx.restore();
+  }
+
+  // Flash a word on the billboard for `secs` seconds.
+  function showBillboard(r, text, color, secs) {
+    r.board = { text, color: color || '#e4ff4a', from: performance.now() / 1000, until: performance.now() / 1000 + (secs || 2.5) };
+  }
+
   // ---------------- the lot ----------------
   const LAMPS = [[-7.7, 16.5, '#ffb04a'], [7.7, 16.5, '#ffb04a'], [-7.7, 3, '#ff4fc0'], [7.7, -3, '#3fdcff'], [-7.7, -12, '#ffb04a'], [7.7, -15, '#ffb04a']];
   const STALL_IN = 8.0, STALL_OUT = 13.2, STALL_W = 2.6;
@@ -792,6 +863,7 @@
     const ctx = r.ctx;
     ctx.setTransform(r.dpr, 0, 0, r.dpr, 0, 0);
     drawSky(ctx, r);
+    drawBillboard(ctx, r);
     drawLot(ctx, r);
     drawCourt(ctx, r);
 
@@ -823,6 +895,7 @@
   CT.resizeRenderer = resize;
   CT.setView = setView;
   CT.renderGame = render;
+  CT.showBillboard = showBillboard;
   CT.unproject = unproject;
   CT.project = proj;
 })();

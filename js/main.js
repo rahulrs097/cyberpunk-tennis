@@ -201,9 +201,16 @@
   }
 
   // ---------------- game events ----------------
+  // the sky billboard's word for a point, by how it ended
+  const BOARD_WORDS = { Ace: ['ACE', '#e4ff4a'], Winner: ['WINNER', '#e4ff4a'], Out: ['OOPS', '#ff3f6c'], Net: ['OOPS', '#ff3f6c'], 'Double fault': ['OOPS', '#ff3f6c'] };
+  const LONG_RALLY = 8;   // shots in a rally that get a WOW
+  let rallyShots = 0;
+
   function onEvent(type, d) {
     const names = game ? game.players.map((p) => p.ch.name) : ['', ''];
     if (type === 'hit') {
+      rallyShots = d.kind === 'serve' ? 1 : rallyShots + 1;
+      if (!tut && (rallyShots === LONG_RALLY || (d.perfect && d.side === me && /power|overhead/i.test(d.kind)))) CT.showBillboard(renderer, 'WOW', '#ff3fb4', 1.8);
       blip(d.kind === 'overhead' || d.kind === 'serve' ? 220 : 330, 0.07, 'square', 0.09, 140);
       if (d.side === me) {
         const kind = { fh: 'Forehand', bh: 'Backhand' }[d.wing];
@@ -232,6 +239,8 @@
       if (d.result === 'game') sub = names[d.winner] + ' takes the game';
       if (d.result === 'set') sub = names[d.winner] + ' wins the set';
       showMsg(d.text, sub, youWon ? 'good' : 'bad');
+      const word = BOARD_WORDS[d.text];
+      if (word) CT.showBillboard(renderer, word[0], word[1], 2.6);
       blip(youWon ? 520 : 200, 0.25, 'triangle', 0.08, youWon ? 780 : 120);
       updateHud();
     } else if (type === 'serveReady') {
