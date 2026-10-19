@@ -18,7 +18,9 @@
   // the finger lifts (input.lead), and it forgives LOB_EASE times as much mistiming.
   const LOB_LEAD = 0.18;
   const LOB_EASE = 1.5;
-  const CPU_EARLY = 0.45;        // share of the CPU's mistimed shots that are early rather than late
+  const CPU_EARLY = 0.45;
+  // Auto-moving players still run at a ball landing this far (m) out, and let it go.
+  const CHASE_OUT = 1;        // share of the CPU's mistimed shots that are early rather than late
   // Between points you get back this share of what you're missing (more at a
   // changeover), so long rallies leave you tired for the next few points.
   const STAMINA_POINT = 0.3;
@@ -482,8 +484,20 @@
     emit(g, 'hit', info);
   }
 
+  // A swing that misses still plays the stroke, on the side the ball is on
+  // (at = where it would have been met; defaults to where the ball is now).
+  function swingMiss(g, p, reason, at) {
+    const x = at ? at.x : g.ball.pos.x, z = at ? at.z : g.ball.pos.z;
+    const px = at && at.px !== undefined ? at.px : p.x;   // (a late swing: where they were as it passed)
+    if (p.swing < 0) {
+      p.swing = 0;
+      p.swingWing = z >= p.ch.overheadZ ? 'oh' : (x - px) * p.fwd >= -0.05 ? 'fh' : 'bh';
+    }
+    emit(g, 'whiff', { side: p.side, reason });
+  }
+
   function tryHit(g, p, input, err) {
-    if (!canReach(g, p)) { emit(g, 'whiff', { side: p.side, reason: 'Out of reach' }); return false; }
+    if (!canReach(g, p)) { swingMiss(g, p, 'Out of reach'); return false; }
     const shot = computeShot(g, p, input, err);
     applyShot(g, p, shot);
     return true;
@@ -519,8 +533,8 @@
     const Wout = outerWindow(p, input), lead = swingLead(input);
     if (given) {
       errOverride -= lead;
-      if (errOverride > Wout) { emit(g, 'whiff', { side, reason: 'Too late' }); return; }
-      if (errOverride < -Wout) { emit(g, 'whiff', { side, reason: 'Too early' }); return; }
+      if (errOverride > Wout) { swingMiss(g, p, 'Too late', p.cross); return; }
+      if (errOverride < -Wout) { swingMiss(g, p, 'Too early', predictCross(g, p, 3)); return; }
       // the ball may already have reached them here while the swipe was in flight
       if (p.cross && p.cross.t >= g.lastHitT) hitAsSeen(g, p, input, errOverride);
       else p.pending = { t: g.time, input, err: errOverride };
@@ -529,12 +543,12 @@
     if (p.cross && p.cross.t >= g.lastHitT) {
       const err = (g.time - p.cross.t) / g.timeScale - lead;
       if (err <= Wout) { tryHit(g, p, input, err); return; }
-      emit(g, 'whiff', { side, reason: 'Too late' });
+      swingMiss(g, p, 'Too late', p.cross);
       return;
     }
     const c = predictCross(g, p, 3);
     if (!c) { emit(g, 'whiff', { side, reason: 'Nothing to hit' }); return; }
-    if (c.t / g.timeScale + lead > Wout) { emit(g, 'whiff', { side, reason: 'Too early' }); return; }
+    if (c.t / g.timeScale + lead > Wout) { swingMiss(g, p, 'Too early', c); return; }
     // (timed from `lead` before now, so the lateness worked out at contact counts from then)
     p.pending = { t: g.time - lead * g.timeScale, input };
   }
@@ -561,7 +575,7 @@
     const at = p.cross;
     const contactT = at.t + Math.max(0, err) * g.timeScale;
     const b = rewound(at.ball, Math.max(0, err) * g.timeScale);
-    if (!b) { emit(g, 'whiff', { side: p.side, reason: 'Too late' }); return; }
+    if (!b) { swingMiss(g, p, 'Too late', at); return; }
     const x = p.x, y = p.y, now = g.ball;
     g.ball = b; p.x = at.px; p.y = at.py;
     const hit = tryHit(g, p, input, err);
@@ -655,7 +669,7 @@
     const speed = moveSpeed(c);
     let t = 0, bounces = b.bounces;
     const cands = [];
-    let step = 0;
+    let step = 0, letGo = false;
     while (t < 4.5) {
       const ev = CT.stepBall(b, PHYS.DT);
       t += PHYS.DT; step++;
@@ -664,7 +678,11 @@
         if (bounces === 0) {
           const onMySide = fwd * b.pos.y < 0;
           const good = g.ball.isServe ? CT.inServiceBox(b.pos.x, b.pos.y, g.serveBox) : CT.inSingles(b.pos.x, b.pos.y);
-          if (!onMySide || !good) { cpuRecover(g, c); c.leaving = true; return; }
+          if (!onMySide || (!good && outBy(b.pos.x, b.pos.y, g.ball.isServe && g.serveBox) > CHASE_OUT)) {
+            cpuRecover(g, c); c.leaving = true; return;
+          }
+          // just out: it looks playable for a while, so run at it, then let it go
+          if (!good) letGo = true;
         }
         bounces++;
         if (bounces >= 2) break;
@@ -672,6 +690,7 @@
       if (step % 3) continue;
       if (fwd * b.pos.y >= 0 || fwd * b.vel.y >= 0) continue;
       const bounced = bounces > 0;
+      if (letGo && !bounced) continue;   // don't stand in its way and volley it
       const z = b.pos.z;
       if (bounced) { if (z < 0.25 || z > ch.maxZ) continue; }
       else {
@@ -702,13 +721,23 @@
         cands.push({ t, x: px, y: py, z, slack, q, wing });
       }
     }
-    c.leaving = false;
-    if (!cands.length) { cpuRecover(g, c); return; }
+    c.leaving = letGo;
+    if (!cands.length) { cpuRecover(g, c); c.leaving = letGo; return; }
     let best = null;
     for (const k of cands) if (k.slack >= 0.15 && (!best || k.q > best.q)) best = k;
     if (!best) for (const k of cands) if (!best || k.slack > best.slack) best = k;
     c.plan = best;
     c.tx = best.x; c.ty = best.y;
+  }
+
+  // How far (m) a bounce at x, y lands outside the singles court, or outside
+  // the service box `box` when given.
+  function outBy(x, y, box) {
+    if (box) {
+      const sx = box.sign * x;
+      return Math.hypot(Math.max(0, -sx, sx - COURT.SW), Math.max(0, Math.abs(y) - COURT.SL));
+    }
+    return Math.hypot(Math.max(0, Math.abs(x) - COURT.SW), Math.max(0, Math.abs(y) - COURT.HL));
   }
 
   // The opponent's weaker wing as world x (+1/-1): narrower timing window
@@ -1035,6 +1064,8 @@
             cpuHit(g, p);
             return;
           }
+          // got there a step too late: lunge for it anyway
+          if (c_hasPlan(p) && Math.abs(b.pos.x - p.x) <= p.ch.reach + 1.2 && b.pos.z <= p.ch.maxZ + 0.5) swingMiss(g, p, 'Out of reach');
         } else if (p.pending) {
           const err = p.pending.err !== undefined ? p.pending.err : (p.pending.t - g.time) / g.timeScale;
           const input = p.pending.input;
@@ -1295,6 +1326,7 @@
   CT.cancelPrediction = cancelPrediction;
   CT.createGame = createGame;
   CT._computeShot = computeShot;   // for tests
+  CT._cpuPlan = cpuPlan;
   CT.updateGame = update;
   CT.requestMove = requestMove;
   CT.requestToss = requestToss;

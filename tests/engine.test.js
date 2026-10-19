@@ -161,6 +161,61 @@ test('a lob is timed from the middle of the slow swipe, so lifting the finger af
   assert.ok(!noLead || !noLead.perfect, 'without the lead the same swipe is late');
 });
 
+// The ball machine's first feed, then a swipe `at` seconds after the ball
+// reaches the player (negative = before, timed from the feed leaving).
+function swipeFeed(CT, at) {
+  const whiffs = [];
+  const g = CT.createGame({ p0: 'octopus', p1: 'philosopher', control: ['human', 'feeder'], autoMove: [true, false], timeScale: 0.65,
+    drill: { reps: 0, wing: 'fh' }, onEvent: (t, e) => { if (t === 'whiff') whiffs.push(e); } });
+  const p = g.players[0];
+  for (let i = 0; i < 60 * 10 && !whiffs.length; i++) {
+    CT.updateGame(g, 1 / 60);
+    const fed = g.phase === 'rally' && g.ball.inFlight && g.ball.lastHitter === 1;
+    if (at < 0 ? fed && g.time - g.lastHitT >= 0.05 : p.cross && g.wall >= p.cross.wall + at) CT.requestSwipe(g, 0, { aim: 0, pace: 0.6, spinDir: 1, curve: 0 });
+    if (p.cross && p.cross.wall === undefined) p.cross.wall = g.wall;
+  }
+  return { p, whiffs };
+}
+
+test('a swipe that is far too early or too late still swings the racket', () => {
+  const CT = loadEngine();
+  for (const [at, reason] of [[-1, 'Too early'], [0.3, 'Too late']]) {
+    const { p, whiffs } = swipeFeed(CT, at);
+    assert.equal(whiffs[0] && whiffs[0].reason, reason);
+    assert.ok(p.swing >= 0 && (p.swingWing === 'fh' || p.swingWing === 'bh'), `${reason}: swing ${p.swing} ${p.swingWing}`);
+  }
+});
+
+// Side 1 hits a ball that lands at (x, y) on side 0's half; where does an
+// auto-moving side 0 run?
+function chase(CT, x, y) {
+  const g = CT.createGame({ p0: 'octopus', p1: 'philosopher', control: ['human', 'cpu'], autoMove: [true, false] });
+  const p = g.players[0];
+  g.phase = 'rally';
+  p.x = 0; p.y = -11.5; p.reactUntil = 0;
+  const pos = { x: 0, y: 10, z: 1 }, vel = { x: 0, y: -22, z: 2 };
+  for (let i = 0; i < 40; i++) {
+    const land = CT.flight(pos, vel, 0, 0).land;
+    vel.x += (x - land.x) * 0.5; vel.z += (land.y - y) * 0.2;
+  }
+  g.ball = Object.assign(CT.makeBall(), { pos, vel, active: true, inFlight: true, bounces: 0, lastHitter: 1 });
+  CT._cpuPlan(g, p);
+  return p;
+}
+
+test('automove runs at a ball landing just out and lets it go, but not at one well out', () => {
+  const CT = loadEngine();
+  const edge = CT.COURT.SW;
+  const inBall = chase(CT, edge - 0.3, -9);
+  assert.ok(!inBall.leaving && inBall.tx > 3, `in: ${inBall.tx} ${inBall.leaving}`);
+  const justOut = chase(CT, edge + 0.6, -9);
+  assert.ok(justOut.leaving && justOut.tx > 3.5, `just out: ${justOut.tx} ${justOut.leaving}`);
+  const wellOut = chase(CT, edge + 2, -9);
+  assert.ok(wellOut.leaving && Math.abs(wellOut.tx) <= 2.2, `well out: ${wellOut.tx} ${wellOut.leaving}`);
+  const long = chase(CT, 1, -CT.COURT.HL - 0.6);
+  assert.ok(long.leaving && long.ty < -CT.COURT.HL, `long: ${long.ty}`);
+});
+
 test('a fast downward swipe still slices with real backspin', () => {
   const CT = loadEngine();
   for (const z of [0.8, 1.6]) {
