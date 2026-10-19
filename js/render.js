@@ -384,6 +384,121 @@
     for (; ox < r.W; ox += sw) ctx.drawImage(r.sky, ox, oy, sw, r.skyH);
   }
 
+  // ---------------- sky billboard ----------------
+  // A neon sign over the skyline just left of the far player, turned in
+  // towards the court, so it sits in the open sky on a phone held upright.
+  // It shows a photo and the player's tag, and flashes a word when something
+  // happens (CT.showBillboard).
+  const BOARD = { x: -6, y: 40, z: 5.5, w: 17, h: 5.2, turn: 0.4, tag: 'HHORNS' };   // turn: radians, far end to the right
+  const BOARD_TEX = { w: 520, h: 168 };
+
+  // Between words the sign shows a photo that slowly slides up and down.
+  const BOARD_PHOTO = new Image();
+  BOARD_PHOTO.src = 'img/billboard.jpg';
+
+  // what the sign says now: the latest word until it expires, else the
+  // photo (or just the tag until the photo has loaded)
+  function boardText(r, now) {
+    const b = r.board;
+    if (b && now < b.until) return b;
+    return { text: BOARD.tag, color: '#25d9ff', from: b ? b.until : 0, photo: BOARD_PHOTO.complete && BOARD_PHOTO.naturalWidth > 0 };
+  }
+
+  function boardTexture(r, text, color) {
+    const t = r.boardTex || (r.boardTex = document.createElement('canvas'));
+    // rebuilt once the display font has loaded
+    const key = text + color + (document.fonts && document.fonts.check('900 20px Tektur') ? 1 : 0);
+    if (t.key === key) return t;
+    t.key = key;
+    const W = BOARD_TEX.w, H = BOARD_TEX.h;
+    t.width = W; t.height = H;
+    const ctx = t.getContext('2d');
+    ctx.fillStyle = 'rgba(8,6,22,0.82)';
+    ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = '#ff3fb4'; ctx.lineWidth = 6;
+    ctx.shadowColor = '#ff3fb4'; ctx.shadowBlur = 14;
+    ctx.strokeRect(8, 8, W - 16, H - 16);
+    let size = 104;
+    ctx.font = `900 ${size}px Tektur, sans-serif`;
+    const fit = (W - 70) / ctx.measureText(text).width;
+    if (fit < 1) { size = Math.floor(size * fit); ctx.font = `900 ${size}px Tektur, sans-serif`; }
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.shadowColor = color; ctx.shadowBlur = 22;
+    ctx.fillStyle = color;
+    ctx.fillText(text, W / 2, H / 2 + 4);
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = 'rgba(255,255,255,0.75)';   // hot core of the neon
+    ctx.fillText(text, W / 2, H / 2 + 4);
+    return t;
+  }
+
+  // the photo in a square on the left, sliding slowly between the top and
+  // bottom of the picture, and the tag beside it (in BOARD_TEX coordinates)
+  function drawBoardPhoto(ctx, r, now) {
+    const W = BOARD_TEX.w, H = BOARD_TEX.h, m = 12, img = BOARD_PHOTO;
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = 'rgba(8,6,22,0.88)';
+    ctx.fillRect(0, 0, W, H);
+    const side = H - 2 * m;
+    const sw = img.naturalWidth, sh = Math.min(img.naturalHeight, sw);
+    const t = 0.5 - 0.5 * Math.cos(now * 0.5);   // eases at each end
+    ctx.drawImage(img, 0, t * (img.naturalHeight - sh), sw, sh, m, m, side, side);
+    ctx.strokeStyle = '#ff3fb4'; ctx.lineWidth = 6;
+    ctx.strokeRect(8, 8, W - 16, H - 16);
+    ctx.beginPath(); ctx.moveTo(m + side + 3, 8); ctx.lineTo(m + side + 3, H - 8); ctx.stroke();
+    const cx = (m + side + W) / 2;
+    ctx.font = '900 80px Tektur, sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#25d9ff';
+    if (r.quality) { ctx.shadowColor = '#25d9ff'; ctx.shadowBlur = 18; }
+    ctx.fillText(BOARD.tag, cx, H / 2 + 4, W - side - 60);
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.fillText(BOARD.tag, cx, H / 2 + 4, W - side - 60);
+  }
+
+  function drawBillboard(ctx, r) {
+    const B = BOARD, z1 = B.z + B.h;
+    const ca = Math.cos(B.turn), sa = Math.sin(B.turn);
+    // a point on the sign, u across it from 0 (left) to 1 (right)
+    const at = (u, z) => proj(r, B.x + (u - 0.5) * B.w * ca, B.y + (u - 0.5) * B.w * sa, z);
+    const tl = at(0, z1), tr = at(1, z1);
+    if (tl.behind || tr.behind) return;
+    if (Math.max(tl.x, tr.x) < 0 || Math.min(tl.x, tr.x) > r.W) return;
+    const now = performance.now() / 1000;
+    const cur = boardText(r, now);
+    // a new word flickers on, then hums
+    const age = now - cur.from;
+    const on = age < 0.35 ? (Math.floor(age * 24) % 2 ? 0.25 : 1) : 0.88 + 0.12 * Math.sin(now * 3);
+    // the pylon it stands on, down into the skyline
+    const pb = at(0.5, 0), pt = at(0.5, B.z);
+    ctx.strokeStyle = '#1c1b2a'; ctx.lineWidth = Math.max(2, (pt.s || 0) * 0.5);
+    ctx.beginPath(); ctx.moveTo(pb.x, pb.y); ctx.lineTo(pt.x, pt.y); ctx.stroke();
+    let src;
+    if (cur.photo) {
+      src = r.boardPhotoTex || (r.boardPhotoTex = document.createElement('canvas'));
+      if (src.width !== BOARD_TEX.w) { src.width = BOARD_TEX.w; src.height = BOARD_TEX.h; }
+      drawBoardPhoto(src.getContext('2d'), r, now);
+    } else src = boardTexture(r, cur.text, cur.color);
+    const d = r.dpr, W = BOARD_TEX.w, H = BOARD_TEX.h, N = 10, sw = W / N;
+    ctx.save();
+    ctx.globalAlpha = on;
+    ctx.imageSmoothingQuality = 'high';
+    // The sign is turned, so its near end looks taller than its far end.
+    // Drawn as thin vertical strips, each mapped from its own corners.
+    for (let i = 0; i < N; i++) {
+      const a0 = at(i / N, z1), a1 = at((i + 1) / N, z1), b0 = at(i / N, B.z);
+      ctx.setTransform(d * (a1.x - a0.x) / sw, d * (a1.y - a0.y) / sw, d * (b0.x - a0.x) / H, d * (b0.y - a0.y) / H, d * a0.x, d * a0.y);
+      ctx.drawImage(src, i * sw, 0, Math.min(sw + 1, W - i * sw), H, 0, 0, Math.min(sw + 1, W - i * sw), H);
+    }
+    ctx.restore();
+  }
+
+  // Flash a word on the billboard for `secs` seconds.
+  function showBillboard(r, text, color, secs) {
+    r.board = { text, color: color || '#e4ff4a', from: performance.now() / 1000, until: performance.now() / 1000 + (secs || 2.5) };
+  }
+
   // ---------------- the lot ----------------
   const LAMPS = [[-7.7, 16.5, '#ffb04a'], [7.7, 16.5, '#ffb04a'], [-7.7, 3, '#ff4fc0'], [7.7, -3, '#3fdcff'], [-7.7, -12, '#ffb04a'], [7.7, -15, '#ffb04a']];
   const STALL_IN = 8.0, STALL_OUT = 13.2, STALL_W = 2.6;
@@ -792,6 +907,7 @@
     const ctx = r.ctx;
     ctx.setTransform(r.dpr, 0, 0, r.dpr, 0, 0);
     drawSky(ctx, r);
+    drawBillboard(ctx, r);
     drawLot(ctx, r);
     drawCourt(ctx, r);
 
@@ -823,6 +939,7 @@
   CT.resizeRenderer = resize;
   CT.setView = setView;
   CT.renderGame = render;
+  CT.showBillboard = showBillboard;
   CT.unproject = unproject;
   CT.project = proj;
 })();
