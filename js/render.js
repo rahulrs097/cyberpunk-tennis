@@ -385,43 +385,46 @@
   }
 
   // ---------------- sky billboard ----------------
-  // A neon sign floating over the far left of the skyline. It shows the
-  // player's tag and flashes a word when something happens (CT.showBillboard).
+  // A neon sign floating over the far left of the skyline. It shows a photo
+  // and the player's tag, and flashes a word when something happens
+  // (CT.showBillboard).
   const BOARD = { x: -21, y: 40, z: 4, w: 17, h: 5.2, tag: 'HHORNS' };
   const BOARD_TEX = { w: 520, h: 168 };
 
-  // what the sign says now: the latest word until it expires, else the tag
+  // Between words the sign shows a photo that slowly slides up and down.
+  const BOARD_PHOTO = new Image();
+  BOARD_PHOTO.src = 'img/billboard.jpg';
+
+  // what the sign says now: the latest word until it expires, else the
+  // photo (or just the tag until the photo has loaded)
   function boardText(r, now) {
     const b = r.board;
-    return b && now < b.until ? b : { text: BOARD.tag, color: '#25d9ff', from: 0 };
+    if (b && now < b.until) return b;
+    return { text: BOARD.tag, color: '#25d9ff', from: b ? b.until : 0, photo: BOARD_PHOTO.complete && BOARD_PHOTO.naturalWidth > 0 };
   }
 
-  function boardTexture(r, text, color) {
-    const t = r.boardTex || (r.boardTex = document.createElement('canvas'));
-    // rebuilt once the display font has loaded
-    const key = text + color + (document.fonts && document.fonts.check('900 20px Tektur') ? 1 : 0);
-    if (t.key === key) return t;
-    t.key = key;
-    const W = BOARD_TEX.w, H = BOARD_TEX.h;
-    t.width = W; t.height = H;
-    const ctx = t.getContext('2d');
-    ctx.fillStyle = 'rgba(8,6,22,0.82)';
+  // the photo in a square on the left, sliding slowly between the top and
+  // bottom of the picture, and the tag beside it (in BOARD_TEX coordinates)
+  function drawBoardPhoto(ctx, r, now) {
+    const W = BOARD_TEX.w, H = BOARD_TEX.h, m = 12, img = BOARD_PHOTO;
+    ctx.fillStyle = 'rgba(8,6,22,0.88)';
     ctx.fillRect(0, 0, W, H);
+    const side = H - 2 * m;
+    const sw = img.naturalWidth, sh = Math.min(img.naturalHeight, sw);
+    const t = 0.5 - 0.5 * Math.cos(now * 0.5);   // eases at each end
+    ctx.drawImage(img, 0, t * (img.naturalHeight - sh), sw, sh, m, m, side, side);
     ctx.strokeStyle = '#ff3fb4'; ctx.lineWidth = 6;
-    ctx.shadowColor = '#ff3fb4'; ctx.shadowBlur = 14;
     ctx.strokeRect(8, 8, W - 16, H - 16);
-    let size = 104;
-    ctx.font = `900 ${size}px Tektur, sans-serif`;
-    const fit = (W - 70) / ctx.measureText(text).width;
-    if (fit < 1) { size = Math.floor(size * fit); ctx.font = `900 ${size}px Tektur, sans-serif`; }
+    ctx.beginPath(); ctx.moveTo(m + side + 3, 8); ctx.lineTo(m + side + 3, H - 8); ctx.stroke();
+    const cx = (m + side + W) / 2;
+    ctx.font = '900 80px Tektur, sans-serif';
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.shadowColor = color; ctx.shadowBlur = 22;
-    ctx.fillStyle = color;
-    ctx.fillText(text, W / 2, H / 2 + 4);
+    ctx.fillStyle = '#25d9ff';
+    if (r.quality) { ctx.shadowColor = '#25d9ff'; ctx.shadowBlur = 18; }
+    ctx.fillText(BOARD.tag, cx, H / 2 + 4, W - side - 60);
     ctx.shadowBlur = 0;
-    ctx.fillStyle = 'rgba(255,255,255,0.75)';   // hot core of the neon
-    ctx.fillText(text, W / 2, H / 2 + 4);
-    return t;
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.fillText(BOARD.tag, cx, H / 2 + 4, W - side - 60);
   }
 
   function drawBillboard(ctx, r) {
@@ -438,7 +441,6 @@
     const pb = proj(r, B.x, B.y, 0), pt = proj(r, B.x, B.y, B.z);
     ctx.strokeStyle = '#1c1b2a'; ctx.lineWidth = Math.max(2, (bl.s || 0) * 0.5);
     ctx.beginPath(); ctx.moveTo(pb.x, pb.y); ctx.lineTo(pt.x, pt.y); ctx.stroke();
-    const tex = boardTexture(r, cur.text, cur.color);
     const d = r.dpr, W = BOARD_TEX.w, H = BOARD_TEX.h;
     ctx.save();
     ctx.globalAlpha = on;
@@ -446,7 +448,8 @@
     // the sign is far off and faces the court, so an affine map from its
     // three corners is close enough to true perspective
     ctx.setTransform(d * (tr.x - tl.x) / W, d * (tr.y - tl.y) / W, d * (bl.x - tl.x) / H, d * (bl.y - tl.y) / H, d * tl.x, d * tl.y);
-    ctx.drawImage(tex, 0, 0);
+    if (cur.photo) drawBoardPhoto(ctx, r, now);
+    else ctx.drawImage(boardTexture(r, cur.text, cur.color), 0, 0);
     ctx.restore();
   }
 
