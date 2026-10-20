@@ -233,7 +233,7 @@
       if (net && net.role === 'guest') game.marks.push({ x: d.x, y: d.y, age: 0 });
     } else if (type === 'lineCall') {
       if (d.m > CLOSE_OUT || d.m < -CLOSE_IN) return;
-      CT.showLineCall(renderer, d.m, 3);
+      CT.showLineCall(renderer, d, 3);
       lineCallShown = true;
     } else if (type === 'net') {
       blip(90, 0.12, 'sawtooth', 0.05);
