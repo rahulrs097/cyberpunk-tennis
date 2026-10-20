@@ -1308,7 +1308,8 @@
 
   // The menu's levels: ball speed (game time per real second; swipes are
   // timed in game time, so a slower level looks and times just like Pro,
-  // only with more time to react) and how the CPU plays. err scales its timing errors, react is how long it takes to read a
+  // only with more time to react) and how the CPU plays. err scales its
+  // timing errors, react is how long it takes to read a
   // shot (s), cover is how far it shades towards the angle, attack is how often
   // it goes for a winner off an easy ball, smart is how much it thinks
   // (patterns, learning your game, touch shots, the score). Tuned with `npm run sim` so a
