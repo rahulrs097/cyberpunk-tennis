@@ -442,3 +442,33 @@ test("online: the guest's shots leave its racket at once on both phones, with no
     }
   }
 });
+
+// ---------------- line calls ----------------
+test('line margin: how far the ball missed the line, or how much of it stayed in', () => {
+  const CT = loadEngine();
+  const { SW, HL, SL } = CT.COURT, R = CT.PHYS.R;
+  const near = (a, b) => Math.abs(a - b) < 1e-9;
+  assert.ok(near(CT.lineMargin(0, HL + R + 0.04), 0.04), 'long by 4 cm');
+  assert.ok(near(CT.lineMargin(-SW - R - 0.002, 3), 0.002), 'wide by 2 mm');
+  assert.ok(near(CT.lineMargin(SW + R - 0.01, -5), -0.01), '1 cm of the ball on the line');
+  assert.ok(CT.lineMargin(0, 5) < -1, 'mid-court is nowhere near');
+  const box = { side: 1, sign: 1 };
+  assert.ok(near(CT.lineMargin(2, SL + R + 0.05, box), 0.05), 'serve long by 5 cm');
+  assert.ok(near(CT.lineMargin(-R - 0.03, 3, box), 0.03), 'serve wide of the centre line by 3 cm');
+  // the margin makes the same call as the umpire
+  for (const [x, y] of [[SW + R - 1e-6, 0], [SW + R + 1e-6, 0], [1, HL + R - 1e-6], [-SW - 0.02, -HL - 0.02]]) {
+    assert.equal(CT.lineMargin(x, y) <= 0, CT.inSingles(x, y));
+  }
+  for (const [x, y] of [[-R + 1e-6, 3], [-R - 1e-6, 3], [SW, SL + R - 1e-6], [2, SL + R + 1e-6]]) {
+    assert.equal(CT.lineMargin(x, y, box) <= 0, CT.inServiceBox(x, y, box));
+  }
+});
+
+test('every first bounce over the net comes with a line call', () => {
+  const CT = loadEngine(3);
+  const calls = [];
+  const g = CT.createGame({ p0: 'octopus', p1: 'philosopher', ...levelOpts(CT, 'pro'), control: ['cpu', 'cpu'], onEvent: (t, d) => { if (t === 'lineCall') calls.push(d.m); } });
+  for (let i = 0; i < 60 * 120; i++) CT.updateGame(g, 1 / 60);
+  assert.ok(calls.length > 20, `saw ${calls.length} line calls`);
+  assert.ok(calls.some((m) => m > 0) && calls.some((m) => m <= 0), 'both ins and outs');
+});

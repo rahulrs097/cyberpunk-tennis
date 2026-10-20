@@ -457,6 +457,59 @@
     ctx.fillText(BOARD.tag, cx, H / 2 + 4, W - side - 60);
   }
 
+  // A Hawk-Eye style close-up of a close call: the line upright in the middle
+  // (court to its left, out to its right) and the ball's mark where it
+  // landed, zooming in as it comes up, with the call and the gap beside it.
+  // m: gap (m) between the ball's edge and the outside of the line, <0 when in.
+  const LINE_W = 0.05, MARK_LONG = 1.6;   // line width (m); a skid mark is longer than it is wide
+  function drawBoardCall(ctx, r, m, age) {
+    const W = BOARD_TEX.w, H = BOARD_TEX.h, R = CT.PHYS.R, out = m > 0;
+    const vw = 330, vx = 14, vy = 14, vh = H - 28;   // the close-up's window
+    const c = m + R;   // ball centre, outwards from the line's outer edge
+    const span = Math.max(0.3, (Math.abs(c + LINE_W / 2) + R) * 2 + 0.1);
+    const zoom = 1 - Math.pow(1 - Math.min(1, age / 0.6), 3);
+    const k = vw / span * (0.35 + 0.65 * zoom);   // px per metre
+    const X = (w) => vx + vw / 2 + (w - (c - LINE_W / 2) / 2) * k;
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = 'rgba(8,6,22,0.88)';
+    ctx.fillRect(0, 0, W, H);
+    ctx.save();
+    ctx.beginPath(); ctx.rect(vx, vy, vw, vh); ctx.clip();
+    ctx.fillStyle = '#17487f'; ctx.fillRect(vx, vy, vw, vh);   // in
+    const lx = X(-LINE_W), rx = X(0);
+    ctx.fillStyle = '#08152b'; ctx.fillRect(rx, vy, vx + vw - rx, vh);   // out
+    ctx.fillStyle = PAL.line;
+    if (r.quality) { ctx.shadowColor = PAL.line; ctx.shadowBlur = 14; }
+    ctx.fillRect(lx, vy, rx - lx, vh);
+    ctx.shadowBlur = 0;
+    // the mark
+    const bx = X(c), by = vy + vh / 2, a = Math.min(1, age / 0.35);
+    ctx.globalAlpha = a;
+    ctx.beginPath(); ctx.ellipse(bx, by, R * k, R * k * MARK_LONG, 0, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(228,255,74,0.55)'; ctx.fill();
+    ctx.lineWidth = 3; ctx.strokeStyle = PAL.ball;
+    if (r.quality) { ctx.shadowColor = PAL.ballGlow; ctx.shadowBlur = 12; }
+    ctx.stroke();
+    ctx.restore();
+    ctx.strokeStyle = '#ff3fb4'; ctx.lineWidth = 6;
+    ctx.strokeRect(8, 8, W - 16, H - 16);
+    ctx.beginPath(); ctx.moveTo(vx + vw + 3, 8); ctx.lineTo(vx + vw + 3, H - 8); ctx.stroke();
+    // the call, after the mark has landed
+    if (age < 0.35) return;
+    const col = out ? PAL.warn : '#3fff9a', cx = (vx + vw + W) / 2, tw = W - vx - vw - 30;
+    const mm = Math.max(1, Math.round(Math.abs(m) * 1000));
+    const dist = mm < 10 ? mm + ' MM' : Math.round(mm / 10) + ' CM';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = '900 60px Tektur, sans-serif';
+    ctx.fillStyle = col;
+    if (r.quality) { ctx.shadowColor = col; ctx.shadowBlur = 18; }
+    ctx.fillText(out ? 'OUT' : 'IN', cx, H * 0.36, tw);
+    ctx.shadowBlur = 0;
+    ctx.font = '700 36px Tektur, sans-serif';
+    ctx.fillStyle = '#e8f6ff';
+    ctx.fillText(dist, cx, H * 0.7, tw);
+  }
+
   function drawBillboard(ctx, r) {
     const B = BOARD, z1 = B.z + B.h;
     const ca = Math.cos(B.turn), sa = Math.sin(B.turn);
@@ -475,10 +528,11 @@
     ctx.strokeStyle = '#1c1b2a'; ctx.lineWidth = Math.max(2, (pt.s || 0) * 0.5);
     ctx.beginPath(); ctx.moveTo(pb.x, pb.y); ctx.lineTo(pt.x, pt.y); ctx.stroke();
     let src;
-    if (cur.photo) {
+    if (cur.photo || cur.call !== undefined) {
       src = r.boardPhotoTex || (r.boardPhotoTex = document.createElement('canvas'));
       if (src.width !== BOARD_TEX.w) { src.width = BOARD_TEX.w; src.height = BOARD_TEX.h; }
-      drawBoardPhoto(src.getContext('2d'), r, now);
+      if (cur.photo) drawBoardPhoto(src.getContext('2d'), r, now);
+      else drawBoardCall(src.getContext('2d'), r, cur.call, age);
     } else src = boardTexture(r, cur.text, cur.color);
     const d = r.dpr, W = BOARD_TEX.w, H = BOARD_TEX.h, N = 10, sw = W / N;
     ctx.save();
@@ -497,6 +551,13 @@
   // Flash a word on the billboard for `secs` seconds.
   function showBillboard(r, text, color, secs) {
     r.board = { text, color: color || '#e4ff4a', from: performance.now() / 1000, until: performance.now() / 1000 + (secs || 2.5) };
+  }
+
+  // Put a close line call up on the billboard for `secs` seconds (m as
+  // CT.lineMargin gives it).
+  function showLineCall(r, m, secs) {
+    const now = performance.now() / 1000;
+    r.board = { call: m, from: now, until: now + (secs || 3) };
   }
 
   // ---------------- the lot ----------------
@@ -940,6 +1001,7 @@
   CT.setView = setView;
   CT.renderGame = render;
   CT.showBillboard = showBillboard;
+  CT.showLineCall = showLineCall;
   CT.unproject = unproject;
   CT.project = proj;
 })();
