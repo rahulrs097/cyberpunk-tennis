@@ -10,6 +10,7 @@
     SW: 4.115,         // singles half width
     DW: 5.485,         // doubles half width
     SL: 6.40,          // net to service line
+    LW: 0.05,          // line width (the baselines are twice that)
     NET_C: 0.914,      // net height at the centre strap
     NET_P: 1.07,       // net height at the posts
     POST_X: 6.4,
@@ -193,7 +194,9 @@
   // box: { side: 0|1 (whose half), sign: +1|-1 (which half of x) }
   function inServiceBox(x, y, box) {
     const inY = box.side === 0 ? (y <= 0 && y >= -COURT.SL - PHYS.R) : (y >= 0 && y <= COURT.SL + PHYS.R);
-    const inX = box.sign > 0 ? (x >= -PHYS.R && x <= COURT.SW + PHYS.R) : (x <= PHYS.R && x >= -COURT.SW - PHYS.R);
+    // (the centre service line straddles x = 0 and belongs to both boxes)
+    const c = COURT.LW / 2 + PHYS.R;
+    const inX = box.sign > 0 ? (x >= -c && x <= COURT.SW + PHYS.R) : (x <= c && x >= -COURT.SW - PHYS.R);
     return inX && inY;
   }
 
@@ -202,7 +205,7 @@
   // still in) when in. Same call as inSingles / inServiceBox.
   function lineMargin(x, y, box) {
     const ax = box ? box.sign * x : Math.abs(x), ay = Math.abs(y);
-    const x0 = box ? 0 : -Infinity, x1 = COURT.SW, y1 = box ? COURT.SL : COURT.HL;
+    const x0 = box ? -COURT.LW / 2 : -Infinity, x1 = COURT.SW, y1 = box ? COURT.SL : COURT.HL;
     const past = Math.max(x0 - ax, ax - x1, ay - y1);   // beyond the outer edge of a line (<0 inside)
     return past - PHYS.R;
   }

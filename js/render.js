@@ -457,35 +457,76 @@
     ctx.fillText(BOARD.tag, cx, H / 2 + 4, W - side - 60);
   }
 
-  // A Hawk-Eye style close-up of a close call: the line upright in the middle
-  // (court to its left, out to its right) and the ball's mark where it
-  // landed, zooming in as it comes up, with the call and the gap beside it.
-  // m: gap (m) between the ball's edge and the outside of the line, <0 when in.
-  const LINE_W = 0.05, MARK_LONG = 1.6;   // line width (m); a skid mark is longer than it is wide
-  function drawBoardCall(ctx, r, m, age) {
-    const W = BOARD_TEX.w, H = BOARD_TEX.h, R = CT.PHYS.R, out = m > 0;
+  // A Hawk-Eye style close-up of a close call, looking down on the court the
+  // way you face it: the lines around the bounce, the court the ball had to
+  // land in lit up, and the ball's mark where it landed, skidding on the way
+  // the ball was going and further the faster it was, zooming in as it comes
+  // up. The call and the gap go beside it.
+  // call: { m, x, y, vx, vy, box } (m as CT.lineMargin gives it).
+  function courtLines() {
+    const { SW, DW, HL, SL, LW } = COURT, BW = 2 * LW;
+    return [   // [x0, x1, y0, y1], each line's outer edge on the court's edge
+      [SW - LW, SW, -HL, HL], [-SW, -SW + LW, -HL, HL],
+      [DW - LW, DW, -HL, HL], [-DW, -DW + LW, -HL, HL],
+      [-DW, DW, HL - BW, HL], [-DW, DW, -HL, -HL + BW],
+      [-SW, SW, SL - LW, SL], [-SW, SW, -SL, -SL + LW],
+      [-LW / 2, LW / 2, -SL, SL],
+    ];
+  }
+  // the area the ball had to land in, as [x0, x1, y0, y1]
+  function callArea(box) {
+    const { SW, HL, SL, LW } = COURT;
+    if (!box) return [-SW, SW, -HL, HL];
+    const x = box.sign > 0 ? [-LW / 2, SW] : [-SW, LW / 2];
+    return [x[0], x[1], box.side === 0 ? -SL : 0, box.side === 0 ? 0 : SL];
+  }
+  // the nearest point on a line the ball could have landed out over
+  function nearestLine(x, y, box) {
+    const [x0, x1, y0, y1] = callArea(box);
+    if (x < x0 || x > x1 || y < y0 || y > y1) return [CT.clamp(x, x0, x1), CT.clamp(y, y0, y1)];
+    const edges = [[x - x0, x0, y], [x1 - x, x1, y]];
+    // (the net isn't a line)
+    if (!box || box.side === 1) edges.push([y1 - y, x, y1]);
+    if (!box || box.side === 0) edges.push([y - y0, x, y0]);
+    edges.sort((a, b) => a[0] - b[0]);
+    return [edges[0][1], edges[0][2]];
+  }
+
+  function drawBoardCall(ctx, r, call, age) {
+    const W = BOARD_TEX.w, H = BOARD_TEX.h, R = CT.PHYS.R, m = call.m, out = m > 0;
     const vw = 330, vx = 14, vy = 14, vh = H - 28;   // the close-up's window
-    const c = m + R;   // ball centre, outwards from the line's outer edge
-    const span = Math.max(0.3, (Math.abs(c + LINE_W / 2) + R) * 2 + 0.1);
+    const f = r.human === 1 ? -1 : 1;   // seen from your end of the court
+    const sp = Math.hypot(call.vx, call.vy);
+    const skid = Math.min(0.14, sp * 0.004);   // how far the mark runs on past the contact
+    const dx = sp > 0.1 ? call.vx / sp : 0, dy = sp > 0.1 ? call.vy / sp : 0;
+    const [qx, qy] = nearestLine(call.x, call.y, call.box);
+    const ox = (call.x + qx) / 2, oy = (call.y + qy) / 2;
+    const hx = Math.abs(call.x - qx) / 2 + R + skid + 0.06, hy = Math.abs(call.y - qy) / 2 + R + skid + 0.06;
     const zoom = 1 - Math.pow(1 - Math.min(1, age / 0.6), 3);
-    const k = vw / span * (0.35 + 0.65 * zoom);   // px per metre
-    const X = (w) => vx + vw / 2 + (w - (c - LINE_W / 2) / 2) * k;
+    const k = Math.min(vw / (2 * hx), vh / (2 * hy), vh / 0.22) * (0.35 + 0.65 * zoom);   // px per metre
+    const PX = (x) => vx + vw / 2 + f * (x - ox) * k, PY = (y) => vy + vh / 2 - f * (y - oy) * k;
+    const rect = (q) => {
+      const a = PX(q[0]), b = PX(q[1]), c = PY(q[2]), d = PY(q[3]);
+      ctx.fillRect(Math.min(a, b), Math.min(c, d), Math.abs(b - a), Math.abs(d - c));
+    };
     ctx.clearRect(0, 0, W, H);
     ctx.fillStyle = 'rgba(8,6,22,0.88)';
     ctx.fillRect(0, 0, W, H);
     ctx.save();
     ctx.beginPath(); ctx.rect(vx, vy, vw, vh); ctx.clip();
-    ctx.fillStyle = '#17487f'; ctx.fillRect(vx, vy, vw, vh);   // in
-    const lx = X(-LINE_W), rx = X(0);
-    ctx.fillStyle = '#08152b'; ctx.fillRect(rx, vy, vx + vw - rx, vh);   // out
+    ctx.fillStyle = '#08152b'; ctx.fillRect(vx, vy, vw, vh);   // out
+    ctx.fillStyle = '#17487f'; rect(callArea(call.box));          // in
     ctx.fillStyle = PAL.line;
     if (r.quality) { ctx.shadowColor = PAL.line; ctx.shadowBlur = 14; }
-    ctx.fillRect(lx, vy, rx - lx, vh);
+    for (const q of courtLines()) rect(q);
     ctx.shadowBlur = 0;
-    // the mark
-    const bx = X(c), by = vy + vh / 2, a = Math.min(1, age / 0.35);
-    ctx.globalAlpha = a;
-    ctx.beginPath(); ctx.ellipse(bx, by, R * k, R * k * MARK_LONG, 0, 0, Math.PI * 2);
+    // the mark: an oval from the back of the contact patch, stretched on
+    // along the skid
+    const mx = PX(call.x + dx * skid / 2), my = PY(call.y + dy * skid / 2);
+    const ang = Math.atan2(-f * dy, f * dx);
+    ctx.globalAlpha = Math.min(1, age / 0.35);
+    ctx.beginPath();
+    ctx.ellipse(mx, my, (R + skid / 2) * k, R * k, ang, 0, Math.PI * 2);
     ctx.fillStyle = 'rgba(228,255,74,0.55)'; ctx.fill();
     ctx.lineWidth = 3; ctx.strokeStyle = PAL.ball;
     if (r.quality) { ctx.shadowColor = PAL.ballGlow; ctx.shadowBlur = 12; }
@@ -553,11 +594,11 @@
     r.board = { text, color: color || '#e4ff4a', from: performance.now() / 1000, until: performance.now() / 1000 + (secs || 2.5) };
   }
 
-  // Put a close line call up on the billboard for `secs` seconds (m as
-  // CT.lineMargin gives it).
-  function showLineCall(r, m, secs) {
+  // Put a close line call up on the billboard for `secs` seconds (the
+  // engine's lineCall event).
+  function showLineCall(r, call, secs) {
     const now = performance.now() / 1000;
-    r.board = { call: m, from: now, until: now + (secs || 3) };
+    r.board = { call, from: now, until: now + (secs || 3) };
   }
 
   // ---------------- the lot ----------------
