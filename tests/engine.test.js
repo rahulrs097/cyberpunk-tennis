@@ -140,7 +140,7 @@ test('a slow upward swipe lobs high and deep, and lands in', () => {
 // Swipe a lob `late` seconds after the ball reaches the contact plane.
 function lobLate(CT, input, late) {
   let hit = null;
-  const g = CT.createGame({ p0: 'octopus', p1: 'philosopher', control: ['human', 'feeder'], autoMove: [true, false], timeScale: 0.65,
+  const g = CT.createGame({ p0: 'octopus', p1: 'philosopher', control: ['human', 'feeder'], autoMove: [true, false], timeScale: 0.75,
     drill: { reps: 0, wing: 'fh' }, onEvent: (t, e) => { if (t === 'hit' && e.side === 0) hit = e; } });
   const p = g.players[0];
   let crossedAt = null;
@@ -165,7 +165,7 @@ test('a lob is timed from the middle of the slow swipe, so lifting the finger af
 // reaches the player (negative = before, timed from the feed leaving).
 function swipeFeed(CT, at) {
   const whiffs = [];
-  const g = CT.createGame({ p0: 'octopus', p1: 'philosopher', control: ['human', 'feeder'], autoMove: [true, false], timeScale: 0.65,
+  const g = CT.createGame({ p0: 'octopus', p1: 'philosopher', control: ['human', 'feeder'], autoMove: [true, false], timeScale: 0.75,
     drill: { reps: 0, wing: 'fh' }, onEvent: (t, e) => { if (t === 'whiff') whiffs.push(e); } });
   const p = g.players[0];
   for (let i = 0; i < 60 * 10 && !whiffs.length; i++) {
@@ -179,7 +179,7 @@ function swipeFeed(CT, at) {
 
 test('a swipe that is far too early or too late still swings the racket', () => {
   const CT = loadEngine();
-  for (const [at, reason] of [[-1, 'Too early'], [0.3, 'Too late']]) {
+  for (const [at, reason] of [[-1, 'Too early'], [0.4, 'Too late']]) {
     const { p, whiffs } = swipeFeed(CT, at);
     assert.equal(whiffs[0] && whiffs[0].reason, reason);
     assert.ok(p.swing >= 0 && (p.swingWing === 'fh' || p.swingWing === 'bh'), `${reason}: swing ${p.swing} ${p.swingWing}`);
@@ -262,7 +262,7 @@ test('the levels get harder: the same player wins more games on Chill than on Pr
 // ---------------- tutorial ----------------
 function drill(CT, d, play) {
   const ends = [];
-  const g = CT.createGame({ p0: 'octopus', p1: 'philosopher', control: ['human', 'feeder'], autoMove: [true, false], timeScale: 0.65,
+  const g = CT.createGame({ p0: 'octopus', p1: 'philosopher', control: ['human', 'feeder'], autoMove: [true, false], timeScale: 0.75,
     drill: { reps: 0, ...d }, onEvent: (t, e) => { if (t === 'drill') ends.push(e); } });
   const bot = play && makeBot(CT, g, 0, 0, () => 0.5);
   for (let i = 0; i < 60 * 30 && ends.length < 4; i++) { if (bot) bot(); CT.updateGame(g, 1 / 60); }

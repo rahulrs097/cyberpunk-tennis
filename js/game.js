@@ -504,7 +504,9 @@
   }
 
   // A swipe from a controller. `input` as in computeShot.
-  // `errOverride` (seconds, + = late) is timing already judged on the guest's
+  // Timing is judged in game seconds, so on the slower levels a swipe that
+  // looks on time is exactly as on time as on Pro (the windows just last longer).
+  // `errOverride` (game seconds, + = late) is timing already judged on the guest's
   // phone against the ball it saw, so network delay doesn't make it late.
   function requestSwipe(g, side, input, errOverride) {
     if (g.remote) return;
@@ -514,7 +516,7 @@
     if (g.phase === 'toss' && g.server === side) {
       let peak = g.peakT;
       if (peak === null) peak = g.time + Math.max(0, b.vel.z) / PHYS.G;
-      const err = given ? errOverride : (g.time - peak) / g.timeScale;
+      const err = given ? errOverride : g.time - peak;
       if (Math.abs(err) > OUTER * windowFor(p, 'fh')) {
         emit(g, 'whiff', { side, reason: err < 0 ? 'Too early, wait for the top of the toss' : 'Too late' });
         return;
@@ -522,15 +524,15 @@
       // the guest hit the toss where they saw it, which is higher than it is here by now
       let contactT = null;
       if (given && g.peakBall) {
-        const tb = rewound(g.peakBall, err * g.timeScale);
-        if (tb) { g.ball = tb; contactT = g.peakT + Math.max(0, err) * g.timeScale; }
+        const tb = rewound(g.peakBall, err);
+        if (tb) { g.ball = tb; contactT = g.peakT + Math.max(0, err); }
       }
       applyShot(g, p, computeShot(g, p, input, err));
       if (contactT !== null) catchUp(g, g.time - contactT - SHOT_SHARE);
       return;
     }
     if (!incomingTo(g, p)) return;
-    const Wout = outerWindow(p, input), lead = swingLead(input);
+    const Wout = outerWindow(p, input), lead = swingLead(input) * g.timeScale;
     if (given) {
       errOverride -= lead;
       if (errOverride > Wout) { swingMiss(g, p, 'Too late', p.cross); return; }
@@ -541,16 +543,16 @@
       return;
     }
     if (p.cross && p.cross.t >= g.lastHitT) {
-      const err = (g.time - p.cross.t) / g.timeScale - lead;
+      const err = g.time - p.cross.t - lead;
       if (err <= Wout) { tryHit(g, p, input, err); return; }
       swingMiss(g, p, 'Too late', p.cross);
       return;
     }
     const c = predictCross(g, p, 3);
     if (!c) { emit(g, 'whiff', { side, reason: 'Nothing to hit' }); return; }
-    if (c.t / g.timeScale + lead > Wout) { swingMiss(g, p, 'Too early', c); return; }
+    if (c.t + lead > Wout) { swingMiss(g, p, 'Too early', c); return; }
     // (timed from `lead` before now, so the lateness worked out at contact counts from then)
-    p.pending = { t: g.time - lead * g.timeScale, input };
+    p.pending = { t: g.time - lead, input };
   }
 
   // The ball `dt` seconds of game time after state `b`, or null if it bounces
@@ -573,8 +575,8 @@
   // shot the moment they swiped) already shows it.
   function hitAsSeen(g, p, input, err) {
     const at = p.cross;
-    const contactT = at.t + Math.max(0, err) * g.timeScale;
-    const b = rewound(at.ball, Math.max(0, err) * g.timeScale);
+    const contactT = at.t + Math.max(0, err);
+    const b = rewound(at.ball, Math.max(0, err));
     if (!b) { swingMiss(g, p, 'Too late', at); return; }
     const x = p.x, y = p.y, now = g.ball;
     g.ball = b; p.x = at.px; p.y = at.py;
@@ -620,7 +622,7 @@
     }
     if (!incomingTo(g, p)) return;
     const Wout = outerWindow(p, input);
-    err -= swingLead(input);
+    err -= swingLead(input) * g.timeScale;
     if (Math.abs(err) > Wout) return;
     if (p.cross && p.cross.t >= g.lastHitT) predictHit(g, p, input, err);
     else p.pending = { t: g.time, input, err };   // hit it as it reaches them (stepRemote)
@@ -1018,7 +1020,7 @@
     const rp = g.players[r];
     if (g.control[r] === 'remote' && rp.cross && rp.cross.t >= g.lastHitT) {
       const Wout = OUTER * Math.max(windowFor(rp, 'fh'), windowFor(rp, 'bh'));
-      const until = rp.cross.t + (Wout + LAG_ALLOW) * g.timeScale;
+      const until = rp.cross.t + Wout + LAG_ALLOW * g.timeScale;
       if (g.time < until) { g.held = { w: h, text: b.isServe ? 'Ace' : 'Winner', until }; return; }
     }
     pointTo(g, h, b.isServe ? 'Ace' : 'Winner');
@@ -1071,7 +1073,7 @@
           // got there a step too late: lunge for it anyway
           if (c_hasPlan(p) && Math.abs(b.pos.x - p.x) <= p.ch.reach + 1.2 && b.pos.z <= p.ch.maxZ + 0.5) swingMiss(g, p, 'Out of reach');
         } else if (p.pending) {
-          const err = p.pending.err !== undefined ? p.pending.err : (p.pending.t - g.time) / g.timeScale;
+          const err = p.pending.err !== undefined ? p.pending.err : p.pending.t - g.time;
           const input = p.pending.input;
           p.pending = null;
           tryHit(g, p, input, err);
@@ -1188,7 +1190,7 @@
       const rp = g.players.find((p) => g.control[p.side] === 'remote' && incomingTo(g, p) && p.cross && p.cross.ball && p.cross.t >= g.lastHitT);
       const c = rp && rp.cross;
       const Wout = rp && OUTER * Math.max(windowFor(rp, 'fh'), windowFor(rp, 'bh'));
-      if (c && g.time < c.t + (Wout + LAG_ALLOW) * g.timeScale &&
+      if (c && g.time < c.t + Wout + LAG_ALLOW * g.timeScale &&
         Math.abs(c.x - c.px) <= rp.ch.reach + 0.5 && c.z <= rp.ch.maxZ) {
         if (!v.hold || v.hold.t !== c.t) v.hold = { t: c.t, ball: CT.cloneBall(c.ball), acc: (g.time - c.t) * VIEW_SLOW };
         else v.hold.acc += wallDt * g.timeScale * VIEW_SLOW;
@@ -1249,7 +1251,7 @@
     const p = g.players[side];
     if (!incomingTo(g, p)) return null;
     const c = predictCross(g, p, 3);
-    return c ? { t: c.t / g.timeScale, x: c.x, y: c.y, z: c.z, reach: Math.abs(c.x - p.x) <= p.ch.reach && c.z <= p.ch.maxZ } : null;
+    return c ? { t: c.t, x: c.x, y: c.y, z: c.z, reach: Math.abs(c.x - p.x) <= p.ch.reach && c.z <= p.ch.maxZ } : null;
   }
 
   // ---------------- online ----------------
@@ -1295,25 +1297,27 @@
     const p = g.players[side], b = g.ball;
     if (g.phase === 'toss' && g.server === side) {
       const peak = g.peakT !== null ? g.peakT : g.time + Math.max(0, b.vel.z) / PHYS.G;
-      return { err: (g.time - peak) / g.timeScale };
+      return { err: g.time - peak };
     }
     if (!incomingTo(g, p)) return null;
-    if (p.cross && p.cross.t >= g.lastHitT) return { err: (g.time - p.cross.t) / g.timeScale };
+    if (p.cross && p.cross.t >= g.lastHitT) return { err: g.time - p.cross.t };
     const c = predictCross(g, p, 3);
     if (!c) return { whiff: 'Nothing to hit' };
-    return { err: -c.t / g.timeScale };
+    return { err: -c.t };
   }
 
-  // The menu's levels: ball speed (game time per real second) and how the CPU
-  // plays. err scales its timing errors, react is how long it takes to read a
+  // The menu's levels: ball speed (game time per real second; swipes are
+  // timed in game time, so a slower level looks and times just like Pro,
+  // only with more time to react) and how the CPU plays. err scales its
+  // timing errors, react is how long it takes to read a
   // shot (s), cover is how far it shades towards the angle, attack is how often
   // it goes for a winner off an easy ball, smart is how much it thinks
   // (patterns, learning your game, touch shots, the score). Tuned with `npm run sim` so a
   // loose player beats Chill, an average one usually beats Club, and Pro
   // takes sharp timing.
   CT.CPU_LEVELS = {
-    chill: { timeScale: 0.65, err: 1.9, react: 0.36, cover: 0.1, speed: 0.8, pace: 0.75, depth: 0.75, attack: 0, smart: 0.15 },
-    club: { timeScale: 0.8, err: 1.3, react: 0.26, cover: 0.2, speed: 0.9, pace: 0.86, depth: 0.88, attack: 0.15, smart: 0.55 },
+    chill: { timeScale: 0.75, err: 1.9, react: 0.36, cover: 0.1, speed: 0.8, pace: 0.75, depth: 0.75, attack: 0, smart: 0.15 },
+    club: { timeScale: 0.88, err: 1.3, react: 0.26, cover: 0.2, speed: 0.9, pace: 0.86, depth: 0.88, attack: 0.15, smart: 0.55 },
     pro: { timeScale: 1, err: 0.85, react: 0.14, cover: 0.38, speed: 1, pace: 1, depth: 1, attack: 0.3, smart: 1 },
   };
   CT.levelOpts = (level) => {

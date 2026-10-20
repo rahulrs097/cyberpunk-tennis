@@ -72,7 +72,7 @@ function makeBot(CT, g, side, skill, rnd) {
     if (plan.hitT !== g.lastHitT) { plan = null; return; }
     const crossed = p.cross && p.cross.t >= g.lastHitT;
     // (an early swipe whose moment fell between two frames goes as soon as it can)
-    const fire = plan.e < 0 ? crossed || (info && info.t <= -plan.e)
+    const fire = plan.e < 0 ? crossed || (info && info.t / g.timeScale <= -plan.e)
       : crossed && (g.time - p.cross.t) / g.timeScale >= plan.e;
     if (fire) { CT.requestSwipe(g, side, plan.input); lastHit = g.lastHitT; plan = null; }
   };
