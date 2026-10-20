@@ -205,16 +205,11 @@
   const BOARD_WORDS = { Ace: ['YEAH!!', '#e4ff4a'], Winner: ['OMG!!', '#e4ff4a'], Out: ['OOPS', '#ff3f6c'], Net: ['OOPS', '#ff3f6c'], 'Double fault': ['OOPS', '#ff3f6c'] };
   const LONG_RALLY = 8;   // shots in a rally that get a WOW
   let rallyShots = 0;
-  // Close calls go up on the billboard with how near the ball was to the
-  // line: outs that missed by up to CLOSE_OUT (m), ins that kept no more
+  // Close calls go up on the billboard as a close-up of the ball's mark
+  // against the line: outs that missed by up to CLOSE_OUT (m), ins that kept no more
   // than CLOSE_IN of the ball on the line. They stay up over the point's word.
   const CLOSE_OUT = 0.3, CLOSE_IN = 0.05;
   let lineCallShown = false;
-
-  function lineCallText(m) {
-    const mm = Math.max(1, Math.round(Math.abs(m) * 1000));
-    return (m > 0 ? 'OUT ' : 'IN ') + (mm < 10 ? mm + ' MM' : Math.round(mm / 10) + ' CM');
-  }
 
   function onEvent(type, d) {
     const names = game ? game.players.map((p) => p.ch.name) : ['', ''];
@@ -238,7 +233,7 @@
       if (net && net.role === 'guest') game.marks.push({ x: d.x, y: d.y, age: 0 });
     } else if (type === 'lineCall') {
       if (d.m > CLOSE_OUT || d.m < -CLOSE_IN) return;
-      CT.showBillboard(renderer, lineCallText(d.m), d.m > 0 ? '#ff3f6c' : '#3fff9a', 2.6);
+      CT.showLineCall(renderer, d.m, 3);
       lineCallShown = true;
     } else if (type === 'net') {
       blip(90, 0.12, 'sawtooth', 0.05);
