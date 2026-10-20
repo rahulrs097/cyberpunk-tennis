@@ -197,6 +197,16 @@
     return inX && inY;
   }
 
+  // How far (m) the edge of a ball bouncing at x, y missed the outside of the
+  // nearest line: positive when out, negative (by how much of the ball was
+  // still in) when in. Same call as inSingles / inServiceBox.
+  function lineMargin(x, y, box) {
+    const ax = box ? box.sign * x : Math.abs(x), ay = Math.abs(y);
+    const x0 = box ? 0 : -Infinity, x1 = COURT.SW, y1 = box ? COURT.SL : COURT.HL;
+    const past = Math.max(x0 - ax, ax - x1, ay - y1);   // beyond the outer edge of a line (<0 inside)
+    return past - PHYS.R;
+  }
+
   CT.COURT = COURT;
   CT.PHYS = PHYS;
   CT.netHeight = netHeight;
@@ -209,6 +219,7 @@
   CT.findRoot = findRoot;
   CT.inSingles = inSingles;
   CT.inServiceBox = inServiceBox;
+  CT.lineMargin = lineMargin;
   CT.clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   CT.lerp = (a, b, t) => a + (b - a) * t;
 })();

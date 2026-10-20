@@ -994,6 +994,7 @@
     const h = b.lastHitter, r = 1 - h;
     if (b.bounces === 0) {
       const inOppHalf = fwdOf(h) * b.pos.y > 0;
+      if (!b.netted && inOppHalf) emit(g, 'lineCall', { m: CT.lineMargin(b.pos.x, b.pos.y, b.isServe && g.serveBox) });
       if (b.isServe) {
         if (b.netted || !inOppHalf) fault(g, 'Net');
         else if (!CT.inServiceBox(b.pos.x, b.pos.y, g.serveBox)) fault(g, 'Fault');
