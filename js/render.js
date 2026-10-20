@@ -520,15 +520,13 @@
     if (r.quality) { ctx.shadowColor = PAL.line; ctx.shadowBlur = 14; }
     for (const q of courtLines()) rect(q);
     ctx.shadowBlur = 0;
-    // the mark: the contact patch, then the skid on from it
-    const bx = PX(call.x), by = PY(call.y);
-    const ex = PX(call.x + dx * skid), ey = PY(call.y + dy * skid);
+    // the mark: an oval from the back of the contact patch, stretched on
+    // along the skid
+    const mx = PX(call.x + dx * skid / 2), my = PY(call.y + dy * skid / 2);
+    const ang = Math.atan2(-f * dy, f * dx);
     ctx.globalAlpha = Math.min(1, age / 0.35);
     ctx.beginPath();
-    const ang = Math.atan2(ey - by, ex - bx);
-    ctx.arc(bx, by, R * k, ang + Math.PI / 2, ang + Math.PI * 1.5);
-    ctx.arc(ex, ey, R * k * 0.85, ang - Math.PI / 2, ang + Math.PI / 2);
-    ctx.closePath();
+    ctx.ellipse(mx, my, (R + skid / 2) * k, R * k, ang, 0, Math.PI * 2);
     ctx.fillStyle = 'rgba(228,255,74,0.55)'; ctx.fill();
     ctx.lineWidth = 3; ctx.strokeStyle = PAL.ball;
     if (r.quality) { ctx.shadowColor = PAL.ballGlow; ctx.shadowBlur = 12; }
