@@ -939,7 +939,7 @@ func on_bounce() -> void:
 	if b.bounces == 0:
 		var in_opp_half := fwd_of(h) * b.py > 0.0
 		if not b.netted and in_opp_half:
-			emit("lineCall", {"m": Phys.line_margin(b.px, b.py, b.is_serve, box_sign), "x": b.px, "y": b.py, "vx": b.vx, "vy": b.vy, "box": b.is_serve})
+			emit("lineCall", {"m": Phys.line_margin(b.px, b.py, b.is_serve, box_sign), "x": b.px, "y": b.py, "vx": b.vx, "vy": b.vy, "box": {"side": box_side, "sign": box_sign} if b.is_serve else null})
 		if b.is_serve:
 			if b.netted or not in_opp_half: fault("Net")
 			elif not Phys.in_service_box(b.px, b.py, box_side, box_sign): fault("Fault")

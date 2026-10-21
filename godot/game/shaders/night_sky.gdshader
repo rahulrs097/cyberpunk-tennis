@@ -1,7 +1,17 @@
-// The game's night sky: purple haze on the horizon into deep blue, stars and a moon.
+// The game's night sky: purple haze on the horizon into deep blue, stars and a
+// moon, behind the skyline baked in Blender (art/skyline_pano.png, made by
+// art/skyline_pano.py). The bake is an equirectangular strip over latitudes
+// lat_min..lat_max, centred on the far end of the court (-z here), 8192 wide
+// and stored as two stacked 4096 halves (the left half on top). It holds
+// linear colour scaled down by 2^gain so the lit windows fit in 8 bits.
 shader_type sky;
 
 uniform vec3 moon_dir = vec3(0.33, 0.21, -0.92);
+uniform sampler2D skyline : source_color, filter_linear, repeat_disable;
+uniform float lat_min = -10.0;
+uniform float lat_max = 26.0;
+uniform float gain = 1.7;
+uniform float wall_gain = 1.6;
 
 float hash(vec3 p) { return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }
 
@@ -27,5 +37,17 @@ void sky() {
 	float m = dot(d, normalize(moon_dir));
 	c += vec3(0.9, 0.92, 1.0) * smoothstep(0.99975, 0.9998, m) * 3.0;
 	c += vec3(0.5, 0.55, 0.8) * pow(max(m, 0.0), 900.0) * 0.4;
+	// the baked skyline over it (below the strip: the street at its bottom edge)
+	float lat = degrees(asin(clamp(h, -1.0, 1.0)));
+	if (lat < lat_max) {
+		float u = 0.5 + atan(d.x, -d.z) / (2.0 * PI);
+		float v = (lat_max - max(lat, lat_min + 0.06)) / (lat_max - lat_min) * 0.5;
+		vec2 uv = u < 0.5 ? vec2(u * 2.0, v) : vec2(u * 2.0 - 1.0, v + 0.5);
+		vec4 t = texture(skyline, uv);
+		// the lit windows get their full brightness back; the walls and haze
+		// stay dark (Blender graded them with AgX's high-contrast look)
+		float lum = max(t.r, max(t.g, t.b));
+		c = mix(c, t.rgb * mix(wall_gain, exp2(gain), smoothstep(0.04, 0.25, lum)), t.a);
+	}
 	COLOR = c;
 }

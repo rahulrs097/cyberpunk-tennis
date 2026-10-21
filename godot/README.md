@@ -10,8 +10,9 @@ tests prove it.
 | --- | --- |
 | `engine/` | The match engine, a line-for-line GDScript port of `js/physics.js`, `js/match.js`, `js/game.js` and the stats in `js/characters.js` |
 | `native/` | `FastFlight`, the ball flight in C++ (a GDExtension). The shot solver flies thousands of trial balls per shot. That is 10 to 40 ms in GDScript and under 1 ms in C++. If the library isn't built, the engine falls back to GDScript with identical results |
-| `game/` | The app. `arena.gd` is the rooftop court, `actors.gd` the players and ball, `camera_rig.gd` the chase and first-person views, `main.gd` the input and match loop, `hud.gd` the menus and HUD, and `settings.gd` the saved settings and graphics presets |
-| `art/` | Assets exported from the Blender art tests (the parked cars so far) |
+| `game/` | The app. `arena.gd` is the rooftop court, `actors.gd` the players and ball, `camera_rig.gd` the chase and first-person views, `main.gd` the input and match loop, `hud.gd` the menus and HUD (the web game's design, from `neon.gd`), `billboard.gd` the HHORNS sign, and `settings.gd` the saved settings and graphics presets |
+| `art/` | Assets from the Blender art tests: the parked cars, the character portraits, and `skyline_pano.png`, the city skyline baked into a 360° strip by `skyline_pano.py` from the court scene (the sky shader draws it behind everything, on every preset). Also the billboard photo |
+| `fonts/` | Tektur and Chakra Petch, the web game's fonts (SIL Open Font License) |
 | `tests/` | `js_trace.js` records seeded sets from the JS engine. `parity.gd` replays them in GDScript and checks every event. `input_smoke.gd` drives the app with touches |
 
 ## Graphics presets
@@ -25,7 +26,6 @@ Every preset targets a steady 60 fps (`Engine.max_fps = 60`):
 | Neon glow | off | on | high | high |
 | Lamp shadows | none | none | 2 lamps | all 6 |
 | Car underglow lights, outer car rows | no | no | yes | yes |
-| Skyline buildings | 60 | 110 | 170 | 240 |
 
 **Auto** is the default. On first launch it times the High preset in the menu for three seconds, using GPU time per frame, and picks the preset that fits. During play, if three seconds average under 50 fps, it drops one preset and says so. You can pick a preset yourself in the menu or the pause screen.
 

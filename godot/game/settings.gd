@@ -8,15 +8,15 @@ extends RefCounted
 const PATH := "user://settings.cfg"
 const ORDER := ["low", "medium", "high", "ultra"]
 const PRESETS := {
-	# scale: 3D resolution; detail: 0 bare court .. 2 everything; towers: skyline buildings
+	# scale: 3D resolution; detail: 0 bare court .. 2 everything
 	"low": {"name": "Low", "scale": 0.6, "msaa": Viewport.MSAA_DISABLED, "fxaa": false, "glow": false, "glow_hq": false,
-		"fog": false, "lamp_shadows": 0, "extra_lights": false, "detail": 0, "towers": 60, "shadow_size": 1024, "trail": 4},
+		"fog": false, "lamp_shadows": 0, "extra_lights": false, "detail": 0, "shadow_size": 1024, "trail": 4},
 	"medium": {"name": "Medium", "scale": 0.75, "msaa": Viewport.MSAA_DISABLED, "fxaa": true, "glow": true, "glow_hq": false,
-		"fog": true, "lamp_shadows": 0, "extra_lights": false, "detail": 1, "towers": 110, "shadow_size": 1024, "trail": 6},
+		"fog": true, "lamp_shadows": 0, "extra_lights": false, "detail": 1, "shadow_size": 1024, "trail": 6},
 	"high": {"name": "High", "scale": 0.9, "msaa": Viewport.MSAA_2X, "fxaa": false, "glow": true, "glow_hq": true,
-		"fog": true, "lamp_shadows": 2, "extra_lights": true, "detail": 2, "towers": 170, "shadow_size": 2048, "trail": 10},
+		"fog": true, "lamp_shadows": 2, "extra_lights": true, "detail": 2, "shadow_size": 2048, "trail": 10},
 	"ultra": {"name": "Ultra", "scale": 1.0, "msaa": Viewport.MSAA_4X, "fxaa": false, "glow": true, "glow_hq": true,
-		"fog": true, "lamp_shadows": 6, "extra_lights": true, "detail": 2, "towers": 240, "shadow_size": 4096, "trail": 14},
+		"fog": true, "lamp_shadows": 6, "extra_lights": true, "detail": 2, "shadow_size": 4096, "trail": 14},
 }
 
 var graphics := "auto"      # auto | low | medium | high | ultra

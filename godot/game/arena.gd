@@ -1,7 +1,8 @@
 # The rooftop parking lot at night, built in code to the layout of
 # js/render.js and the Blender court test (art/court-test): court, net, the
-# six lamps, parked cars with underglow, parapets, the HHORNS billboard and
-# the skyline. Detail follows the graphics preset (Settings.PRESETS).
+# six lamps, parked cars with underglow, parapets and the HHORNS billboard.
+# The skyline is baked into the sky (shaders/night_sky.gdshader). Detail
+# follows the graphics preset (Settings.PRESETS).
 # Game coordinates (x across, y along the court, z up) map to Godot as
 # Vector3(x, z, -y).
 class_name Arena
@@ -46,7 +47,6 @@ func build(p: Dictionary) -> void:
 	_cars()
 	_parapets()
 	_billboard()
-	_skyline()
 	apply_preset(p)
 
 
@@ -109,6 +109,8 @@ func _environment() -> void:
 	var sky := Sky.new()
 	var sm := ShaderMaterial.new()
 	sm.shader = load("res://game/shaders/night_sky.gdshader")
+	# the skyline and the street below, baked in Blender (see the shader)
+	sm.set_shader_parameter("skyline", load("res://art/skyline_pano.png"))
 	sky.sky_material = sm
 	env.sky = sky
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
@@ -340,72 +342,12 @@ func _parapets() -> void:
 
 
 # ---------------------------------------------------------------- the billboard (BOARD in render.js)
-var board_label: Label3D
+var board: Billboard
 
 func _billboard() -> void:
-	var root := Node3D.new()
-	root.position = gv(-6.0, 40.0, 0.0)
-	root.rotation.y = 0.4   # (turned in towards the court, far end to the right)
-	add_child(root)
-	var metal := mat(Color("#1c1b2a"), 0.4, 0.7)
-	var pylon := MeshInstance3D.new(); var pm := CylinderMesh.new()
-	pm.top_radius = 0.5; pm.bottom_radius = 0.5; pm.height = 5.5 + DROP
-	pylon.mesh = pm; pylon.material_override = metal; pylon.position = Vector3(0, (5.5 - DROP) / 2.0, -0.6)
-	root.add_child(pylon)
-	var panel := MeshInstance3D.new(); var bm := BoxMesh.new(); bm.size = Vector3(17.0, 5.2, 0.3)
-	panel.mesh = bm; panel.material_override = mat(Color("#080616"), 0.5); panel.position = Vector3(0, 5.5 + 2.6, -0.35)
-	root.add_child(panel)
-	var frame := glow_mat(Color("#ff3fb4"), 3.0)
-	for f in [[0.0, 5.76, 16.6, 0.12], [0.0, 10.44, 16.6, 0.12], [-8.24, 8.1, 0.12, 4.8], [8.24, 8.1, 0.12, 4.8]]:
-		var fm := MeshInstance3D.new(); var fb := BoxMesh.new(); fb.size = Vector3(f[2], f[3], 0.08)
-		fm.mesh = fb; fm.material_override = frame; fm.position = Vector3(f[0], f[1], -0.15)
-		root.add_child(fm)
-	board_label = Label3D.new()
-	board_label.text = "HHORNS"
-	board_label.font_size = 420
-	board_label.pixel_size = 0.0085
-	board_label.modulate = Color(0.15, 0.85, 1.0) * 2.4
-	board_label.outline_size = 0
-	board_label.position = Vector3(0, 8.1, -0.1)
-	board_label.shaded = false
-	root.add_child(board_label)
+	board = Billboard.new(mat(Color("#1c1b2a"), 0.4, 0.7))
+	board.position = gv(-6.0, 40.0, 0.0)
+	board.rotation.y = 0.4   # (turned in towards the court, far end to the right)
+	add_child(board)
 
 
-func flash_board(text: String, color: Color) -> void:
-	board_label.text = text
-	board_label.modulate = color * 2.4
-
-
-func reset_board() -> void:
-	board_label.text = "HHORNS"
-	board_label.modulate = Color(0.15, 0.85, 1.0) * 2.4
-
-
-# ---------------------------------------------------------------- skyline
-func _skyline() -> void:
-	var mm := MultiMesh.new()
-	mm.transform_format = MultiMesh.TRANSFORM_3D
-	mm.mesh = BoxMesh.new()
-	var rng := RandomNumberGenerator.new()
-	rng.seed = 4
-	var xf := []
-	var count: int = preset.towers
-	while xf.size() < count:
-		var ang := rng.randf_range(-1.25, 1.25) if rng.randf() < 0.75 else rng.randf_range(1.25, 2.6) * (1.0 if rng.randf() < 0.5 else -1.0)
-		var dist := rng.randf_range(220.0, 700.0)
-		var x := dist * sin(ang); var y := dist * cos(ang)
-		var h := rng.randf_range(10.0, 45.0) * (1.6 if dist > 420.0 else 1.0) * (1.5 if rng.randf() > 0.88 else 1.0)
-		var w := rng.randf_range(18.0, 40.0); var d := rng.randf_range(18.0, 40.0)
-		var b := Basis(Vector3.UP, rng.randf_range(-0.2, 0.2)).scaled(Vector3(w, h + DROP, d))
-		xf.append(Transform3D(b, gv(x, y, (h - DROP) / 2.0)))
-	mm.instance_count = xf.size()
-	for i in xf.size():
-		mm.set_instance_transform(i, xf[i])
-	var mmi := MultiMeshInstance3D.new()
-	mmi.multimesh = mm
-	var sm := ShaderMaterial.new()
-	sm.shader = load("res://game/shaders/towers.gdshader")
-	mmi.material_override = sm
-	add_child(mmi)
-	var street := mat(Color(0.01, 0.01, 0.012), 0.3)
-	box(Vector3(-900, -600, -DROP - 0.1), Vector3(900, 900, -DROP), street)

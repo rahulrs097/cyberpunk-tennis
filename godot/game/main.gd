@@ -2,8 +2,15 @@
 # against the CPU; the online mode comes with multiplayer.
 extends Node3D
 
-const BOARD_WORDS := {"Ace": ["ACE", "#ffc23d"], "Winner": ["WINNER", "#25d9ff"], "Out": ["OUT", "#ff3f6c"],
-	"Net": ["NET", "#ff3fb4"], "Double fault": ["DOUBLE FAULT", "#ff3f6c"]}
+# What the billboard says (as js/main.js)
+const BOARD_WORDS := {"Ace": ["YEAH!!", "#e4ff4a"], "Winner": ["OMG!!", "#e4ff4a"], "Out": ["OOPS", "#ff3f6c"],
+	"Net": ["OOPS", "#ff3f6c"], "Double fault": ["OOPS", "#ff3f6c"]}
+const LONG_RALLY := 8   # shots in a rally that get a WOW
+# Close calls go up on the billboard as a close-up of the ball's mark against
+# the line: outs that missed by up to CLOSE_OUT (m), ins that kept no more
+# than CLOSE_IN of the ball on the line. They stay up over the point's word.
+const CLOSE_OUT := 0.3
+const CLOSE_IN := 0.05
 # A lob: an upward swipe at least LOB_LEN screens long, averaging under LOB_SPEED screens a second.
 const LOB_LEN := 0.22
 const LOB_SPEED := 1.4
@@ -17,7 +24,8 @@ var game: TennisGame = null
 var me := 0
 var paused := false
 var touch = null            # {index, pts: [[pos, ms]]}
-var board_until := 0.0
+var rally_shots := 0
+var line_call_shown := false
 # frame-rate watch: benchmark in the menu, then step down on auto when slow
 var bench := {"t": 0.0, "frames": 0, "gpu": 0.0, "cpu": 0.0, "done": false}
 var watch := {"t": 0.0, "frames": 0}
@@ -116,9 +124,6 @@ func _process(dt: float) -> void:
 	actors.sync_ball(me, true)
 	cam.update_view(game, me, dt)
 	hud.update(game, me, dt)
-	if board_until > 0.0 and Time.get_ticks_msec() / 1000.0 > board_until:
-		board_until = 0.0
-		arena.reset_board()
 
 
 # ---------------------------------------------------------------- graphics
@@ -192,12 +197,23 @@ func _on_event(type: String, d: Dictionary) -> void:
 	match type:
 		"hit":
 			hud.hint("")
+			line_call_shown = false
+			rally_shots = 1 if d.kind == "serve" else rally_shots + 1
+			var kind: String = d.kind
+			if rally_shots == LONG_RALLY or (d.perfect and d.side == me and (kind.to_lower().contains("power") or kind == "overhead")):
+				arena.board.show_word("WOW", Neon.PINK, 1.8)
 			if d.side == me:
-				var s := "%s %d km/h" % [d.spin, d.kmh]
-				if d.curve != "": s += ", " + d.curve
-				if d.perfect: s += "  ·  Perfect"
-				elif d.note != "": s += "  ·  " + d.note
-				hud.show_shot(s)
+				var wing: String = {"fh": "Forehand", "bh": "Backhand"}.get(d.wing, "")
+				var label: String = {"serve": "Serve", "overhead": "Overhead", "volley": wing + " volley",
+					"power": "Power " + wing.to_lower(), "powerVolley": "Power " + wing.to_lower() + " volley"}.get(d.kind, wing)
+				var timing: String = "Perfect timing" if d.perfect else (d.note if d.note != "" and absi(d.errMs) < 15
+					else ("Late " if d.errMs > 0 else "Early ") + str(absi(d.errMs)) + " ms" + (" · " + d.note if d.note != "" else ""))
+				var parts := [label, timing, "%d km/h" % d.kmh, d.spin, d.curve].filter(func(x): return x != "")
+				hud.show_shot(" · ".join(PackedStringArray(parts)))
+		"lineCall":
+			if d.m > CLOSE_OUT or d.m < -CLOSE_IN: return
+			arena.board.show_call(d, me, 3.0)
+			line_call_shown = true
 		"whiff":
 			if d.side == me: hud.show_shot(d.reason)
 		"fault":
@@ -208,10 +224,10 @@ func _on_event(type: String, d: Dictionary) -> void:
 			if d.result == "game": sub = names[d.winner] + " takes the game"
 			if d.result == "set": sub = names[d.winner] + " wins the set"
 			hud.show_msg(d.text, sub, "good" if d.winner == me else "bad")
-			if BOARD_WORDS.has(d.text):
-				arena.flash_board(BOARD_WORDS[d.text][0], Color(BOARD_WORDS[d.text][1]))
-				board_until = Time.get_ticks_msec() / 1000.0 + 2.6
+			if BOARD_WORDS.has(d.text) and not line_call_shown:
+				arena.board.show_word(BOARD_WORDS[d.text][0], Color(BOARD_WORDS[d.text][1]), 2.6)
 		"serveReady":
+			line_call_shown = false
 			hud.hint("Tap to toss, then swipe as the ball peaks" if d.server == me else "")
 		"toss":
 			if d.side == me: hud.hint("Swipe at the top of the toss")
