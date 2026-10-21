@@ -40,4 +40,5 @@ function trace(name, seed, level, p0, p1, ctl) {
   console.log(name, g.match.games.join('-'), events.length, 'events');
 }
 
+fs.mkdirSync(path.join(__dirname, 'traces'), { recursive: true });
 for (const c of CASES) trace(...c);
