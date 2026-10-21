@@ -172,6 +172,7 @@
     g.peakT = null;
     g.peakBall = null;
     g.held = null;
+    g.shots = 0;
     if (!keepClock) g.serveWait = 0;
     emit(g, 'serveReady', { server, first: m.firstServe });
   }
@@ -475,6 +476,7 @@
       note: Math.abs(shot.e) >= 0.35 ? shot.note : '',
     };
     g.lastShot = info;
+    g.shots++;
     // where will it land? used for the landing marker
     const fl = CT.flight(b.pos, b.vel, b.spin, b.side);
     g.predLand = fl.land;
@@ -971,11 +973,14 @@
     const ls = g.lastShot, sc = g.scout;
     if ((text === 'Out' || text === 'Net') && ls && ls.side === 1 - w && ls.kind !== 'serve') sc[ls.side][ls.wing].err++;
     for (const p of g.players) { sc[p.side].points++; if (p.seenAtNet) sc[p.side].net++; }
+    // (server, shots in the rally and whether it was a tiebreak point are
+    // for the achievements; games is the score after the point)
+    const tiebreak = g.match.tiebreak;
     const res = CT.awardPoint(g.match, w);
     g.phase = 'pointOver';
     g.phaseWall = 0;
     for (const p of g.players) p.pending = null;
-    emit(g, 'point', { winner: w, text, detail, result: res });
+    emit(g, 'point', { winner: w, text, detail, result: res, server: g.server, shots: g.shots, tiebreak, games: g.match.games.slice() });
   }
 
   function fault(g, text) {
