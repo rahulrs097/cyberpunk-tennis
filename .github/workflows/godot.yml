@@ -27,13 +27,16 @@ jobs:
       - name: godot-cpp
         uses: actions/cache@v4
         with:
-          path: godot-cpp
+          path: /tmp/gc
           key: godot-cpp-linux-${{ env.GODOT_CPP_TAG }}
+      # godot-cpp lives at a short path: its static library is archived in one
+      # shell command, which overflows the argument limit under the long
+      # workspace path.
       - name: FastFlight extension (Linux)
         run: |
-          [ -d godot-cpp ] || git clone --depth 1 --branch "$GODOT_CPP_TAG" https://github.com/godotengine/godot-cpp.git
+          [ -d /tmp/gc ] || git clone --depth 1 --branch "$GODOT_CPP_TAG" https://github.com/godotengine/godot-cpp.git /tmp/gc
           pip install scons
-          cd godot/native && GODOT_CPP=$GITHUB_WORKSPACE/godot-cpp scons platform=linux target=template_release -j4
+          cd godot/native && GODOT_CPP=/tmp/gc scons platform=linux target=template_release -j4
       - name: Import
         run: godot --headless --path godot --import || godot --headless --path godot --import
       - name: Parity with the JS engine
@@ -71,14 +74,14 @@ jobs:
       - name: godot-cpp
         uses: actions/cache@v4
         with:
-          path: godot-cpp
+          path: /tmp/gc
           key: godot-cpp-android-${{ env.GODOT_CPP_TAG }}
       - name: FastFlight extension (Android arm64)
         run: |
-          [ -d godot-cpp ] || git clone --depth 1 --branch "$GODOT_CPP_TAG" https://github.com/godotengine/godot-cpp.git
+          [ -d /tmp/gc ] || git clone --depth 1 --branch "$GODOT_CPP_TAG" https://github.com/godotengine/godot-cpp.git /tmp/gc
           pip install scons
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;$NDK_VERSION" > /dev/null
-          cd godot/native && GODOT_CPP=$GITHUB_WORKSPACE/godot-cpp scons platform=android arch=arm64 target=template_release -j4
+          cd godot/native && GODOT_CPP=/tmp/gc scons platform=android arch=arm64 target=template_release -j4
       - name: Editor settings and debug keystore
         run: |
           keytool -genkeypair -v -keystore ~/debug.keystore -storepass android -alias androiddebugkey -keypass android \
