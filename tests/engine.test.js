@@ -237,6 +237,25 @@ test('being jammed, stretched or on the run counts as mistiming', () => {
   assert.equal(run.note, 'On the run');
 });
 
+test('back-to-back power groundstrokes tire you, but attacking the net does not', () => {
+  const CT = loadEngine();
+  const input = { aim: 0, landX: 0, pace: 0.9, spinDir: 1, curve: 0, depth: 1 };
+  // stamina spent hitting these kinds one after another (swings included)
+  const cost = (kinds) => {
+    const { g, p } = atContact(CT, 'octopus', 0.6, -12.5, 1);
+    const base = CT._computeShot(g, p, input, 0);
+    for (const kind of kinds) CT._applyShot(g, p, { ...base, pos: { ...base.pos }, kind });
+    return 100 - p.stamina;
+  };
+  const swings = (n) => 0.4 * n;
+  // baseline power spam: 3 + 6 + 9
+  assert.ok(Math.abs(cost(['power', 'power', 'power']) - (18 + swings(3))) < 1e-6);
+  // approach, power volley, smash, power volley: only the approach costs extra
+  assert.ok(Math.abs(cost(['power', 'powerVolley', 'overhead', 'powerVolley']) - (3 + swings(4))) < 1e-6);
+  // a put-away at the net breaks the run, so the next power groundstroke starts at 3
+  assert.ok(Math.abs(cost(['power', 'power', 'volley', 'power']) - (12 + swings(4))) < 1e-6);
+});
+
 // ---------------- whole sets ----------------
 test('a CPU-vs-CPU set finishes with a valid score, and stamina runs down', () => {
   const CT = loadEngine(7);

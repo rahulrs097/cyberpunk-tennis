@@ -455,8 +455,11 @@
       g.scout[p.side][shot.wing].n++;
       if (-p.fwd * p.y < NET_ZONE) p.seenAtNet = true;
     }
-    if (shot.kind === 'power' || shot.kind === 'powerVolley') { p.streak++; p.stamina = Math.max(0, p.stamina - 3 * p.streak); }
-    else if (shot.kind === 'ground' || shot.kind === 'volley') p.streak = 0;
+    // Back-to-back power groundstrokes cost 3, 6, 9... so baseline power
+    // can't be spammed. Shots out of the air don't count and break the run:
+    // an approach, a power volley and a smash is one attack, not three.
+    if (shot.kind === 'power') { p.streak++; p.stamina = Math.max(0, p.stamina - 3 * p.streak); }
+    else if (shot.kind !== 'serve') p.streak = 0;
     p.swing = 0;
     p.swingWing = shot.kind === 'overhead' ? 'oh' : shot.kind === 'serve' ? 'serve' : shot.wing;
     g.phase = 'rally';
@@ -1334,6 +1337,7 @@
   CT.cancelPrediction = cancelPrediction;
   CT.createGame = createGame;
   CT._computeShot = computeShot;   // for tests
+  CT._applyShot = applyShot;
   CT._cpuPlan = cpuPlan;
   CT.updateGame = update;
   CT.requestMove = requestMove;
