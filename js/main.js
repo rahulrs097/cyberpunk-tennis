@@ -21,6 +21,10 @@
   try { const v = localStorage.getItem('ct.music'); if (v !== null) musicOn = v === '1'; } catch (e) { /* storage is optional */ }
   let view = 'chase';  // camera: 'chase' (behind and above) or 'first' (your eyes)
   try { if (localStorage.getItem('ct.view') === 'first') view = 'first'; } catch (e) { /* storage is optional */ }
+  // achievements and stats saved on this phone, and the tracker for the
+  // match in progress (none in the tutorial)
+  const ach = CT.loadAchievements();
+  let tracker = null;
   let lastFrame = performance.now();
   const FRAME_MS = 1000 / 60;
   let frameDue = 0;
@@ -211,8 +215,30 @@
   const CLOSE_OUT = 0.3, CLOSE_IN = 0.05;
   let lineCallShown = false;
 
+  // Achievements go up on the billboard after the point's word, one at a time.
+  const ACH_DELAY = 1.3, ACH_SECS = 2.4;
+  let achQueue = [], achFreeAt = 0, achNew = [];
+  function track(type, d) {
+    if (!tracker || (type !== 'point' && type !== 'hit')) return;
+    const res = tracker[type](d);
+    const fresh = CT.recordAchievements(ach, res, tracker.mode);
+    achNew.push(...fresh);
+    const show = res.earned.filter((id) => fresh.includes(id) || !CT.achievement(id).common);
+    if (!show.length) return;
+    const now = performance.now() / 1000;
+    if (!achQueue.length) achFreeAt = Math.max(achFreeAt, now + ACH_DELAY);
+    achQueue.push(...show);
+  }
+  function showAchievements(now) {
+    if (!achQueue.length || now < achFreeAt) return;
+    const a = CT.achievement(achQueue.shift());
+    CT.showBillboard(renderer, a.name.toUpperCase(), a.pro ? '#ffc23d' : '#25d9ff', ACH_SECS);
+    achFreeAt = now + ACH_SECS;
+  }
+
   function onEvent(type, d) {
     const names = game ? game.players.map((p) => p.ch.name) : ['', ''];
+    track(type, d);
     if (type === 'hit') {
       lineCallShown = false;
       rallyShots = d.kind === 'serve' ? 1 : rallyShots + 1;
@@ -272,7 +298,9 @@
     const score = `${m.games[winner]}–${m.games[1 - winner]}` + (m.tiebreak ? ` (${m.points[winner]}–${m.points[1 - winner]})` : '');
     $('endTitle').textContent = winner === me ? 'You win the set' : `${w} wins the set`;
     $('endScore').textContent = score;
-    $('endNote').hidden = true;
+    const fresh = achNew.map((id) => CT.achievement(id).name);
+    $('endNote').textContent = fresh.length ? 'Unlocked: ' + fresh.join(', ') : '';
+    $('endNote').hidden = !fresh.length;
     $('rematch').textContent = 'Rematch';
     $('end').hidden = false;
     leaveFullscreen();
@@ -535,6 +563,8 @@
   function showMenu() {
     leaveOnline(true);
     tut = null;
+    tracker = null;
+    achQueue = [];
     $('lobby').hidden = true;
     CT.Music.setPlaying(false);
     $('end').hidden = true;
@@ -564,6 +594,8 @@
     // events fired while the game is being built are ignored; the HUD is
     // refreshed below once it exists. The host also forwards every event.
     let g = null;
+    tracker = tut || cfg.drill ? null : CT.createAchievementTracker(me, net ? 'online' : level);
+    achQueue = []; achNew = [];
     g = CT.createGame({ ...cfg, firstServer: 0, onEvent: (t, d) => {
       if (!g || game !== g) return;
       onEvent(t, d);
@@ -597,6 +629,7 @@
       updateHud();
       if (msgTimer > 0) { msgTimer -= dt; if (msgTimer <= 0) $('msg').hidden = true; }
       if (shotTimer > 0) { shotTimer -= dt; if (shotTimer <= 0) $('shot').hidden = true; }
+      showAchievements(now / 1000);
     }
     if (game) {
       // draw the ball where it's shown (online it can lag the real one briefly)
@@ -667,6 +700,42 @@
     });
   }
 
+  // ---------------- achievements screen ----------------
+  // Only unlocked achievements are listed; locked ones stay hidden.
+  const STAT_ROWS = [['Matches', (s) => s.played], ['Won', (s) => s.won + (s.played ? ' (' + Math.round(100 * s.won / s.played) + '%)' : '')],
+    ['Win streak', (s) => s.streak], ['Best streak', (s) => s.bestStreak], ['Games won', (s) => s.games], ['Points won', (s) => s.points],
+    ['Aces', (s) => s.aces], ['Double faults', (s) => s.doubleFaults], ['Longest rally', (s) => s.longestRally ? s.longestRally + ' shots' : '–'],
+    ['Fastest serve', (s) => s.fastestServe ? s.fastestServe + ' km/h' : '–']];
+  let statMode = 'all';
+  function showTrophies() {
+    const got = CT.ACHIEVEMENTS.filter((a) => ach.earned[a.id]);
+    const list = $('achList');
+    list.textContent = '';
+    for (const a of got) {
+      const li = document.createElement('li');
+      const nm = document.createElement('b'); nm.textContent = a.name;
+      if (a.pro) { const t = document.createElement('i'); t.textContent = 'Pro'; nm.append(' ', t); }
+      const ds = document.createElement('span'); ds.textContent = a.desc;
+      const n = document.createElement('em'); n.textContent = '×' + ach.earned[a.id].n;
+      li.append(nm, n, ds);
+      list.append(li);
+    }
+    $('achEmpty').hidden = got.length > 0;
+    showStats(statMode);
+    $('trophies').hidden = false;
+  }
+  function showStats(mode) {
+    statMode = mode;
+    document.querySelectorAll('[data-stats]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.stats === mode)));
+    const s = CT.achievementStats(ach, mode), dl = $('statList');
+    dl.textContent = '';
+    for (const [label, f] of STAT_ROWS) {
+      const dt = document.createElement('dt'); dt.textContent = label;
+      const dd = document.createElement('dd'); dd.textContent = f(s);
+      dl.append(dt, dd);
+    }
+  }
+
   function init() {
     canvas.addEventListener('pointerdown', onDown, { passive: false });
     canvas.addEventListener('pointermove', onMove, { passive: false });
@@ -709,6 +778,9 @@
     $('tutBtn').addEventListener('click', () => { ensureAudio(); startTutorial(); });
     $('helpTut').addEventListener('click', () => { $('help').hidden = true; ensureAudio(); startTutorial(); });
     $('helpClose').addEventListener('click', () => { $('help').hidden = true; });
+    $('achBtn').addEventListener('click', showTrophies);
+    $('achClose').addEventListener('click', () => { $('trophies').hidden = true; });
+    document.querySelectorAll('[data-stats]').forEach((b) => b.addEventListener('click', () => showStats(b.dataset.stats)));
     $('hostBtn').addEventListener('click', hostRoom);
     $('joinBtn').addEventListener('click', () => { leaveOnline(true); lobby('Enter the 4-letter code your friend sees.', '', true); $('codeInput').value = ''; $('codeInput').focus(); });
     $('lobbyGo').addEventListener('click', () => {

@@ -147,6 +147,17 @@
   .btns { display: flex; gap: 10px; flex-wrap: wrap; }
   .opts { display: grid; grid-template-columns: auto 1fr; gap: 8px 12px; align-items: center; }
   .opts .seg button { padding-top: 8px; padding-bottom: 8px; }
+  #trophies { align-items: flex-start; }
+  .ach { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+  .ach li { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; }
+  .ach b { font-family: var(--display); font-weight: 700; font-size: 15px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--cyan); }
+  .ach i { font-style: normal; font-family: var(--ui); font-size: 10px; letter-spacing: 0.14em; color: var(--gold); border: 1px solid var(--gold); border-radius: 3px; padding: 0 4px; vertical-align: 2px; }
+  .ach em { font-style: normal; color: var(--ball); font-variant-numeric: tabular-nums; }
+  .ach span { grid-column: 1 / 3; font-size: 13px; color: var(--muted); }
+  .stats { margin: 0; display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; font-size: 14px; }
+  .stats dt { color: var(--muted); }
+  .stats dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+  .seg.tabs button { min-height: 36px; font-size: 12px; letter-spacing: 0.04em; padding: 0 2px; min-width: 0; }
   @media (max-height: 760px) {
     .sheet { gap: 12px; }
     #menu .lede, .pick dl { display: none; }
@@ -225,6 +236,26 @@
       <button id="tutBtn">Tutorial</button>
       <button id="howBtn">How to play</button>
     </div>
+    <button class="btn" id="achBtn">Achievements &amp; stats</button>
+  </div>
+</div>
+<div class="overlay" id="trophies" hidden>
+  <div class="sheet">
+    <div class="title"><b>Achievements</b></div>
+    <p class="lede" id="achEmpty">None yet. Play a match to start unlocking them.</p>
+    <ul class="ach" id="achList"></ul>
+    <div class="label">Stats</div>
+    <div class="seg tabs">
+      <button data-stats="all" aria-pressed="true">All</button>
+      <button data-stats="chill" aria-pressed="false">Chill</button>
+      <button data-stats="club" aria-pressed="false">Club</button>
+      <button data-stats="pro" aria-pressed="false">Pro</button>
+      <button data-stats="online" aria-pressed="false">Online</button>
+    </div>
+    <dl class="stats" id="statList"></dl>
+    <div class="btns">
+      <button class="btn primary" id="achClose">Back</button>
+    </div>
   </div>
 </div>
 
@@ -290,6 +321,7 @@
 <script src="js/characters.js"></script>
 <script src="js/match.js"></script>
 <script src="js/game.js"></script>
+<script src="js/achievements.js"></script>
 <script src="js/render.js"></script>
 <script src="js/music.js"></script>
 <script src="js/net.js"></script>
