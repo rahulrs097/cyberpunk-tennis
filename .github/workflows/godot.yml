@@ -1,0 +1,108 @@
+name: Godot
+on:
+  push:
+    paths: ['godot/**', 'js/**', 'tests/**', '.github/workflows/godot.yml']
+  pull_request:
+    paths: ['godot/**', 'js/**', 'tests/**', '.github/workflows/godot.yml']
+  workflow_dispatch:
+
+env:
+  GODOT_VERSION: 4.5.1
+  GODOT_CPP_TAG: godot-4.5-stable
+  NDK_VERSION: 28.1.13356709
+
+jobs:
+  # The GDScript engine against the JS one, plus a touch-input smoke test.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Godot
+        run: |
+          curl -sSL -o godot.zip "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          unzip -q godot.zip && mv "Godot_v${GODOT_VERSION}-stable_linux.x86_64" /usr/local/bin/godot
+      - name: godot-cpp
+        uses: actions/cache@v4
+        with:
+          path: godot-cpp
+          key: godot-cpp-linux-${{ env.GODOT_CPP_TAG }}
+      - name: FastFlight extension (Linux)
+        run: |
+          [ -d godot-cpp ] || git clone --depth 1 --branch "$GODOT_CPP_TAG" https://github.com/godotengine/godot-cpp.git
+          pip install scons
+          cd godot/native && GODOT_CPP=$GITHUB_WORKSPACE/godot-cpp scons platform=linux target=template_release -j4
+      - name: Import
+        run: godot --headless --path godot --import || godot --headless --path godot --import
+      - name: Parity with the JS engine
+        run: |
+          node godot/tests/js_trace.js
+          godot --headless --path godot -s tests/parity.gd
+          CT_NO_NATIVE=1 godot --headless --path godot -s tests/parity.gd
+      - name: Input smoke test
+        run: godot --headless --path godot -s tests/input_smoke.gd
+
+  # A debug-signed APK for sideloading, uploaded as a build artifact.
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Godot and export templates
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/godot/export_templates
+          key: godot-templates-${{ env.GODOT_VERSION }}
+      - name: Install Godot
+        run: |
+          curl -sSL -o godot.zip "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          unzip -q godot.zip && sudo mv "Godot_v${GODOT_VERSION}-stable_linux.x86_64" /usr/local/bin/godot
+          T=~/.local/share/godot/export_templates/${GODOT_VERSION}.stable
+          if [ ! -f "$T/android_debug.apk" ]; then
+            curl -sSL -o t.tpz "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_export_templates.tpz"
+            unzip -q t.tpz 'templates/android*' 'templates/version.txt'
+            mkdir -p "$T" && mv templates/* "$T"/
+          fi
+      - name: godot-cpp
+        uses: actions/cache@v4
+        with:
+          path: godot-cpp
+          key: godot-cpp-android-${{ env.GODOT_CPP_TAG }}
+      - name: FastFlight extension (Android arm64)
+        run: |
+          [ -d godot-cpp ] || git clone --depth 1 --branch "$GODOT_CPP_TAG" https://github.com/godotengine/godot-cpp.git
+          pip install scons
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;$NDK_VERSION" > /dev/null
+          cd godot/native && GODOT_CPP=$GITHUB_WORKSPACE/godot-cpp scons platform=android arch=arm64 target=template_release -j4
+      - name: Editor settings and debug keystore
+        run: |
+          keytool -genkeypair -v -keystore ~/debug.keystore -storepass android -alias androiddebugkey -keypass android \
+            -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          mkdir -p ~/.config/godot
+          for f in editor_settings-4.5.tres editor_settings-4.tres; do
+            cat > ~/.config/godot/$f <<EOS
+          [gd_resource type="EditorSettings" format=3]
+
+          [resource]
+          export/android/android_sdk_path = "$ANDROID_HOME"
+          export/android/java_sdk_path = "$JAVA_HOME"
+          export/android/debug_keystore = "$HOME/debug.keystore"
+          export/android/debug_keystore_user = "androiddebugkey"
+          export/android/debug_keystore_pass = "android"
+          EOS
+          done
+      - name: Export APK
+        run: |
+          godot --headless --path godot --import || godot --headless --path godot --import
+          mkdir -p godot/build
+          godot --headless --path godot --export-debug Android build/cyberpunk-tennis.apk
+          ls -la godot/build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cyberpunk-tennis-apk
+          path: godot/build/cyberpunk-tennis.apk

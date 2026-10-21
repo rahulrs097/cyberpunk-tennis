@@ -1,0 +1,7 @@
+.godot/
+/build/
+native/bin/
+native/src/*.os
+native/src/*.o
+native/.sconsign.dblite
+tests/traces/

@@ -1,0 +1,13 @@
+#!/usr/bin/env python
+# Builds the FastFlight extension. GODOT_CPP points at a godot-cpp checkout
+# (tag godot-4.5-stable). Examples:
+#   scons platform=linux target=template_release
+#   scons platform=android arch=arm64 target=template_release
+import os
+
+env = SConscript(os.path.join(os.environ.get("GODOT_CPP", "godot-cpp"), "SConstruct"))
+# no fused multiply-add: results must match the GDScript and JS engines bit for bit
+env.Append(CCFLAGS=["-ffp-contract=off"])
+env.Append(CPPPATH=["src/"])
+lib = env.SharedLibrary("bin/libfastflight{}{}".format(env["suffix"], env["SHLIBSUFFIX"]), source=Glob("src/*.cpp"))
+Default(lib)

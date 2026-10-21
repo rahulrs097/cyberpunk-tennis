@@ -1,0 +1,9 @@
+[configuration]
+
+entry_symbol = "fast_flight_init"
+compatibility_minimum = "4.5"
+
+[libraries]
+
+linux.x86_64 = "res://native/bin/libfastflight.linux.template_release.x86_64.so"
+android.arm64 = "res://native/bin/libfastflight.android.template_release.arm64.so"
