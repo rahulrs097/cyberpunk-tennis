@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
-const FILES = ['physics.js', 'characters.js', 'match.js', 'game.js'];
+const FILES = ['physics.js', 'characters.js', 'match.js', 'game.js', 'achievements.js'];
 
 // Math.random is the CPU's only randomness; seeding it makes runs repeatable.
 function seeded(seed) {
@@ -18,10 +18,11 @@ function seeded(seed) {
   };
 }
 
-function loadEngine(seed = 1) {
+// globals: extra globals for the sandbox (a fake localStorage, say)
+function loadEngine(seed = 1, globals = {}) {
   const math = Object.create(Math);
   math.random = seeded(seed);
-  const sandbox = { Math: math, console };
+  const sandbox = { Math: math, console, ...globals };
   sandbox.window = sandbox;
   vm.createContext(sandbox);
   for (const f of FILES) {

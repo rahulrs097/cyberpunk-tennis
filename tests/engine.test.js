@@ -491,3 +491,145 @@ test('every first bounce over the net comes with a line call', () => {
   assert.ok(calls.length > 20, `saw ${calls.length} line calls`);
   assert.ok(calls.some((m) => m > 0) && calls.some((m) => m <= 0), 'both ins and outs');
 });
+
+// ---------------- achievements and stats ----------------
+// Plays `seq` through real scoring and feeds a tracker for side 0 the 'point'
+// events the engine would send. seq: one entry per point, 0/1 = who won it,
+// 'A' = side 0 serves an ace, 'D' = side 0 double faults.
+function trackSeq(CT, seq, mode = 'pro', firstServer = 0) {
+  const m = CT.createMatch(firstServer);
+  const t = CT.createAchievementTracker(0, mode);
+  const res = [];
+  for (const p of seq) {
+    const server = CT.currentServer(m);
+    const w = p === 'A' ? 0 : p === 'D' ? 1 : p;
+    if (p === 'A' || p === 'D') assert.equal(server, 0, 'only the server aces or double faults');
+    const tiebreak = m.tiebreak;
+    const result = CT.awardPoint(m, w);
+    res.push(t.point({ winner: w, text: p === 'A' ? 'Ace' : p === 'D' ? 'Double fault' : 'Winner', result, server, shots: 3, tiebreak, games: m.games.slice() }));
+    if (m.over) break;
+  }
+  return { m, res, earned: res.flatMap((r) => r.earned) };
+}
+const holdGames = (n) => Array(n * 4).fill(0);
+
+test('aces: tetra and penta ace need four or five aces in the same game', () => {
+  const CT = loadEngine();
+  // four aces, not all in a row, in one game: ace, lost, ace, ace, lost, ace (deuce), then ad and game
+  let r = trackSeq(CT, ['A', 1, 'A', 'A', 1, 'A', 0, 0]);
+  assert.deepEqual(plain(r.earned.filter((id) => /ace/i.test(id))), ['ace', 'ace', 'ace', 'ace', 'tetraAce']);
+  // a love game of aces is a tetra ace; five aces in one game need deuce
+  r = trackSeq(CT, ['A', 'A', 'A', 'A']);
+  assert.ok(r.earned.includes('tetraAce') && r.earned.includes('loveGame'));
+  r = trackSeq(CT, [1, 1, 1, 'A', 'A', 'A', 'A', 'A']);
+  assert.ok(r.earned.includes('pentaAce') && r.earned.includes('tetraAce'));
+  // aces split across two service games don't add up
+  r = trackSeq(CT, ['A', 'A', 'A', 0, 1, 1, 1, 1, 'A', 'A', 0, 0]);
+  assert.ok(!r.earned.includes('tetraAce'));
+});
+
+test('game achievements: game on, love game and breaker', () => {
+  const CT = loadEngine();
+  const r = trackSeq(CT, [0, 1, 0, 0, 0, /* receiving: */ 0, 0, 0, 0]);
+  assert.deepEqual(plain(r.res[4].earned), ['game']);
+  assert.deepEqual(plain(r.res[8].earned), ['game', 'loveGame', 'break']);
+});
+
+test('match achievements: a golden 6-0 set on Pro earns the lot, and only Pro counts for the Pro ones', () => {
+  const CT = loadEngine();
+  const pro = trackSeq(CT, holdGames(6)).earned;
+  for (const id of ['match', 'proChampion', 'bagel', 'noLove', 'goldenSet']) assert.ok(pro.includes(id), id);
+  assert.ok(!pro.includes('breadstick') && !pro.includes('tiebreak') && !pro.includes('comeback'));
+  const club = trackSeq(CT, holdGames(6), 'club').earned;
+  assert.ok(club.includes('match') && club.includes('noLove'));
+  for (const a of CT.ACHIEVEMENTS.filter((x) => x.pro)) assert.ok(!club.includes(a.id), a.id);
+  const online = trackSeq(CT, holdGames(6), 'online').earned;
+  assert.ok(!online.includes('bagel'));
+});
+
+test('match achievements: breadstick, comeback, tiebreak, and no love is lost to a love game', () => {
+  const CT = loadEngine();
+  // lose a game to love, then win six: 6-1 breadstick, but not no love
+  let r = trackSeq(CT, [1, 1, 1, 1, ...holdGames(6)]);
+  assert.deepEqual(plain(r.m.games), [6, 1]);
+  assert.ok(r.earned.includes('breadstick') && !r.earned.includes('noLove') && !r.earned.includes('goldenSet'));
+  // 0-3 down, then win six in a row
+  r = trackSeq(CT, [...Array(12).fill(1), ...holdGames(6)]);
+  assert.deepEqual(plain(r.m.games), [6, 3]);
+  assert.ok(r.earned.includes('comeback'));
+  // trade games to 6-6, then take the tiebreak 7-0
+  const trade = []; for (let i = 0; i < 6; i++) trade.push(0, 0, 0, 0, 1, 1, 1, 1);
+  r = trackSeq(CT, [...trade, ...Array(7).fill(0)]);
+  assert.deepEqual(plain(r.m.games), [7, 6]);
+  assert.ok(r.earned.includes('tiebreak'));
+  // losing a set earns no match achievements
+  r = trackSeq(CT, Array(24).fill(1));
+  assert.equal(r.m.winner, 1);
+  assert.deepEqual(plain(r.earned), []);
+});
+
+test('achievements and stats are saved: counts, firsts, streaks and bests per level', () => {
+  const store = {};
+  const localStorage = { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); } };
+  const CT = loadEngine(1, { localStorage });
+  const rec = CT.loadAchievements();
+  const t = CT.createAchievementTracker(0, 'club');
+  assert.deepEqual(plain(CT.recordAchievements(rec, t.hit({ side: 0, kind: 'serve', kmh: 181 }), 'club')), []);
+  const ace = { winner: 0, text: 'Ace', result: 'point', server: 0, shots: 1, tiebreak: false, games: [0, 0] };
+  assert.deepEqual(plain(CT.recordAchievements(rec, t.point(ace), 'club')), ['ace'], 'first ace is new');
+  assert.deepEqual(plain(CT.recordAchievements(rec, t.point(ace), 'club')), [], 'second is not');
+  CT.recordAchievements(rec, { earned: ['match'], stats: { games: 6 }, best: { longestRally: 24 }, over: { won: true } }, 'club');
+  CT.recordAchievements(rec, { earned: [], stats: {}, best: { longestRally: 9 }, over: { won: true } }, 'pro');
+  CT.recordAchievements(rec, { earned: [], stats: {}, best: {}, over: { won: false } }, 'club');
+  const again = CT.loadAchievements();
+  assert.equal(again.earned.ace.n, 2);
+  assert.equal(again.earned.match.n, 1);
+  const all = CT.achievementStats(again, 'all'), club = CT.achievementStats(again, 'club');
+  assert.deepEqual([all.played, all.won, all.streak, all.bestStreak, all.aces, all.fastestServe, all.longestRally], [3, 2, 0, 2, 2, 181, 24]);
+  assert.deepEqual([club.played, club.won, club.bestStreak, club.games, club.longestRally], [2, 1, 1, 6, 24]);
+  assert.equal(CT.achievementStats(again, 'online').played, 0);
+});
+
+test('in a real set the tracker counts the points, games and aces the engine scored', () => {
+  const CT = loadEngine(11);
+  const t = CT.createAchievementTracker(0, 'club');
+  const tot = { points: 0, games: 0, aces: 0 };
+  let won = 0, aces = 0, over = null;
+  const g = CT.createGame({ p0: 'philosopher', p1: 'octopus', control: ['cpu', 'cpu'], ...levelOpts(CT, 'club'), onEvent: (type, d) => {
+    if (type === 'point') {
+      const res = t.point(d);
+      for (const k in res.stats) tot[k] += res.stats[k];
+      if (d.winner === 0) won++;
+      if (d.winner === 0 && d.text === 'Ace') aces++;
+      if (res.over) over = res.over;
+    }
+  } });
+  for (let i = 0; i < 3600 * 60 && g.phase !== 'matchOver'; i++) CT.updateGame(g, 1 / 60);
+  assert.equal(g.phase, 'matchOver');
+  assert.equal(tot.points, won);
+  assert.equal(tot.games, g.match.games[0]);
+  assert.equal(tot.aces, aces);
+  assert.deepEqual(plain(over), { won: g.match.winner === 0 });
+});
+
+test('rocket serve: a perfect full-pace serve reaches 200 km/h, a tired or soft one does not', () => {
+  const serve = (pace, stamina) => {
+    const CT = loadEngine(3);
+    const t = CT.createAchievementTracker(0, 'club');
+    let res = null;
+    const g = CT.createGame({ p0: 'octopus', p1: 'philosopher', control: ['human', 'cpu'], ...levelOpts(CT, 'club'),
+      onEvent: (type, d) => { if (type === 'hit' && d.kind === 'serve' && d.side === 0) res = t.hit(d); } });
+    g.players[0].stamina = stamina;
+    for (let i = 0; i < 600 && !res; i++) {
+      if (g.phase === 'preServe' && g.phaseWall > 0.5) CT.requestToss(g, 0);
+      if (g.phase === 'toss' && g.peakT !== null && g.time >= g.peakT) CT.requestSwipe(g, 0, { aim: 0, pace, over: 0, spinDir: 1, curve: 0 });
+      CT.updateGame(g, 1 / 60);
+    }
+    return res;
+  };
+  const big = serve(1, 100);
+  assert.ok(big.best.fastestServe >= 200, `${big.best.fastestServe} km/h`);
+  assert.deepEqual(plain(big.earned), ['rocket']);
+  assert.deepEqual(plain(serve(0.7, 100).earned), []);
+  assert.deepEqual(plain(serve(1, 40).earned), []);
+});
