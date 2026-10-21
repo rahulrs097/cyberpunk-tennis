@@ -96,6 +96,7 @@ func _label(text: String, css_size: float, weight: int, color: Color, display :=
 	var l := Label.new()
 	l.text = text
 	l.uppercase = upper
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	var size := px(css_size)
 	l.add_theme_font_override("font", Neon.display(weight, spacing_em, size) if display else Neon.ui(weight, spacing_em, size))
 	l.add_theme_font_size_override("font_size", size)
