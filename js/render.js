@@ -413,7 +413,7 @@
     if (b && now < b.until) return b;
     // in zen mode the score stands in for the tag, with a slow ping under it
     const s = r.score;
-    if (s) return { text: s.text, label: s.label, server: s.server, ping: p, color: PAL.ball, from: Math.max(s.from, p ? p.from : 0, b ? b.until : 0), photo };
+    if (s) return { score: true, text: s.text, label: s.label, server: s.server, ping: p, color: PAL.ball, from: Math.max(s.from, p ? p.from : 0, b ? b.until : 0) };
     if (p) return { text: p.ms + ' MS', label: p.direct ? 'DIRECT PING' : 'RELAY PING', color: p.red ? PAL.warn : p.slow ? '#e4ff4a' : '#25d9ff', from: Math.max(p.from, b ? b.until : 0), photo };
     return { text: BOARD.tag, color: '#25d9ff', from: b ? b.until : 0, photo };
   }
@@ -448,19 +448,22 @@
 
   // the photo in a square on the left, sliding slowly between the top and
   // bottom of the picture, and the tag (or the ping, under its label)
-  // beside it (in BOARD_TEX coordinates)
+  // beside it (in BOARD_TEX coordinates). Zen mode's score has the whole
+  // sign, with no photo.
   function drawBoardPhoto(ctx, r, now, cur) {
     const W = BOARD_TEX.w, H = BOARD_TEX.h, m = 12, img = BOARD_PHOTO;
     ctx.clearRect(0, 0, W, H);
     ctx.fillStyle = 'rgba(8,6,22,0.88)';
     ctx.fillRect(0, 0, W, H);
-    const side = H - 2 * m;
-    const sw = img.naturalWidth, sh = Math.min(img.naturalHeight, sw);
-    const t = 0.5 - 0.5 * Math.cos(now * 0.5);   // eases at each end
-    ctx.drawImage(img, 0, t * (img.naturalHeight - sh), sw, sh, m, m, side, side);
+    const side = cur.score ? -m : H - 2 * m;
     ctx.strokeStyle = '#ff3fb4'; ctx.lineWidth = 6;
     ctx.strokeRect(8, 8, W - 16, H - 16);
-    ctx.beginPath(); ctx.moveTo(m + side + 3, 8); ctx.lineTo(m + side + 3, H - 8); ctx.stroke();
+    if (!cur.score) {
+      const sw = img.naturalWidth, sh = Math.min(img.naturalHeight, sw);
+      const t = 0.5 - 0.5 * Math.cos(now * 0.5);   // eases at each end
+      ctx.drawImage(img, 0, t * (img.naturalHeight - sh), sw, sh, m, m, side, side);
+      ctx.beginPath(); ctx.moveTo(m + side + 3, 8); ctx.lineTo(m + side + 3, H - 8); ctx.stroke();
+    }
     const cx = (m + side + W) / 2, tw = W - side - 60, pl = cur.ping;
     const y = pl ? H * 0.55 : cur.label ? H * 0.64 : H / 2 + 4;
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -475,7 +478,7 @@
       ctx.fillStyle = pl.red ? PAL.warn : pl.slow ? '#e4ff4a' : '#25d9ff';
       ctx.fillText((pl.direct ? 'DIRECT PING ' : 'RELAY PING ') + pl.ms + ' MS', cx, H * 0.84, tw);
     }
-    ctx.font = `900 ${pl ? 56 : cur.label ? 64 : 80}px Tektur, sans-serif`;
+    ctx.font = `900 ${pl ? 60 : cur.score ? 76 : cur.label ? 64 : 80}px Tektur, sans-serif`;
     // a ball by the score of whoever serves (yours on the left)
     if (cur.server === 0 || cur.server === 1) {
       const half = Math.min(tw, ctx.measureText(cur.text).width) / 2;
@@ -606,10 +609,10 @@
     ctx.strokeStyle = '#1c1b2a'; ctx.lineWidth = Math.max(2, (pt.s || 0) * 0.5);
     ctx.beginPath(); ctx.moveTo(pb.x, pb.y); ctx.lineTo(pt.x, pt.y); ctx.stroke();
     let src;
-    if (cur.photo || cur.call !== undefined) {
+    if (cur.photo || cur.score || cur.call !== undefined) {
       src = r.boardPhotoTex || (r.boardPhotoTex = document.createElement('canvas'));
       if (src.width !== BOARD_TEX.w) { src.width = BOARD_TEX.w; src.height = BOARD_TEX.h; }
-      if (cur.photo) drawBoardPhoto(src.getContext('2d'), r, now, cur);
+      if (cur.photo || cur.score) drawBoardPhoto(src.getContext('2d'), r, now, cur);
       else drawBoardCall(src.getContext('2d'), r, cur.call, age);
     } else src = boardTexture(r, cur.text, cur.color);
     const d = r.dpr, W = BOARD_TEX.w, H = BOARD_TEX.h, N = 10, sw = W / N;

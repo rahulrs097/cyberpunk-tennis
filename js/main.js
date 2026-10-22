@@ -203,7 +203,7 @@
       const opp = 1 - me;
       CT.showScore(renderer, {
         text: CT.pointLabel(m, me) + '–' + CT.pointLabel(m, opp),
-        label: m.games[me] + '–' + m.games[opp] + (call ? ' · ' + call.toUpperCase() : ' GAMES'),
+        label: m.games[me] + '–' + m.games[opp] + (call ? ' · ' + call.toUpperCase() : ''),
         server: m.over ? -1 : srv === me ? 0 : 1,
       });
     }
