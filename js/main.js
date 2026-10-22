@@ -19,6 +19,9 @@
   try { const v = localStorage.getItem('ct.autoMove'); if (v !== null) autoMove = v === '1'; } catch (e) { /* storage is optional */ }
   let musicOn = true;
   try { const v = localStorage.getItem('ct.music'); if (v !== null) musicOn = v === '1'; } catch (e) { /* storage is optional */ }
+  // Zen mode: no HUD but the pause button, no guides; the score is on the billboard
+  let zen = false;
+  try { zen = localStorage.getItem('ct.zen') === '1'; } catch (e) { /* storage is optional */ }
   let view = 'chase';  // camera: 'chase' (behind and above) or 'first' (your eyes)
   try { if (localStorage.getItem('ct.view') === 'first') view = 'first'; } catch (e) { /* storage is optional */ }
   // achievements and stats saved on this phone, and the tracker for the
@@ -196,6 +199,25 @@
     }
     if (tut) { const L = LESSONS[tut.i]; call = `Lesson ${tut.i + 1}/${LESSONS.length} · ${L.title} · ${Math.min(tut.done, L.need)}/${L.need}`; }
     put($('callout'), 'text', call, (v) => { $('callout').textContent = v; });
+    if (zenOn()) {
+      const opp = 1 - me;
+      CT.showScore(renderer, {
+        text: CT.pointLabel(m, me) + '–' + CT.pointLabel(m, opp),
+        label: m.games[me] + '–' + m.games[opp] + (call ? ' · ' + call.toUpperCase() : ''),
+        server: m.over ? -1 : srv === me ? 0 : 1,
+      });
+    }
+  }
+
+  // Zen applies to matches, not the tutorial (its lessons live in the hints)
+  // or the rally behind the menu.
+  function zenOn() { return zen && !!game && !tut && $('menu').hidden; }
+  function applyZen() {
+    const on = zenOn();
+    document.body.classList.toggle('zen', on);
+    CT.setZen(renderer, on);
+    if (!on) CT.showScore(renderer, null);
+    if (game) layout();
   }
 
   function hintForState() {
@@ -269,6 +291,7 @@
     } else if (type === 'whiff') {
       if (d.side === me) showShot(d.reason);
     } else if (type === 'fault') {
+      if (zenOn()) CT.showBillboard(renderer, d.text === 'Net' || d.text === 'Serve clock' ? d.text.toUpperCase() : 'FAULT', '#ffc23d', 1.6);
       showMsg(d.text === 'Net' || d.text === 'Serve clock' ? d.text : 'Fault', 'Second serve', 'warn');
       blip(160, 0.2, 'sawtooth', 0.05, 90);
     } else if (type === 'point') {
@@ -622,7 +645,7 @@
     paused = false;
     $('menu').hidden = false;
     game = CT.createGame({ p0: 'octopus', p1: 'philosopher', timeScale: 0.6, control: ['cpu', 'cpu'], onEvent: () => {} });
-    layout();
+    applyZen();
   }
 
   // Play vs CPU, or Rematch (online, the host restarts for both).
@@ -656,7 +679,7 @@
     $('end').hidden = true;
     $('pauseMenu').hidden = true;
     paused = false;
-    layout();
+    applyZen();
     updateHud();
     hintForState();
     if (!cfg.drill) showMsg('First to 6', 'Tiebreak at 6–6', 'neutral');
@@ -686,7 +709,7 @@
     if (game) {
       // draw the ball where it's shown (online it can lag the real one briefly)
       const info = paused ? null : CT.incomingInfo(game, me), ball = game.ball;
-      const land = paused ? null : CT.landingFor(game, me, info);
+      const land = paused || zenOn() ? null : CT.landingFor(game, me, info);
       game.ball = CT.viewBall(game);
       try { CT.renderGame(renderer, game, me, info, land); } finally { game.ball = ball; }
     }
@@ -719,6 +742,16 @@
     pb.textContent = on ? 'Music on' : 'Music off';
     ensureAudio();
     CT.Music.setOn(on);
+  }
+
+  function setZen(on) {
+    zen = on;
+    try { localStorage.setItem('ct.zen', on ? '1' : '0'); } catch (e) { /* storage is optional */ }
+    document.querySelectorAll('[data-zen]').forEach((b) => b.setAttribute('aria-pressed', String((b.dataset.zen === 'on') === on)));
+    const pb = $('zenPause');
+    pb.setAttribute('aria-pressed', String(on));
+    pb.textContent = on ? 'Zen mode on' : 'Zen mode off';
+    applyZen();
   }
 
   function setView(v) {
@@ -815,6 +848,8 @@
     $('musicPause').addEventListener('click', () => setMusic(!musicOn));
     document.querySelectorAll('[data-music]').forEach((b) => b.setAttribute('aria-pressed', String((b.dataset.music === 'on') === musicOn)));
     $('musicPause').textContent = musicOn ? 'Music on' : 'Music off';
+    document.querySelectorAll('[data-zen]').forEach((b) => b.addEventListener('click', () => setZen(b.dataset.zen === 'on')));
+    $('zenPause').addEventListener('click', () => setZen(!zen));
     $('play').addEventListener('click', () => { ensureAudio(); startMatch(); });
     $('rematch').addEventListener('click', startMatch);
     $('toMenu').addEventListener('click', showMenu);
@@ -849,10 +884,11 @@
       $('mute').textContent = muted ? 'Sound off' : 'Sound on';
     });
     pickChar('octopus');
+    showMenu();
+    setZen(zen);
     const fontsReady = document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve();
     fontsReady.then(() => { drawPortraits(); if (game) layout(); });
     drawPortraits();
-    showMenu();
     requestAnimationFrame(frame);
     window.__CT_GAME = () => game;   // handy for debugging in the console
     window.__cam = renderer.cam;

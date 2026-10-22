@@ -411,6 +411,9 @@
     const photo = BOARD_PHOTO.complete && BOARD_PHOTO.naturalWidth > 0;
     if (p && p.held) return { text: p.ms + ' MS', label: 'PAUSED', color: PAL.warn, from: p.from, photo };
     if (b && now < b.until) return b;
+    // in zen mode the score stands in for the tag, with a slow ping under it
+    const s = r.score;
+    if (s) return { score: true, text: s.text, label: s.label, server: s.server, ping: p, color: PAL.ball, from: Math.max(s.from, p ? p.from : 0, b ? b.until : 0) };
     if (p) return { text: p.ms + ' MS', label: p.direct ? 'DIRECT PING' : 'RELAY PING', color: p.red ? PAL.warn : p.slow ? '#e4ff4a' : '#25d9ff', from: Math.max(p.from, b ? b.until : 0), photo };
     return { text: BOARD.tag, color: '#25d9ff', from: b ? b.until : 0, photo };
   }
@@ -445,27 +448,44 @@
 
   // the photo in a square on the left, sliding slowly between the top and
   // bottom of the picture, and the tag (or the ping, under its label)
-  // beside it (in BOARD_TEX coordinates)
+  // beside it (in BOARD_TEX coordinates). Zen mode's score has the whole
+  // sign, with no photo.
   function drawBoardPhoto(ctx, r, now, cur) {
     const W = BOARD_TEX.w, H = BOARD_TEX.h, m = 12, img = BOARD_PHOTO;
     ctx.clearRect(0, 0, W, H);
     ctx.fillStyle = 'rgba(8,6,22,0.88)';
     ctx.fillRect(0, 0, W, H);
-    const side = H - 2 * m;
-    const sw = img.naturalWidth, sh = Math.min(img.naturalHeight, sw);
-    const t = 0.5 - 0.5 * Math.cos(now * 0.5);   // eases at each end
-    ctx.drawImage(img, 0, t * (img.naturalHeight - sh), sw, sh, m, m, side, side);
+    const side = cur.score ? -m : H - 2 * m;
     ctx.strokeStyle = '#ff3fb4'; ctx.lineWidth = 6;
     ctx.strokeRect(8, 8, W - 16, H - 16);
-    ctx.beginPath(); ctx.moveTo(m + side + 3, 8); ctx.lineTo(m + side + 3, H - 8); ctx.stroke();
-    const cx = (m + side + W) / 2, tw = W - side - 60, y = cur.label ? H * 0.64 : H / 2 + 4;
+    if (!cur.score) {
+      const sw = img.naturalWidth, sh = Math.min(img.naturalHeight, sw);
+      const t = 0.5 - 0.5 * Math.cos(now * 0.5);   // eases at each end
+      ctx.drawImage(img, 0, t * (img.naturalHeight - sh), sw, sh, m, m, side, side);
+      ctx.beginPath(); ctx.moveTo(m + side + 3, 8); ctx.lineTo(m + side + 3, H - 8); ctx.stroke();
+    }
+    const cx = (m + side + W) / 2, tw = W - side - 60, pl = cur.ping;
+    const y = pl ? H * 0.55 : cur.label ? H * 0.64 : H / 2 + 4;
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     if (cur.label) {
       ctx.font = '700 32px Tektur, sans-serif';
       ctx.fillStyle = '#e8f6ff';
-      ctx.fillText(cur.label, cx, H * 0.28, tw);
+      ctx.fillText(cur.label, cx, pl ? H * 0.24 : H * 0.28, tw);
     }
-    ctx.font = `900 ${cur.label ? 64 : 80}px Tektur, sans-serif`;
+    // the score's ping line, in the ping's colour
+    if (pl) {
+      ctx.font = '700 22px Tektur, sans-serif';
+      ctx.fillStyle = pl.red ? PAL.warn : pl.slow ? '#e4ff4a' : '#25d9ff';
+      ctx.fillText((pl.direct ? 'DIRECT PING ' : 'RELAY PING ') + pl.ms + ' MS', cx, H * 0.84, tw);
+    }
+    ctx.font = `900 ${pl ? 60 : cur.score ? 76 : cur.label ? 64 : 80}px Tektur, sans-serif`;
+    // a ball by the score of whoever serves (yours on the left)
+    if (cur.server === 0 || cur.server === 1) {
+      const half = Math.min(tw, ctx.measureText(cur.text).width) / 2;
+      ctx.beginPath();
+      ctx.arc(cur.server === 0 ? cx - half - 16 : cx + half + 16, y - 2, 7, 0, Math.PI * 2);
+      ctx.fillStyle = PAL.ball; ctx.fill();
+    }
     ctx.fillStyle = cur.color;
     if (r.quality) { ctx.shadowColor = cur.color; ctx.shadowBlur = 18; }
     ctx.fillText(cur.text, cx, y, tw);
@@ -589,10 +609,10 @@
     ctx.strokeStyle = '#1c1b2a'; ctx.lineWidth = Math.max(2, (pt.s || 0) * 0.5);
     ctx.beginPath(); ctx.moveTo(pb.x, pb.y); ctx.lineTo(pt.x, pt.y); ctx.stroke();
     let src;
-    if (cur.photo || cur.call !== undefined) {
+    if (cur.photo || cur.score || cur.call !== undefined) {
       src = r.boardPhotoTex || (r.boardPhotoTex = document.createElement('canvas'));
       if (src.width !== BOARD_TEX.w) { src.width = BOARD_TEX.w; src.height = BOARD_TEX.h; }
-      if (cur.photo) drawBoardPhoto(src.getContext('2d'), r, now, cur);
+      if (cur.photo || cur.score) drawBoardPhoto(src.getContext('2d'), r, now, cur);
       else drawBoardCall(src.getContext('2d'), r, cur.call, age);
     } else src = boardTexture(r, cur.text, cur.color);
     const d = r.dpr, W = BOARD_TEX.w, H = BOARD_TEX.h, N = 10, sw = W / N;
@@ -613,6 +633,19 @@
   function showBillboard(r, text, color, secs) {
     r.board = { text, color: color || '#e4ff4a', from: performance.now() / 1000, until: performance.now() / 1000 + (secs || 2.5) };
   }
+
+  // Zen mode's score for the billboard: { text, label, server } (server 0 is
+  // you, 1 the other player, -1 nobody), or null to go back to the tag.
+  function showScore(r, s) {
+    if (!s) { r.score = null; return; }
+    const was = r.score;
+    if (was && was.text === s.text && was.label === s.label && was.server === s.server) return;
+    // flickers on when the points change
+    r.score = { ...s, from: was && was.text === s.text ? was.from : performance.now() / 1000 };
+  }
+
+  // Zen mode hides the timing rings and the landing X.
+  function setZen(r, on) { r.zen = on; }
 
   // Online lag for the billboard: { ms, red, held }, or null to hide it.
   function showPing(r, p) {
@@ -952,6 +985,7 @@
       if (groundEllipse(ctx, r, p.tx, p.ty, 0.35)) ctx.stroke();
       ctx.restore();
     }
+    if (r.zen) return;
     if (land) {
       ctx.save();
       ctx.strokeStyle = 'rgba(228,255,74,0.7)';
@@ -1061,7 +1095,7 @@
     if (g.ball.active) items.push({ d: depth(g.ball.pos.x, g.ball.pos.y) - 0.01, draw: () => drawBall(ctx, r, g) });
     items.sort((a, b) => b.d - a.d);
     for (const it of items) it.draw();
-    if (r.view === 'first') { drawRacketView(ctx, r, g, g.players[human]); drawTimingRing(ctx, r, g, info); }
+    if (r.view === 'first') { drawRacketView(ctx, r, g, g.players[human]); if (!r.zen) drawTimingRing(ctx, r, g, info); }
     watchFrameRate(r, dt, (performance.now() - now) / 1000);
   }
 
@@ -1072,6 +1106,8 @@
   CT.showBillboard = showBillboard;
   CT.showLineCall = showLineCall;
   CT.showPing = showPing;
+  CT.showScore = showScore;
+  CT.setZen = setZen;
   CT.unproject = unproject;
   CT.project = proj;
 })();
