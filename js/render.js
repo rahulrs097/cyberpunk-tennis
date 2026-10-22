@@ -258,14 +258,19 @@
   // fewer pixels, no lamp pools, no glow blur on the players.
   const DPR_CAP = [1, 1.25, 1.5];
 
-  // Drop a quality level when frames average slower than ~40 fps.
-  function watchFrameRate(r, dt) {
+  // Drop a quality level when the phone can't keep up: frames average
+  // slower than ~40 fps while drawing one takes most of a 60 fps frame
+  // (`work`, seconds), or slower than ~22 fps whatever the reason. A phone
+  // that only shows 30 frames a second but draws each one quickly (an
+  // iPhone in Low Power Mode) keeps the full look.
+  function watchFrameRate(r, dt, work) {
     if (!dt || dt >= 0.1 || r.quality === 0) return;   // skip pauses and tab switches
-    r.frames.push(dt);
+    r.frames.push([dt, work]);
     if (r.frames.length < 90) return;
-    const avg = r.frames.reduce((a, b) => a + b, 0) / r.frames.length;
+    const avg = (i) => r.frames.reduce((a, f) => a + f[i], 0) / r.frames.length;
+    const gap = avg(0), busy = avg(1);
     r.frames.length = 0;
-    if (avg > 0.025) { r.quality--; resize(r, ...r.args); }
+    if ((gap > 0.025 && busy > 0.012) || gap > 0.045) { r.quality--; resize(r, ...r.args); }
   }
 
   // A soft radial glow, rendered once per colour and size.
@@ -1025,7 +1030,6 @@
     const now = performance.now();
     const dt = r.lastT ? Math.min(0.1, (now - r.lastT) / 1000) : 0;
     r.lastT = now;
-    watchFrameRate(r, dt);
     r.human = human;
     updateCamera(r, g, human, dt);
 
@@ -1058,6 +1062,7 @@
     items.sort((a, b) => b.d - a.d);
     for (const it of items) it.draw();
     if (r.view === 'first') { drawRacketView(ctx, r, g, g.players[human]); drawTimingRing(ctx, r, g, info); }
+    watchFrameRate(r, dt, (performance.now() - now) / 1000);
   }
 
   CT.createRenderer = createRenderer;

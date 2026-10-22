@@ -14,9 +14,10 @@ which only adds the doctype and viewport tags the artifact host normally supplie
 | `js/match.js` | Scoring: one set, 7-point tiebreak at 6-6 |
 | `js/game.js` | Match engine: serving, hitting, timing, line calls, stamina, CPU |
 | `js/achievements.js` | Achievements and stats: what counts, the per-match tracker, the record saved in localStorage |
-| `js/render.js` | Perspective camera (chase or first person) and neon arena |
+| `js/render.js` | Perspective camera (chase or first person) and neon arena. A phone that can't keep up steps down a quality level (`watchFrameRate`): frames slower than ~40 fps while drawing one takes most of a 60 fps frame, or slower than ~22 fps. A steady 30 fps that draws quickly (an iPhone in Low Power Mode) keeps the full look |
 | `js/main.js` | Touch input, HUD, sound, frame loop, tutorial lessons |
-| `tests/` | Engine tests (`npm test`) and the balance simulation (`npm run sim`) |
+| `js/net.js`, `server/relay.js` | Online link: the Cloudflare Worker relay (one Durable Object per room code), its client, and the lag meter |
+| `tests/` | Engine and relay tests (`npm test`) and the balance simulation (`npm run sim`) |
 
 ## How the spec maps to the code
 
@@ -35,6 +36,7 @@ which only adds the doctype and viewport tags the artifact host normally supplie
 - **Achievements and stats.** `createAchievementTracker` follows your side through a match from its `point` and `hit` events and says what each point earned; `main.js` saves it to localStorage (`ct.achievements`), puts each unlock on the billboard after the point's word (the common ones only the first time; an online guest sees the billboard over their own far court), and lists unlocked achievements and per-level stats on the Achievements screen. Locked ones aren't shown anywhere. Pro achievements only count against the Pro CPU; the tutorial doesn't count. A serve's speed (fastest serve, Rocket Serve) only counts once it has landed in.
 - **Serve clock.** Online, a server has 20 seconds to toss; running out costs the serve.
 - **Lag.** Online, the phones ping each other every half second (`createLagMeter` in `net.js`). Over 150 ms the ping takes the tag's place on the billboard, yellow, and red over 400 ms. Over 450 ms the host stops the match and both phones say Paused, until the ping has been back under 450 ms for a second; taps and swipes do nothing meanwhile. `?lag=200` on the page URL holds each message back 200 ms, to try it.
+- **Rooms.** A room takes one phone a side. While both are connected, the relay turns away anyone else with the code, so nobody can knock the guest out of a match. A phone that dropped out can take its own place again: each phone keeps a random id (`ct.phoneId` in localStorage) that it sends to the relay.
 
 ## Tests
 

@@ -20,8 +20,19 @@
     return s;
   }
 
+  // This phone's id for the relay, kept on the phone: after a dropped
+  // connection only this phone can take its place in the room again.
+  let phoneId = '';
+  try { phoneId = localStorage.getItem('ct.phoneId') || ''; } catch (e) { /* storage is optional */ }
+  if (!/^[a-z0-9]{16}$/.test(phoneId)) {
+    phoneId = '';
+    for (let i = 0; i < 16; i++) phoneId += 'abcdefghijklmnopqrstuvwxyz0123456789'[Math.floor(Math.random() * 36)];
+    try { localStorage.setItem('ct.phoneId', phoneId); } catch (e) { /* storage is optional */ }
+  }
+
   // role: 'host' | 'guest'. onMessage gets parsed objects; onStatus gets
-  // 'open' | 'closed' | 'error'. Messages travel as JSON either way, so the
+  // 'open' | 'closed' | 'error', or 'full' when the room already has
+  // another phone on that side. Messages travel as JSON either way, so the
   // tab prototype exercises the same encoding as the real relay.
   function connect(code, role, onMessage, onStatus) {
     const status = onStatus || (() => {});
@@ -36,10 +47,10 @@
       setTimeout(() => post(text), due - now);
     };
     if (CT.RELAY_URL) {
-      const ws = new WebSocket(`${CT.RELAY_URL}/room/${code}?role=${role}`);
+      const ws = new WebSocket(`${CT.RELAY_URL}/room/${code}?role=${role}&id=${phoneId}`);
       ws.onmessage = (e) => { const m = parse(e.data); if (m) onMessage(m); };
       ws.onopen = () => status('open');
-      ws.onclose = () => status('closed');
+      ws.onclose = (e) => status(e.code === 4001 ? 'full' : 'closed');
       ws.onerror = () => status('error');
       const post = later((text) => { if (ws.readyState === 1) ws.send(text); });
       return {

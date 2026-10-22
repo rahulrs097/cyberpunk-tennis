@@ -531,6 +531,12 @@
   function onLink(n, status) {
     if (net !== n || net.started || status === 'open') return;
     clearInterval(net.timer);
+    if (status === 'full') {
+      // (a host whose new code is somehow taken just picks another)
+      if (net.role === 'host') hostRoom();
+      else lobby('Room ' + net.code + ' already has two players.', '', true);
+      return;
+    }
     lobby("Couldn't reach the online server. Check your connection and try again.", '', net.role === 'guest');
   }
 

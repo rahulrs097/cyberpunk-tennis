@@ -3,8 +3,9 @@
 // message from one to the other unchanged. The game itself runs on the
 // host's phone; this only forwards.
 //
-// Clients connect to wss://<worker>/room/<CODE>?role=host|guest. Every other
-// path is the game itself, served from the static files.
+// Clients connect to wss://<worker>/room/<CODE>?role=host|guest&id=<phone>,
+// where id is a random id each phone keeps. Every other path is the game
+// itself, served from the static files.
 
 export default {
   async fetch(request, env) {
@@ -25,11 +26,22 @@ export class Room {
   }
 
   async fetch(request) {
-    const role = new URL(request.url).searchParams.get('role');
-    // a reconnect replaces the old socket for the same role
-    for (const old of this.state.getWebSockets(role)) old.close(4000, 'replaced');
+    const params = new URL(request.url).searchParams;
+    const role = params.get('role');
+    const id = 'id:' + (/^[A-Za-z0-9]{1,32}$/.test(params.get('id') || '') ? params.get('id') : '');
     const pair = new WebSocketPair();
-    this.state.acceptWebSocket(pair[1], [role]);
+    // One phone a side. The same phone coming back (a dropped connection)
+    // takes its old place; anyone else is turned away (4001) while that side
+    // is still connected, so a third person with the code can't knock the
+    // guest out of a match.
+    const old = this.state.getWebSockets(role);
+    if (old.some((ws) => this.state.getTags(ws)[1] !== id)) {
+      pair[1].accept();
+      pair[1].close(4001, 'room full');
+      return new Response(null, { status: 101, webSocket: pair[0] });
+    }
+    for (const ws of old) ws.close(4000, 'replaced');
+    this.state.acceptWebSocket(pair[1], [role, id]);
     return new Response(null, { status: 101, webSocket: pair[0] });
   }
 
