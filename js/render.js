@@ -411,7 +411,7 @@
     const photo = BOARD_PHOTO.complete && BOARD_PHOTO.naturalWidth > 0;
     if (p && p.held) return { text: p.ms + ' MS', label: 'PAUSED', color: PAL.warn, from: p.from, photo };
     if (b && now < b.until) return b;
-    if (p) return { text: p.ms + ' MS', label: 'PING', color: p.red ? PAL.warn : '#e4ff4a', from: Math.max(p.from, b ? b.until : 0), photo };
+    if (p) return { text: p.ms + ' MS', label: p.direct ? 'DIRECT PING' : 'RELAY PING', color: p.red ? PAL.warn : p.slow ? '#e4ff4a' : '#25d9ff', from: Math.max(p.from, b ? b.until : 0), photo };
     return { text: BOARD.tag, color: '#25d9ff', from: b ? b.until : 0, photo };
   }
 
@@ -619,7 +619,7 @@
     const was = r.ping;
     if (!p) { r.ping = null; return; }
     // flickers on when it first shows, turns red, or pauses the match
-    const from = was && was.red === p.red && was.held === p.held ? was.from : performance.now() / 1000;
+    const from = was && was.red === p.red && was.held === p.held && was.direct === p.direct ? was.from : performance.now() / 1000;
     r.ping = { ...p, from };
   }
 

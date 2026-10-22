@@ -512,13 +512,16 @@
 
   // Is the online match paused for lag? The host decides from its own ping
   // and sends that with each snapshot; the guest also stops if the host's
-  // snapshots stop coming. The ping goes up on the billboard over 150 ms.
+  // snapshots stop coming. The ping goes up on the billboard over 150 ms
+  // (all the time with ?ping in the page URL), saying whether the phones
+  // have a direct link or go through the relay.
+  const alwaysPing = /[?&]ping\b/.test(location.search);
   function checkLag(now) {
     const st = net.lag.state(now);
     const held = game.phase !== 'matchOver' && (net.role === 'host' ? st.held : !!net.hostHeld || now - net.lastSnap > CT.Net.LAG.pause);
     // the number on the sign changes at most four times a second
     if (!net.shown || now - net.shown.at > 250 || held !== net.held) net.shown = { at: now, ms: Math.round(st.ms / 10) * 10 };
-    CT.showPing(renderer, st.level || held ? { ms: net.shown.ms, red: st.level === 'red' || held, held } : null);
+    CT.showPing(renderer, st.level || held || alwaysPing ? { ms: net.shown.ms, red: st.level === 'red' || held, slow: !!st.level, held, direct: net.link.direct() } : null);
     if (held !== net.held) {
       net.held = held;
       if (held) { showMsg('Paused', 'Slow connection', 'warn'); msgTimer = Infinity; }
