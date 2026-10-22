@@ -230,6 +230,31 @@ test('a swipe at a serve before it bounces is too early, not ignored', () => {
   assert.ok(p.swing >= 0, 'and the racket swings');
 });
 
+test('the landing mark shows where a serve will bounce from the moment it is struck', () => {
+  const CT = loadEngine(5);
+  let bounce = null;
+  const g = CT.createGame({ p0: 'octopus', p1: 'philosopher', control: ['human', 'cpu'], firstServer: 1, ...levelOpts(CT, 'club'),
+    onEvent: (t, d) => { if (t === 'bounce' && !bounce) bounce = d; } });
+  let mark = null;
+  for (let i = 0; i < 240 * 10 && !bounce; i++) {
+    CT.updateGame(g, 1 / 240);
+    if (g.phase === 'rally' && g.ball.isServe && !mark) {
+      mark = CT.landingFor(g, 0);
+      assert.equal(CT.landingFor(g, 1), null, 'not for the server');
+    }
+  }
+  assert.ok(bounce, 'the serve bounced');
+  assert.ok(mark, 'the mark showed before the bounce');
+  assert.ok(Math.hypot(mark.x - bounce.x, mark.y - bounce.y) < 0.05, `mark ${mark.x},${mark.y} vs bounce ${bounce.x},${bounce.y}`);
+  assert.equal(CT.landingFor(g, 0), null, 'and goes once it has bounced');
+  // a serve on its way into the net shows none
+  const g2 = CT.createGame({ p0: 'octopus', p1: 'philosopher', control: ['human', 'cpu'], firstServer: 1, ...levelOpts(CT, 'club') });
+  while (!(g2.phase === 'rally' && g2.ball.isServe)) CT.updateGame(g2, 1 / 240);
+  assert.ok(CT.landingFor(g2, 0));
+  g2.ball.vel.z = -8;
+  assert.equal(CT.landingFor(g2, 0), null);
+});
+
 test('a swipe so fast it overhits says so', () => {
   const CT = loadEngine();
   const shots = [];

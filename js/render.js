@@ -918,7 +918,7 @@
     ctx.restore();
   }
 
-  function drawGuides(ctx, r, g, human, info) {
+  function drawGuides(ctx, r, g, human, info, land) {
     const p = g.players[human];
     if (Math.hypot(p.tx - p.x, p.ty - p.y) > 0.3) {
       ctx.save();
@@ -927,12 +927,11 @@
       if (groundEllipse(ctx, r, p.tx, p.ty, 0.35)) ctx.stroke();
       ctx.restore();
     }
-    const b = g.ball;
-    if (info && g.predLand && b.bounces === 0 && b.lastHitter !== human) {
+    if (land) {
       ctx.save();
       ctx.strokeStyle = 'rgba(228,255,74,0.7)';
       ctx.lineWidth = 2;
-      const L = g.predLand, k = 0.3;
+      const L = land, k = 0.3;
       strokeSeg(ctx, r, [L.x - k, L.y - k], [L.x + k, L.y + k]);
       strokeSeg(ctx, r, [L.x + k, L.y - k], [L.x - k, L.y + k]);
       ctx.restore();
@@ -1002,7 +1001,7 @@
     ctx.restore();
   }
 
-  function render(r, g, human, info) {
+  function render(r, g, human, info, land) {
     const now = performance.now();
     const dt = r.lastT ? Math.min(0.1, (now - r.lastT) / 1000) : 0;
     r.lastT = now;
@@ -1022,7 +1021,7 @@
       ctx.lineWidth = 1.5;
       if (groundEllipse(ctx, r, m.x, m.y, 0.12 + m.age * 0.5)) ctx.stroke();
     }
-    drawGuides(ctx, r, g, human, info);
+    drawGuides(ctx, r, g, human, info, land);
 
     // everything that stands up, sorted far to near along the view direction
     const c = r.cam;

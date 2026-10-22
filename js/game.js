@@ -1276,6 +1276,25 @@
     return c ? { t: c.t, x: c.x, y: c.y, z: c.z, reach: Math.abs(c.x - p.x) <= p.ch.reach && c.z <= p.ch.maxZ } : null;
   }
 
+  // Where the ball on its way to `side` will bounce, for the landing mark.
+  // A serve shows it from the moment it's struck, so the returner can read
+  // it before the bounce (the ring only comes once it has bounced). Like a
+  // rally ball, a serve heading into the net shows none. info is
+  // incomingInfo(g, side), passed in when the caller already has it.
+  function landingFor(g, side, info = incomingInfo(g, side)) {
+    const b = g.ball;
+    if (!g.predLand || b.bounces > 0) return null;
+    if (!b.isServe) return info ? g.predLand : null;
+    if (!swingable(g, g.players[side])) return null;
+    const c = CT.cloneBall(b);
+    for (let t = 0; t < 3; t += PHYS.DT) {
+      const ev = CT.stepBall(c, PHYS.DT);
+      if (ev === 'net') return null;
+      if (ev === 'bounce') break;
+    }
+    return g.predLand;
+  }
+
   // ---------------- online ----------------
   const SNAP_PLAYER = ['x', 'y', 'tx', 'ty', 'stamina', 'cap', 'run', 'streak', 'swing', 'swingWing', 'moving', 'v', 'dirX', 'dirY', 'reactUntil'];
 
@@ -1363,6 +1382,7 @@
   CT.requestToss = requestToss;
   CT.requestSwipe = requestSwipe;
   CT.incomingInfo = incomingInfo;
+  CT.landingFor = landingFor;
   CT.fwdOf = fwdOf;
   CT.setAutoMove = (g, side, on) => { g.autoMove[side] = !!on; };
 })();
