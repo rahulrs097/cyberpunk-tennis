@@ -18,9 +18,10 @@
   // the finger lifts (input.lead), and it forgives LOB_EASE times as much mistiming.
   const LOB_LEAD = 0.18;
   const LOB_EASE = 1.5;
-  const CPU_EARLY = 0.45;
+  const OVERHIT = 0.3;          // input.over from which the shot callout says Overhit
+  const CPU_EARLY = 0.45;       // share of the CPU's mistimed shots that are early rather than late
   // Auto-moving players still run at a ball landing this far (m) out, and let it go.
-  const CHASE_OUT = 1;        // share of the CPU's mistimed shots that are early rather than late
+  const CHASE_OUT = 1;
   // Between points you get back this share of what you're missing (more at a
   // changeover), so long rallies leave you tired for the next few points.
   const STAMINA_POINT = 0.3;
@@ -290,6 +291,15 @@
     return g.phase === 'rally' && b.active && b.inFlight && !b.netted &&
       b.lastHitter !== p.side && !(b.isServe && b.bounces === 0);
   }
+  // A ball p can swing at now: an incoming one, or a serve on its way to
+  // them that hasn't bounced yet (a swipe at that is early, not ignored).
+  function swingable(g, p) {
+    const b = g.ball;
+    return incomingTo(g, p) || (g.phase === 'rally' && b.active && b.inFlight && !b.netted &&
+      b.lastHitter !== p.side && b.isServe && b.bounces === 0);
+  }
+  // Could p reach the ball where it crossed their contact plane (p.cross)?
+  const reachedAt = (p, c) => Math.abs(c.x - c.px) <= p.ch.reach && c.z <= p.ch.maxZ;
 
   // Seconds of game time until the ball crosses p's contact plane, or null.
   function predictCross(g, p, maxT) {
@@ -440,7 +450,7 @@
       }
     }
     const vel = sol.vel;
-    return { pos, vel, spin, side, kind, wing, err, e, powerF, lob: isLob, note };
+    return { pos, vel, spin, side, kind, wing, err, e, powerF, lob: isLob, note, over };
   }
 
   function applyShot(g, p, shot) {
@@ -474,6 +484,9 @@
       errMs: Math.round(shot.err * 1000),
       perfect: Math.abs(shot.e) < 0.35,
       note: Math.abs(shot.e) >= 0.35 ? shot.note : '',
+      // swiped so fast it lost its margin (a full-pace drive or serve this
+      // overhit lands long), so the player can tell why a good one went out
+      overhit: shot.over >= OVERHIT && shot.kind !== 'overhead' && !shot.lob,
     };
     g.lastShot = info;
     g.shots++;
@@ -501,8 +514,11 @@
     emit(g, 'whiff', { side: p.side, reason });
   }
 
-  function tryHit(g, p, input, err) {
-    if (!canReach(g, p)) { swingMiss(g, p, 'Out of reach'); return false; }
+  // `at`: where the ball crossed p's contact plane, when the swing comes
+  // after that. A ball they could reach there that has gone by now was
+  // missed by being late, not by being out of reach.
+  function tryHit(g, p, input, err, at) {
+    if (!canReach(g, p)) { swingMiss(g, p, at && reachedAt(p, at) ? 'Too late' : 'Out of reach', at); return false; }
     const shot = computeShot(g, p, input, err);
     applyShot(g, p, shot);
     return true;
@@ -536,7 +552,7 @@
       if (contactT !== null) catchUp(g, g.time - contactT - SHOT_SHARE);
       return;
     }
-    if (!incomingTo(g, p)) return;
+    if (!swingable(g, p)) return;
     const Wout = outerWindow(p, input), lead = swingLead(input) * g.timeScale;
     if (given) {
       errOverride -= lead;
@@ -549,7 +565,7 @@
     }
     if (p.cross && p.cross.t >= g.lastHitT) {
       const err = g.time - p.cross.t - lead;
-      if (err <= Wout) { tryHit(g, p, input, err); return; }
+      if (err <= Wout) { tryHit(g, p, input, err, p.cross); return; }
       swingMiss(g, p, 'Too late', p.cross);
       return;
     }
@@ -585,7 +601,7 @@
     if (!b) { swingMiss(g, p, 'Too late', at); return; }
     const x = p.x, y = p.y, now = g.ball;
     g.ball = b; p.x = at.px; p.y = at.py;
-    const hit = tryHit(g, p, input, err);
+    const hit = tryHit(g, p, input, err, at);
     // keep running from where they really are
     p.x = x; p.y = y;
     if (!hit) { g.ball = now; return; }
@@ -625,7 +641,7 @@
       if (Math.abs(err) <= OUTER * windowFor(p, 'fh')) predictHit(g, p, input, err);
       return;
     }
-    if (!incomingTo(g, p)) return;
+    if (!swingable(g, p)) return;
     const Wout = outerWindow(p, input);
     err -= swingLead(input) * g.timeScale;
     if (Math.abs(err) > Wout) return;
@@ -768,11 +784,9 @@
     return clamp(mood, -1, 1) * g.cpuSmart;
   }
 
-  // A plan for the point (each character has its own, `tactics.patterns`):
-  // work the weak wing then switch to the open court, run them side to side,
-  // or hit behind them as they recover.
-
-  // The CPU picks a shot the way its character plays (`ch.tactics`).
+  // The CPU picks a shot the way its character plays (`ch.tactics`), with a
+  // plan for the point (`tactics.patterns`): work the weak wing then switch
+  // to the open court, run them side to side, or hit behind them as they recover.
   function cpuChooseShot(g, c) {
     const opp = g.players[1 - c.side];
     const b = g.ball;
@@ -1262,6 +1276,25 @@
     return c ? { t: c.t, x: c.x, y: c.y, z: c.z, reach: Math.abs(c.x - p.x) <= p.ch.reach && c.z <= p.ch.maxZ } : null;
   }
 
+  // Where the ball on its way to `side` will bounce, for the landing mark.
+  // A serve shows it from the moment it's struck, so the returner can read
+  // it before the bounce (the ring only comes once it has bounced). Like a
+  // rally ball, a serve heading into the net shows none. info is
+  // incomingInfo(g, side), passed in when the caller already has it.
+  function landingFor(g, side, info = incomingInfo(g, side)) {
+    const b = g.ball;
+    if (!g.predLand || b.bounces > 0) return null;
+    if (!b.isServe) return info ? g.predLand : null;
+    if (!swingable(g, g.players[side])) return null;
+    const c = CT.cloneBall(b);
+    for (let t = 0; t < 3; t += PHYS.DT) {
+      const ev = CT.stepBall(c, PHYS.DT);
+      if (ev === 'net') return null;
+      if (ev === 'bounce') break;
+    }
+    return g.predLand;
+  }
+
   // ---------------- online ----------------
   const SNAP_PLAYER = ['x', 'y', 'tx', 'ty', 'stamina', 'cap', 'run', 'streak', 'swing', 'swingWing', 'moving', 'v', 'dirX', 'dirY', 'reactUntil'];
 
@@ -1307,7 +1340,7 @@
       const peak = g.peakT !== null ? g.peakT : g.time + Math.max(0, b.vel.z) / PHYS.G;
       return { err: g.time - peak };
     }
-    if (!incomingTo(g, p)) return null;
+    if (!swingable(g, p)) return null;
     if (p.cross && p.cross.t >= g.lastHitT) return { err: g.time - p.cross.t };
     const c = predictCross(g, p, 3);
     if (!c) return { whiff: 'Nothing to hit' };
@@ -1349,6 +1382,7 @@
   CT.requestToss = requestToss;
   CT.requestSwipe = requestSwipe;
   CT.incomingInfo = incomingInfo;
+  CT.landingFor = landingFor;
   CT.fwdOf = fwdOf;
   CT.setAutoMove = (g, side, on) => { g.autoMove[side] = !!on; };
 })();

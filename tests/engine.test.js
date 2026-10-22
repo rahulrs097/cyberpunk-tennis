@@ -1,7 +1,7 @@
 // Run with `npm test` (Node 20+, no dependencies).
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { loadEngine, levelOpts, makeBot, playSet } = require('./engine');
+const { loadEngine, levelOpts, makeBot, playSet, loadNet } = require('./engine');
 
 // the engine runs in its own sandbox, so copy its objects out before deepEqual
 const plain = (v) => JSON.parse(JSON.stringify(v));
@@ -184,6 +184,86 @@ test('a swipe that is far too early or too late still swings the racket', () => 
     assert.equal(whiffs[0] && whiffs[0].reason, reason);
     assert.ok(p.swing >= 0 && (p.swingWing === 'fh' || p.swingWing === 'bh'), `${reason}: swing ${p.swing} ${p.swingWing}`);
   }
+});
+
+// A fast ball (25 m/s) at side 0's forehand, swiped `late` game seconds after
+// it reaches them. Returns what the swipe did: 'hit' or the whiff's reason.
+function swipeLate(CT, late) {
+  let did = null;
+  const g = CT.createGame({ p0: 'octopus', p1: 'philosopher', control: ['human', 'cpu'], timeScale: 1,
+    onEvent: (t, d) => { if (t === 'whiff') did = d.reason; if (t === 'hit' && d.side === 0) did = 'hit'; } });
+  const p = g.players[0];
+  g.phase = 'rally';
+  p.x = 0; p.y = -12;
+  g.ball = Object.assign(CT.makeBall(), { pos: { x: 0.8, y: -4, z: 0.9 }, vel: { x: 0, y: -25, z: 3 }, active: true, inFlight: true, bounces: 1, lastHitter: 1 });
+  for (let i = 0; i < 240 && !did; i++) {
+    CT.updateGame(g, 1 / 120);
+    if (p.cross && g.time - p.cross.t >= late) { CT.requestSwipe(g, 0, { aim: 0, pace: 0.6, spinDir: 1, curve: 0 }); break; }
+  }
+  return did;
+}
+
+test('a late swipe at a ball that came right to you says too late, not out of reach', () => {
+  const CT = loadEngine();
+  assert.equal(swipeLate(CT, 0.1), 'hit');
+  // inside the timing window, but the ball has flown on past the racket by now
+  for (const late of [0.16, 0.2, 0.24]) assert.equal(swipeLate(CT, late), 'Too late', `${late} s late`);
+});
+
+test('a swipe at a serve before it bounces is too early, not ignored', () => {
+  const CT = loadEngine(5);
+  const whiffs = [];
+  const g = CT.createGame({ p0: 'octopus', p1: 'philosopher', control: ['human', 'cpu'], firstServer: 1, ...levelOpts(CT, 'club'),
+    onEvent: (t, d) => { if (t === 'whiff' && d.side === 0) whiffs.push(d.reason); } });
+  const p = g.players[0];
+  let swiped = false;
+  for (let i = 0; i < 60 * 10 && !swiped; i++) {
+    CT.updateGame(g, 1 / 60);
+    const b = g.ball;
+    if (g.phase === 'rally' && b.isServe && b.bounces === 0 && b.lastHitter === 1 && g.time - g.lastHitT > 0.1) {
+      CT.requestSwipe(g, 0, { aim: 0, pace: 0.6, spinDir: 1, curve: 0 });
+      swiped = true;
+    }
+  }
+  assert.ok(swiped, 'the CPU served');
+  assert.deepEqual(plain(whiffs), ['Too early']);
+  assert.ok(p.swing >= 0, 'and the racket swings');
+});
+
+test('the landing mark shows where a serve will bounce from the moment it is struck', () => {
+  const CT = loadEngine(5);
+  let bounce = null;
+  const g = CT.createGame({ p0: 'octopus', p1: 'philosopher', control: ['human', 'cpu'], firstServer: 1, ...levelOpts(CT, 'club'),
+    onEvent: (t, d) => { if (t === 'bounce' && !bounce) bounce = d; } });
+  let mark = null;
+  for (let i = 0; i < 240 * 10 && !bounce; i++) {
+    CT.updateGame(g, 1 / 240);
+    if (g.phase === 'rally' && g.ball.isServe && !mark) {
+      mark = CT.landingFor(g, 0);
+      assert.equal(CT.landingFor(g, 1), null, 'not for the server');
+    }
+  }
+  assert.ok(bounce, 'the serve bounced');
+  assert.ok(mark, 'the mark showed before the bounce');
+  assert.ok(Math.hypot(mark.x - bounce.x, mark.y - bounce.y) < 0.05, `mark ${mark.x},${mark.y} vs bounce ${bounce.x},${bounce.y}`);
+  assert.equal(CT.landingFor(g, 0), null, 'and goes once it has bounced');
+  // a serve on its way into the net shows none
+  const g2 = CT.createGame({ p0: 'octopus', p1: 'philosopher', control: ['human', 'cpu'], firstServer: 1, ...levelOpts(CT, 'club') });
+  while (!(g2.phase === 'rally' && g2.ball.isServe)) CT.updateGame(g2, 1 / 240);
+  assert.ok(CT.landingFor(g2, 0));
+  g2.ball.vel.z = -8;
+  assert.equal(CT.landingFor(g2, 0), null);
+});
+
+test('a swipe so fast it overhits says so', () => {
+  const CT = loadEngine();
+  const shots = [];
+  for (const over of [0, 0.5]) {
+    const { g, p } = atContact(CT, 'octopus', 0, -12.5, 1);
+    g.onEvent = (t, d) => { if (t === 'hit') shots.push(d); };
+    CT._applyShot(g, p, CT._computeShot(g, p, { aim: 0, landX: 0, pace: 1, over, spinDir: 1, curve: 0, depth: 1 }, 0));
+  }
+  assert.deepEqual(shots.map((d) => d.overhit), [false, true]);
 });
 
 // Side 1 hits a ball that lands at (x, y) on side 0's half; where does an
@@ -462,6 +542,46 @@ test("online: the guest's shots leave its racket at once on both phones, with no
   }
 });
 
+// A link whose round trip is `rtt` ms (Infinity: stalled), pinged as main.js
+// does. Returns the lag meter's state every 10 ms.
+function lagRun(Net, m, clock, rtt, ms) {
+  const states = [];
+  for (const end = clock.t + ms; clock.t < end; clock.t += 10) {
+    if (clock.t % Net.PING_EVERY === 0) { m.sent(clock.t); if (Number.isFinite(rtt)) clock.due.push([clock.t + rtt, clock.t]); }
+    while (clock.due.length && clock.due[0][0] <= clock.t) m.answered(clock.due.shift()[1], clock.t);
+    states.push({ t: clock.t, ...m.state(clock.t) });
+  }
+  return states;
+}
+
+test('online lag: the ping shows over 150 ms, red over 400, and pauses the match over 450 until it settles', () => {
+  const Net = loadNet();
+  const m = Net.createLagMeter(), clock = { t: 0, due: [] };
+  const last = (st) => st[st.length - 1];
+  let st = lagRun(Net, m, clock, 100, 3000);
+  assert.deepEqual(plain([last(st).level, st.some((s) => s.held)]), [null, false]);
+  st = lagRun(Net, m, clock, 250, 3000);
+  assert.deepEqual(plain([last(st).level, st.some((s) => s.held)]), ['yellow', false]);
+  st = lagRun(Net, m, clock, 420, 3000);
+  assert.deepEqual(plain([last(st).level, st.some((s) => s.held)]), ['red', false]);
+  // over 450: paused, as soon as a ping has been out that long
+  const from = clock.t;
+  st = lagRun(Net, m, clock, 600, 3000);
+  const heldAt = st.find((s) => s.held).t - from;
+  assert.ok(heldAt <= 500, `paused after ${heldAt} ms`);
+  assert.ok(st.slice(st.indexOf(st.find((s) => s.held))).every((s) => s.held), 'and stays paused');
+  // back to normal: plays on once it has been 450 or under for a second
+  const back = clock.t;
+  st = lagRun(Net, m, clock, 100, 4000);
+  const calm = st.find((s) => s.ms <= 450).t, free = st.find((s) => !s.held).t;
+  assert.ok(free - calm >= 1000 && free - back < 2500, `calm at ${calm - back} ms, playing at ${free - back} ms`);
+  assert.equal(last(st).level, null);
+  // a link that stops answering pauses within half a second or so
+  const stall = clock.t;
+  st = lagRun(Net, m, clock, Infinity, 2000);
+  assert.ok(st.find((s) => s.held).t - stall <= 1000);
+});
+
 // ---------------- line calls ----------------
 test('line margin: how far the ball missed the line, or how much of it stayed in', () => {
   const CT = loadEngine();
@@ -590,6 +710,23 @@ test('achievements and stats are saved: counts, firsts, streaks and bests per le
   assert.equal(CT.achievementStats(again, 'online').played, 0);
 });
 
+test('the saved record is only written when something changed', () => {
+  let writes = 0;
+  const store = {};
+  const localStorage = { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => { writes++; store[k] = String(v); } };
+  const CT = loadEngine(1, { localStorage });
+  const rec = CT.loadAchievements();
+  const t = CT.createAchievementTracker(0, 'club');
+  // the opponent's shots and our groundstrokes change nothing
+  CT.recordAchievements(rec, t.hit({ side: 1, kind: 'ground', kmh: 90 }), 'club');
+  CT.recordAchievements(rec, t.hit({ side: 0, kind: 'ground', kmh: 95 }), 'club');
+  assert.equal(writes, 0);
+  CT.recordAchievements(rec, { earned: [], stats: {}, best: { longestRally: 5 } }, 'club');
+  assert.equal(writes, 1, 'a new best is saved');
+  CT.recordAchievements(rec, { earned: [], stats: {}, best: { longestRally: 4 } }, 'club');
+  assert.equal(writes, 1, 'a shorter rally is not');
+});
+
 test('in a real set the tracker counts the points, games and aces the engine scored', () => {
   const CT = loadEngine(11);
   const t = CT.createAchievementTracker(0, 'club');
@@ -613,23 +750,55 @@ test('in a real set the tracker counts the points, games and aces the engine sco
 });
 
 test('rocket serve: a perfect full-pace serve reaches 200 km/h, a tired or soft one does not', () => {
+  // serve once and play until it's returned or the point ends; what did the serve earn?
   const serve = (pace, stamina) => {
     const CT = loadEngine(3);
     const t = CT.createAchievementTracker(0, 'club');
-    let res = null;
+    const got = { earned: [], fastestServe: 0 };
+    let done = false;
+    const add = (res) => { got.earned.push(...res.earned); got.fastestServe = Math.max(got.fastestServe, res.best.fastestServe || 0); };
     const g = CT.createGame({ p0: 'octopus', p1: 'philosopher', control: ['human', 'cpu'], ...levelOpts(CT, 'club'),
-      onEvent: (type, d) => { if (type === 'hit' && d.kind === 'serve' && d.side === 0) res = t.hit(d); } });
+      onEvent: (type, d) => {
+        if (done || (type !== 'hit' && type !== 'point')) return;
+        add(t[type](d));
+        done = type === 'point' || d.side === 1;
+      } });
     g.players[0].stamina = stamina;
-    for (let i = 0; i < 600 && !res; i++) {
+    for (let i = 0; i < 1200 && !done; i++) {
       if (g.phase === 'preServe' && g.phaseWall > 0.5) CT.requestToss(g, 0);
       if (g.phase === 'toss' && g.peakT !== null && g.time >= g.peakT) CT.requestSwipe(g, 0, { aim: 0, pace, over: 0, spinDir: 1, curve: 0 });
       CT.updateGame(g, 1 / 60);
     }
-    return res;
+    return got;
   };
   const big = serve(1, 100);
-  assert.ok(big.best.fastestServe >= 200, `${big.best.fastestServe} km/h`);
+  assert.ok(big.fastestServe >= 200, `${big.fastestServe} km/h`);
   assert.deepEqual(plain(big.earned), ['rocket']);
   assert.deepEqual(plain(serve(0.7, 100).earned), []);
   assert.deepEqual(plain(serve(1, 40).earned), []);
+});
+
+test('rocket serve and fastest serve only count once the serve lands in', () => {
+  const CT = loadEngine();
+  const t = CT.createAchievementTracker(0, 'club');
+  const serve = (kmh) => t.hit({ side: 0, kind: 'serve', kmh });
+  const point = (winner, text) => t.point({ winner, text, result: 'point', server: 0, shots: 1, tiebreak: false, games: [0, 0] });
+  // nothing until it's in play
+  assert.deepEqual(plain(serve(210)), { earned: [], stats: {}, best: {}, over: null });
+  // a double fault: neither serve counts
+  serve(150);
+  let r = point(1, 'Double fault');
+  assert.deepEqual(plain(r.earned), []);
+  assert.equal(r.best.fastestServe, undefined);
+  // a big first serve that faults, then a second serve that's returned: only the second counts
+  serve(212); serve(160);
+  r = t.hit({ side: 1, kind: 'ground', kmh: 90 });
+  assert.deepEqual(plain([r.earned, r.best]), [[], { fastestServe: 160 }]);
+  // a rocket that's returned, and one that's an ace
+  serve(205);
+  assert.deepEqual(plain(t.hit({ side: 1, kind: 'ground', kmh: 90 }).earned), ['rocket']);
+  serve(208);
+  r = point(0, 'Ace');
+  assert.deepEqual(plain(r.earned), ['ace', 'rocket']);
+  assert.equal(r.best.fastestServe, 208);
 });

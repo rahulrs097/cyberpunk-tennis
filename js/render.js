@@ -258,14 +258,19 @@
   // fewer pixels, no lamp pools, no glow blur on the players.
   const DPR_CAP = [1, 1.25, 1.5];
 
-  // Drop a quality level when frames average slower than ~40 fps.
-  function watchFrameRate(r, dt) {
+  // Drop a quality level when the phone can't keep up: frames average
+  // slower than ~40 fps while drawing one takes most of a 60 fps frame
+  // (`work`, seconds), or slower than ~22 fps whatever the reason. A phone
+  // that only shows 30 frames a second but draws each one quickly (an
+  // iPhone in Low Power Mode) keeps the full look.
+  function watchFrameRate(r, dt, work) {
     if (!dt || dt >= 0.1 || r.quality === 0) return;   // skip pauses and tab switches
-    r.frames.push(dt);
+    r.frames.push([dt, work]);
     if (r.frames.length < 90) return;
-    const avg = r.frames.reduce((a, b) => a + b, 0) / r.frames.length;
+    const avg = (i) => r.frames.reduce((a, f) => a + f[i], 0) / r.frames.length;
+    const gap = avg(0), busy = avg(1);
     r.frames.length = 0;
-    if (avg > 0.025) { r.quality--; resize(r, ...r.args); }
+    if ((gap > 0.025 && busy > 0.012) || gap > 0.045) { r.quality--; resize(r, ...r.args); }
   }
 
   // A soft radial glow, rendered once per colour and size.
@@ -385,8 +390,9 @@
   }
 
   // ---------------- sky billboard ----------------
-  // A neon sign over the skyline just left of the far player, turned in
-  // towards the court, so it sits in the open sky on a phone held upright.
+  // A neon sign over the skyline just left of the far player (whichever end
+  // you play from), turned in towards the court, so it sits in the open sky
+  // on a phone held upright.
   // It shows a photo and the player's tag, and flashes a word when something
   // happens (CT.showBillboard).
   const BOARD = { x: -6, y: 40, z: 5.5, w: 17, h: 5.2, turn: 0.4, tag: 'HHORNS' };   // turn: radians, far end to the right
@@ -397,11 +403,16 @@
   BOARD_PHOTO.src = 'img/billboard.jpg';
 
   // what the sign says now: the latest word until it expires, else the
-  // photo (or just the tag until the photo has loaded)
+  // photo (or just the tag until the photo has loaded). Online, a slow
+  // ping takes the tag's place, and a match paused for lag says so over
+  // everything else.
   function boardText(r, now) {
-    const b = r.board;
+    const b = r.board, p = r.ping;
+    const photo = BOARD_PHOTO.complete && BOARD_PHOTO.naturalWidth > 0;
+    if (p && p.held) return { text: p.ms + ' MS', label: 'PAUSED', color: PAL.warn, from: p.from, photo };
     if (b && now < b.until) return b;
-    return { text: BOARD.tag, color: '#25d9ff', from: b ? b.until : 0, photo: BOARD_PHOTO.complete && BOARD_PHOTO.naturalWidth > 0 };
+    if (p) return { text: p.ms + ' MS', label: 'PING', color: p.red ? PAL.warn : '#e4ff4a', from: Math.max(p.from, b ? b.until : 0), photo };
+    return { text: BOARD.tag, color: '#25d9ff', from: b ? b.until : 0, photo };
   }
 
   function boardTexture(r, text, color) {
@@ -433,8 +444,9 @@
   }
 
   // the photo in a square on the left, sliding slowly between the top and
-  // bottom of the picture, and the tag beside it (in BOARD_TEX coordinates)
-  function drawBoardPhoto(ctx, r, now) {
+  // bottom of the picture, and the tag (or the ping, under its label)
+  // beside it (in BOARD_TEX coordinates)
+  function drawBoardPhoto(ctx, r, now, cur) {
     const W = BOARD_TEX.w, H = BOARD_TEX.h, m = 12, img = BOARD_PHOTO;
     ctx.clearRect(0, 0, W, H);
     ctx.fillStyle = 'rgba(8,6,22,0.88)';
@@ -446,15 +458,20 @@
     ctx.strokeStyle = '#ff3fb4'; ctx.lineWidth = 6;
     ctx.strokeRect(8, 8, W - 16, H - 16);
     ctx.beginPath(); ctx.moveTo(m + side + 3, 8); ctx.lineTo(m + side + 3, H - 8); ctx.stroke();
-    const cx = (m + side + W) / 2;
-    ctx.font = '900 80px Tektur, sans-serif';
+    const cx = (m + side + W) / 2, tw = W - side - 60, y = cur.label ? H * 0.64 : H / 2 + 4;
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillStyle = '#25d9ff';
-    if (r.quality) { ctx.shadowColor = '#25d9ff'; ctx.shadowBlur = 18; }
-    ctx.fillText(BOARD.tag, cx, H / 2 + 4, W - side - 60);
+    if (cur.label) {
+      ctx.font = '700 32px Tektur, sans-serif';
+      ctx.fillStyle = '#e8f6ff';
+      ctx.fillText(cur.label, cx, H * 0.28, tw);
+    }
+    ctx.font = `900 ${cur.label ? 64 : 80}px Tektur, sans-serif`;
+    ctx.fillStyle = cur.color;
+    if (r.quality) { ctx.shadowColor = cur.color; ctx.shadowBlur = 18; }
+    ctx.fillText(cur.text, cx, y, tw);
     ctx.shadowBlur = 0;
     ctx.fillStyle = 'rgba(255,255,255,0.7)';
-    ctx.fillText(BOARD.tag, cx, H / 2 + 4, W - side - 60);
+    ctx.fillText(cur.text, cx, y, tw);
   }
 
   // A Hawk-Eye style close-up of a close call, looking down on the court the
@@ -553,9 +570,12 @@
 
   function drawBillboard(ctx, r) {
     const B = BOARD, z1 = B.z + B.h;
-    const ca = Math.cos(B.turn), sa = Math.sin(B.turn);
+    // an online guest plays from the other end, so the sign stands over
+    // their far court instead (turned half round, so it still reads left to right)
+    const f = r.human === 1 ? -1 : 1;
+    const ca = f * Math.cos(B.turn), sa = f * Math.sin(B.turn);
     // a point on the sign, u across it from 0 (left) to 1 (right)
-    const at = (u, z) => proj(r, B.x + (u - 0.5) * B.w * ca, B.y + (u - 0.5) * B.w * sa, z);
+    const at = (u, z) => proj(r, f * B.x + (u - 0.5) * B.w * ca, f * B.y + (u - 0.5) * B.w * sa, z);
     const tl = at(0, z1), tr = at(1, z1);
     if (tl.behind || tr.behind) return;
     if (Math.max(tl.x, tr.x) < 0 || Math.min(tl.x, tr.x) > r.W) return;
@@ -572,7 +592,7 @@
     if (cur.photo || cur.call !== undefined) {
       src = r.boardPhotoTex || (r.boardPhotoTex = document.createElement('canvas'));
       if (src.width !== BOARD_TEX.w) { src.width = BOARD_TEX.w; src.height = BOARD_TEX.h; }
-      if (cur.photo) drawBoardPhoto(src.getContext('2d'), r, now);
+      if (cur.photo) drawBoardPhoto(src.getContext('2d'), r, now, cur);
       else drawBoardCall(src.getContext('2d'), r, cur.call, age);
     } else src = boardTexture(r, cur.text, cur.color);
     const d = r.dpr, W = BOARD_TEX.w, H = BOARD_TEX.h, N = 10, sw = W / N;
@@ -592,6 +612,15 @@
   // Flash a word on the billboard for `secs` seconds.
   function showBillboard(r, text, color, secs) {
     r.board = { text, color: color || '#e4ff4a', from: performance.now() / 1000, until: performance.now() / 1000 + (secs || 2.5) };
+  }
+
+  // Online lag for the billboard: { ms, red, held }, or null to hide it.
+  function showPing(r, p) {
+    const was = r.ping;
+    if (!p) { r.ping = null; return; }
+    // flickers on when it first shows, turns red, or pauses the match
+    const from = was && was.red === p.red && was.held === p.held ? was.from : performance.now() / 1000;
+    r.ping = { ...p, from };
   }
 
   // Put a close line call up on the billboard for `secs` seconds (the
@@ -914,7 +943,7 @@
     ctx.restore();
   }
 
-  function drawGuides(ctx, r, g, human, info) {
+  function drawGuides(ctx, r, g, human, info, land) {
     const p = g.players[human];
     if (Math.hypot(p.tx - p.x, p.ty - p.y) > 0.3) {
       ctx.save();
@@ -923,12 +952,11 @@
       if (groundEllipse(ctx, r, p.tx, p.ty, 0.35)) ctx.stroke();
       ctx.restore();
     }
-    const b = g.ball;
-    if (info && g.predLand && b.bounces === 0 && b.lastHitter !== human) {
+    if (land) {
       ctx.save();
       ctx.strokeStyle = 'rgba(228,255,74,0.7)';
       ctx.lineWidth = 2;
-      const L = g.predLand, k = 0.3;
+      const L = land, k = 0.3;
       strokeSeg(ctx, r, [L.x - k, L.y - k], [L.x + k, L.y + k]);
       strokeSeg(ctx, r, [L.x + k, L.y - k], [L.x - k, L.y + k]);
       ctx.restore();
@@ -998,11 +1026,10 @@
     ctx.restore();
   }
 
-  function render(r, g, human, info) {
+  function render(r, g, human, info, land) {
     const now = performance.now();
     const dt = r.lastT ? Math.min(0.1, (now - r.lastT) / 1000) : 0;
     r.lastT = now;
-    watchFrameRate(r, dt);
     r.human = human;
     updateCamera(r, g, human, dt);
 
@@ -1018,7 +1045,7 @@
       ctx.lineWidth = 1.5;
       if (groundEllipse(ctx, r, m.x, m.y, 0.12 + m.age * 0.5)) ctx.stroke();
     }
-    drawGuides(ctx, r, g, human, info);
+    drawGuides(ctx, r, g, human, info, land);
 
     // everything that stands up, sorted far to near along the view direction
     const c = r.cam;
@@ -1035,6 +1062,7 @@
     items.sort((a, b) => b.d - a.d);
     for (const it of items) it.draw();
     if (r.view === 'first') { drawRacketView(ctx, r, g, g.players[human]); drawTimingRing(ctx, r, g, info); }
+    watchFrameRate(r, dt, (performance.now() - now) / 1000);
   }
 
   CT.createRenderer = createRenderer;
@@ -1043,6 +1071,7 @@
   CT.renderGame = render;
   CT.showBillboard = showBillboard;
   CT.showLineCall = showLineCall;
+  CT.showPing = showPing;
   CT.unproject = unproject;
   CT.project = proj;
 })();

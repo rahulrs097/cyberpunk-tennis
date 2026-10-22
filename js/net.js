@@ -20,20 +20,41 @@
     return s;
   }
 
+  // This phone's id for the relay, kept on the phone: after a dropped
+  // connection only this phone can take its place in the room again.
+  let phoneId = '';
+  try { phoneId = localStorage.getItem('ct.phoneId') || ''; } catch (e) { /* storage is optional */ }
+  if (!/^[a-z0-9]{16}$/.test(phoneId)) {
+    phoneId = '';
+    for (let i = 0; i < 16; i++) phoneId += 'abcdefghijklmnopqrstuvwxyz0123456789'[Math.floor(Math.random() * 36)];
+    try { localStorage.setItem('ct.phoneId', phoneId); } catch (e) { /* storage is optional */ }
+  }
+
   // role: 'host' | 'guest'. onMessage gets parsed objects; onStatus gets
-  // 'open' | 'closed' | 'error'. Messages travel as JSON either way, so the
+  // 'open' | 'closed' | 'error', or 'full' when the room already has
+  // another phone on that side. Messages travel as JSON either way, so the
   // tab prototype exercises the same encoding as the real relay.
   function connect(code, role, onMessage, onStatus) {
     const status = onStatus || (() => {});
     const parse = (text) => { try { return JSON.parse(text); } catch (e) { return null; } };
+    // CT.Net.lag (?lag= in the page URL) holds each message back that many
+    // ms, in order, to try the game on a slow link
+    let due = 0;
+    const later = (post) => (text) => {
+      if (!CT.Net.lag) { post(text); return; }
+      const now = performance.now();
+      due = Math.max(due, now + CT.Net.lag);
+      setTimeout(() => post(text), due - now);
+    };
     if (CT.RELAY_URL) {
-      const ws = new WebSocket(`${CT.RELAY_URL}/room/${code}?role=${role}`);
+      const ws = new WebSocket(`${CT.RELAY_URL}/room/${code}?role=${role}&id=${phoneId}`);
       ws.onmessage = (e) => { const m = parse(e.data); if (m) onMessage(m); };
       ws.onopen = () => status('open');
-      ws.onclose = () => status('closed');
+      ws.onclose = (e) => status(e.code === 4001 ? 'full' : 'closed');
       ws.onerror = () => status('error');
+      const post = later((text) => { if (ws.readyState === 1) ws.send(text); });
       return {
-        send: (m) => { if (ws.readyState === 1) ws.send(JSON.stringify(m)); },
+        send: (m) => post(JSON.stringify(m)),
         close: () => { try { ws.close(); } catch (e) { /* already closed */ } },
       };
     }
@@ -43,11 +64,42 @@
       if (env && env.from !== role) onMessage(env.m);
     };
     setTimeout(() => status('open'), 0);
+    const post = later((text) => ch.postMessage(text));
     return {
-      send: (m) => ch.postMessage(JSON.stringify({ from: role, m })),
+      send: (m) => post(JSON.stringify({ from: role, m })),
       close: () => ch.close(),
     };
   }
 
-  CT.Net = { connect, makeCode };
+  // Lag in an online match. Each phone pings the other every PING_EVERY ms
+  // and the other answers at once. The ping is the round trip, smoothed, and
+  // never less than how long the oldest unanswered ping has been out, so a
+  // stalled link shows at once. Over `show` ms it goes up on the billboard
+  // (yellow, red over `red`); over `pause` the match stops until the ping has
+  // been back at `pause` or under for `calm` ms.
+  const PING_EVERY = 500;
+  const LAG = { show: 150, red: 400, pause: 450, calm: 1000 };
+  function createLagMeter() {
+    const out = [];   // send times of the pings not answered yet
+    let rtt = null, held = false, calmSince = null;
+    return {
+      sent(now) { out.push(now); },
+      answered(at, now) {
+        while (out.length && out[0] <= at) out.shift();
+        rtt = rtt === null ? now - at : rtt + (now - at - rtt) * 0.4;
+      },
+      // { ms, level: null | 'yellow' | 'red', held }
+      state(now) {
+        const ms = Math.max(rtt || 0, out.length ? now - out[0] : 0);
+        if (!held) { if (ms > LAG.pause) { held = true; calmSince = null; } }
+        else if (ms > LAG.pause) calmSince = null;
+        else if (calmSince === null) calmSince = now;
+        else if (now - calmSince >= LAG.calm) held = false;
+        return { ms, level: ms > LAG.red ? 'red' : ms > LAG.show ? 'yellow' : null, held };
+      },
+    };
+  }
+
+  const lagParam = /[?&]lag=(\d+)/.exec(location.search);
+  CT.Net = { connect, makeCode, createLagMeter, PING_EVERY, LAG, lag: lagParam ? +lagParam[1] : 0 };
 })();
