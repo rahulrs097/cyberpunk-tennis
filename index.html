@@ -104,13 +104,17 @@
 
   .overlay {
     position: fixed; inset: 0;
-    display: flex; align-items: center; justify-content: center;
+    display: flex;
     padding: calc(env(safe-area-inset-top, 0px) + 16px) 16px calc(env(safe-area-inset-bottom, 0px) + 16px);
     background: rgba(5, 4, 12, 0.72);
     backdrop-filter: blur(3px);
     overflow-y: auto;
   }
-  .sheet { width: 100%; max-width: 440px; display: grid; gap: 16px; }
+  /* centred with auto margins, not align-items: a sheet taller than the
+     screen then starts at the top and scrolls, instead of losing its top */
+  .sheet { width: 100%; max-width: 440px; display: grid; gap: 16px; margin: auto; }
+  /* screens opened over the menu hide it, so its buttons don't show through */
+  #help, #trophies { background: rgba(5, 4, 12, 0.94); }
   .title { font-family: var(--display); font-weight: 900; font-size: clamp(34px, 11vw, 54px); line-height: 0.95; letter-spacing: 0.02em; text-transform: uppercase; text-wrap: balance; }
   .title span { display: block; color: var(--pink); text-shadow: 0 0 20px rgba(255,63,180,0.7); }
   .title b { color: var(--cyan); text-shadow: 0 0 20px rgba(37,217,255,0.6); font-weight: 900; }
@@ -147,7 +151,8 @@
   .btns { display: flex; gap: 10px; flex-wrap: wrap; }
   .opts { display: grid; grid-template-columns: auto 1fr; gap: 8px 12px; align-items: center; }
   .opts .seg button { padding-top: 8px; padding-bottom: 8px; }
-  #trophies { align-items: flex-start; }
+  #trophies .sheet { margin-top: 0; }
+  #pauseMenu .btns { flex-direction: column; }
   .ach { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
   .ach li { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; }
   .ach b { font-family: var(--display); font-weight: 700; font-size: 15px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--cyan); }
@@ -266,7 +271,7 @@
       <li><b>Tap</b><span>Run to that spot. With automove on, your player chases the ball for you and a tap overrides it until the next shot. On your serve, tap to toss.</span></li>
       <li><b>Swipe</b><span>Hit. The swipe's direction is where the ball goes, and its length is how deep: a short swipe drops it short. A downward slice swipe aims the other way: top-left to bottom-right goes left.</span></li>
       <li><b>Spin</b><span>Swipe up for topspin, down for slice. Bend the swipe for sidespin.</span></li>
-      <li><b>Pace</b><span>A fast flick hits hard and flat. A slow swipe adds spin and safety.</span></li>
+      <li><b>Pace</b><span>A fast flick hits hard and flat, but flick too hard and it flies long. A slow swipe adds spin and safety.</span></li>
       <li><b>Lob</b><span>Swipe up slowly over a quarter of the screen or more to loft the ball deep, over a player at the net. Start the swipe as the ball arrives: a lob is timed from the middle of the swipe, and forgives more mistiming than a drive.</span></li>
       <li><b>Timing</b><span>Swipe as the ring closes. Late forehands drift right, late backhands drift left.</span></li>
       <li><b>Stamina</b><span>Running, every swing and repeated power shots tire you, and you only get part of it back between points. Tired players run slower and have less time to swing. The striped part of the bar is gone for the set.</span></li>

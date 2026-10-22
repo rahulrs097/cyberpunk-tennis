@@ -385,8 +385,9 @@
   }
 
   // ---------------- sky billboard ----------------
-  // A neon sign over the skyline just left of the far player, turned in
-  // towards the court, so it sits in the open sky on a phone held upright.
+  // A neon sign over the skyline just left of the far player (whichever end
+  // you play from), turned in towards the court, so it sits in the open sky
+  // on a phone held upright.
   // It shows a photo and the player's tag, and flashes a word when something
   // happens (CT.showBillboard).
   const BOARD = { x: -6, y: 40, z: 5.5, w: 17, h: 5.2, turn: 0.4, tag: 'HHORNS' };   // turn: radians, far end to the right
@@ -553,9 +554,12 @@
 
   function drawBillboard(ctx, r) {
     const B = BOARD, z1 = B.z + B.h;
-    const ca = Math.cos(B.turn), sa = Math.sin(B.turn);
+    // an online guest plays from the other end, so the sign stands over
+    // their far court instead (turned half round, so it still reads left to right)
+    const f = r.human === 1 ? -1 : 1;
+    const ca = f * Math.cos(B.turn), sa = f * Math.sin(B.turn);
     // a point on the sign, u across it from 0 (left) to 1 (right)
-    const at = (u, z) => proj(r, B.x + (u - 0.5) * B.w * ca, B.y + (u - 0.5) * B.w * sa, z);
+    const at = (u, z) => proj(r, f * B.x + (u - 0.5) * B.w * ca, f * B.y + (u - 0.5) * B.w * sa, z);
     const tl = at(0, z1), tr = at(1, z1);
     if (tl.behind || tr.behind) return;
     if (Math.max(tl.x, tr.x) < 0 || Math.min(tl.x, tr.x) > r.W) return;

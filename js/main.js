@@ -97,6 +97,9 @@
       return;
     }
     tut = null;
+    // the practice point's match stops here, as a finished match would:
+    // otherwise the CPU could go on serving behind this screen
+    game.phase = 'matchOver';
     $('endTitle').textContent = 'Tutorial done';
     $('endScore').textContent = '';
     $('endNote').textContent = 'One more thing: running and power shots wear down the bar under your name. When it runs low you get slower and your timing gets harder. Start on Chill.';
@@ -250,7 +253,7 @@
         const timing = d.perfect ? 'Perfect timing'
           : d.note && Math.abs(d.errMs) < 15 ? d.note
           : (d.errMs > 0 ? 'Late ' : 'Early ') + Math.abs(d.errMs) + ' ms' + (d.note ? ' · ' + d.note : '');
-        showShot([label, timing, d.kmh + ' km/h', d.spin, d.curve].filter(Boolean).join(' · '));
+        showShot([label, timing, d.overhit && 'Overhit', d.kmh + ' km/h', d.spin, d.curve].filter(Boolean).join(' · '));
         try { navigator.vibrate && navigator.vibrate(18); } catch (e) { /* optional */ }
       }
       hintForState();
@@ -332,8 +335,9 @@
     const dx = b.x - a.x, dy = b.y - a.y;
     const chord = Math.hypot(dx, dy);
     const dur = Math.max(1, b.t - a.t);
-    if (chord < 24 && dur < 400) { handleTap(b.x, b.y); return; }
-    if (chord < 30) return;
+    // A quick touch that barely moved is a tap. One held still for longer is
+    // a swipe the player thought better of, so it does nothing.
+    if (chord < 30) { if (dur < 400) handleTap(b.x, b.y); return; }
     handleSwipe(pts, dx, dy, chord, dur);
   }
 

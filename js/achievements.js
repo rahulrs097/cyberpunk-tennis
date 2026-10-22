@@ -40,12 +40,23 @@
     let everyGame = true;          // scored at least once in every game so far
     let lostPoint = false;
     let maxBehind = 0;
+    // our last serve's speed: it only counts (fastest serve, rocket) once
+    // it has landed in, i.e. they returned it or the point was played out
+    let serveKmh = 0;
     function out(got, stats, best, over) {
       return { earned: ACHIEVEMENTS.filter((x) => got.has(x.id) && (pro || !x.pro)).map((x) => x.id), stats, best, over };
+    }
+    function serveIn(got, best) {
+      if (!serveKmh) return;
+      best.fastestServe = serveKmh;
+      if (serveKmh >= ROCKET) got.add('rocket');
+      serveKmh = 0;
     }
     function point(d) {
       const got = new Set(), stats = {}, best = {};
       const mine = d.winner === side;
+      if (d.text === 'Double fault') serveKmh = 0;
+      serveIn(got, best);
       if (mine) stats.points = 1;
       if (d.server === side) {
         if (mine && d.text === 'Ace') { aces++; got.add('ace'); stats.aces = 1; }
@@ -87,10 +98,9 @@
     }
     function hit(d) {
       const got = new Set(), best = {};
-      if (d.side === side && d.kind === 'serve' && d.kmh) {
-        best.fastestServe = d.kmh;
-        if (d.kmh >= ROCKET) got.add('rocket');
-      }
+      // (a fault is followed by the second serve, which replaces it)
+      if (d.side === side && d.kind === 'serve') serveKmh = d.kmh || 0;
+      else if (d.side === opp) serveIn(got, best);
       return out(got, {}, best, null);
     }
     return { side, mode, point, hit };
@@ -120,25 +130,29 @@
     return s;
   }
 
-  // Adds one tracker result (`res`, in `mode`) to `rec` and saves it.
-  // Returns the ids earned for the first time.
+  // Adds one tracker result (`res`, in `mode`) to `rec` and saves it if
+  // anything changed (most shots change nothing, and saving is a
+  // synchronous write). Returns the ids earned for the first time.
   function record(rec, res, mode, now) {
     const fresh = [];
+    let changed = false;
     for (const id of res.earned || []) {
       if (!BY_ID[id]) continue;
       const e = rec.earned[id];
       if (e) e.n++;
       else { rec.earned[id] = { n: 1, at: now || Date.now() }; fresh.push(id); }
+      changed = true;
     }
     for (const s of [statsFor(rec, 'all'), statsFor(rec, mode)]) {
-      for (const k in res.stats || {}) s[k] += res.stats[k];
-      for (const k in res.best || {}) s[k] = Math.max(s[k], res.best[k]);
+      for (const k in res.stats || {}) { s[k] += res.stats[k]; changed = true; }
+      for (const k in res.best || {}) if (res.best[k] > s[k]) { s[k] = res.best[k]; changed = true; }
       if (res.over) {
         s.played++;
         if (res.over.won) { s.won++; s.streak++; s.bestStreak = Math.max(s.bestStreak, s.streak); } else s.streak = 0;
+        changed = true;
       }
     }
-    save(rec);
+    if (changed) save(rec);
     return fresh;
   }
 
