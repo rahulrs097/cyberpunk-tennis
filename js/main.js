@@ -331,6 +331,7 @@
     const pts = touch.pts;
     touch = null;
     e.preventDefault();
+    if (net && net.held) return;   // paused for lag
     const a = pts[0], b = pts[pts.length - 1];
     const dx = b.x - a.x, dy = b.y - a.y;
     const chord = Math.hypot(dx, dy);
@@ -447,14 +448,18 @@
     if (tellOther) send({ t: 'bye' });
     clearInterval(net.timer);
     net.link.close();
+    if (net.held) { $('msg').hidden = true; msgTimer = 0; }
     net = null;
     me = 0;
+    CT.showPing(renderer, null);
   }
 
   function onNet(m) {
     if (!net) return;
     net.lastHeard = performance.now();
     if (m.t === 'bye') { leaveOnline(false); showMenu(); showMsg('Opponent left', 'Back to the menu', 'warn'); return; }
+    if (m.t === 'ping') { send({ t: 'pong', at: m.at }); return; }
+    if (m.t === 'pong') { if (net.lag && Number.isFinite(m.at)) net.lag.answered(m.at, performance.now()); return; }
     if (net.role === 'host') {
       if (m.t === 'hello' && !net.started) {
         net.guestChar = CT.CHARACTERS[m.char] ? m.char : 'philosopher';
@@ -471,12 +476,14 @@
     } else {
       if (m.t === 'start') {
         net.started = true;
-        clearInterval(net.timer);
-        net.timer = setInterval(() => send({ t: 'ping' }), 1000);
+        net.lastSnap = performance.now();
+        startPings();
         me = 1;
         $('lobby').hidden = true;
         beginMatch({ p0: m.p0, p1: m.p1, timeScale: m.timeScale, control: ['remote', 'human'], remote: true, serveClock: m.serveClock });
       } else if (m.t === 'st' && game && game.remote) {
+        net.lastSnap = performance.now();
+        net.hostHeld = !!m.held;
         const was = game.phase + game.server;
         CT.applySnapshot(game, m.s);
         // events arrive just before the state they belong to, so the hint
@@ -489,6 +496,35 @@
         onEvent(m.type, m.d);
       }
     }
+  }
+
+  // Both phones ping each other every half second to measure the lag.
+  function startPings() {
+    clearInterval(net.timer);
+    net.lag = CT.Net.createLagMeter();
+    net.held = false;
+    net.timer = setInterval(() => {
+      const now = performance.now();
+      net.lag.sent(now);
+      send({ t: 'ping', at: now });
+    }, CT.Net.PING_EVERY);
+  }
+
+  // Is the online match paused for lag? The host decides from its own ping
+  // and sends that with each snapshot; the guest also stops if the host's
+  // snapshots stop coming. The ping goes up on the billboard over 150 ms.
+  function checkLag(now) {
+    const st = net.lag.state(now);
+    const held = game.phase !== 'matchOver' && (net.role === 'host' ? st.held : !!net.hostHeld || now - net.lastSnap > CT.Net.LAG.pause);
+    // the number on the sign changes at most four times a second
+    if (!net.shown || now - net.shown.at > 250 || held !== net.held) net.shown = { at: now, ms: Math.round(st.ms / 10) * 10 };
+    CT.showPing(renderer, st.level || held ? { ms: net.shown.ms, red: st.level === 'red' || held, held } : null);
+    if (held !== net.held) {
+      net.held = held;
+      if (held) { showMsg('Paused', 'Slow connection', 'warn'); msgTimer = Infinity; }
+      else showMsg('Play on', '', 'neutral');
+    }
+    return held;
   }
 
   // only matters before the match starts; mid-match the 6 s silence check handles it
@@ -527,6 +563,7 @@
 
   function hostStart() {
     net.started = true;
+    startPings();
     me = 0;
     // online matches always use Pro ball speed, with a serve clock
     const cfg = { p0: humanChar, p1: net.guestChar, timeScale: 1, control: ['human', 'remote'], autoMove: [autoMove, net.guestAuto], serveClock: SERVE_CLOCK };
@@ -623,11 +660,13 @@
     frameDue = now - frameDue > 50 ? now + FRAME_MS : frameDue + FRAME_MS;
     const dt = Math.min(0.05, (now - lastFrame) / 1000);
     lastFrame = now;
-    // an online match can't be paused: the pause menu just sits over it
+    // an online match can't be paused: the pause menu just sits over it.
+    // It does stop while the link is too slow to play on.
     if (game && (!paused || net)) {
-      CT.updateGame(game, dt);
+      const held = !!(net && net.started && net.lag) && checkLag(now);
+      if (!held) CT.updateGame(game, dt);
       if (net && net.started) {
-        if (net.role === 'host' && now - net.sendT > 50) { net.sendT = now; send({ t: 'st', s: CT.snapshot(game) }); }
+        if (net.role === 'host' && now - net.sendT > 50) { net.sendT = now; send({ t: 'st', s: CT.snapshot(game), held }); }
         if (now - net.lastHeard > 6000) { leaveOnline(false); showMenu(); showMsg('Connection lost', 'Back to the menu', 'warn'); }
       }
       updateHud();

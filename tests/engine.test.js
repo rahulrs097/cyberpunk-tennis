@@ -1,7 +1,7 @@
 // Run with `npm test` (Node 20+, no dependencies).
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { loadEngine, levelOpts, makeBot, playSet } = require('./engine');
+const { loadEngine, levelOpts, makeBot, playSet, loadNet } = require('./engine');
 
 // the engine runs in its own sandbox, so copy its objects out before deepEqual
 const plain = (v) => JSON.parse(JSON.stringify(v));
@@ -540,6 +540,46 @@ test("online: the guest's shots leave its racket at once on both phones, with no
       assert.ok(s.step < 1.2, `lag ${lag}: host's ball jumped ${s.step.toFixed(2)} m in one frame`);
     }
   }
+});
+
+// A link whose round trip is `rtt` ms (Infinity: stalled), pinged as main.js
+// does. Returns the lag meter's state every 10 ms.
+function lagRun(Net, m, clock, rtt, ms) {
+  const states = [];
+  for (const end = clock.t + ms; clock.t < end; clock.t += 10) {
+    if (clock.t % Net.PING_EVERY === 0) { m.sent(clock.t); if (Number.isFinite(rtt)) clock.due.push([clock.t + rtt, clock.t]); }
+    while (clock.due.length && clock.due[0][0] <= clock.t) m.answered(clock.due.shift()[1], clock.t);
+    states.push({ t: clock.t, ...m.state(clock.t) });
+  }
+  return states;
+}
+
+test('online lag: the ping shows over 150 ms, red over 400, and pauses the match over 450 until it settles', () => {
+  const Net = loadNet();
+  const m = Net.createLagMeter(), clock = { t: 0, due: [] };
+  const last = (st) => st[st.length - 1];
+  let st = lagRun(Net, m, clock, 100, 3000);
+  assert.deepEqual(plain([last(st).level, st.some((s) => s.held)]), [null, false]);
+  st = lagRun(Net, m, clock, 250, 3000);
+  assert.deepEqual(plain([last(st).level, st.some((s) => s.held)]), ['yellow', false]);
+  st = lagRun(Net, m, clock, 420, 3000);
+  assert.deepEqual(plain([last(st).level, st.some((s) => s.held)]), ['red', false]);
+  // over 450: paused, as soon as a ping has been out that long
+  const from = clock.t;
+  st = lagRun(Net, m, clock, 600, 3000);
+  const heldAt = st.find((s) => s.held).t - from;
+  assert.ok(heldAt <= 500, `paused after ${heldAt} ms`);
+  assert.ok(st.slice(st.indexOf(st.find((s) => s.held))).every((s) => s.held), 'and stays paused');
+  // back to normal: plays on once it has been 450 or under for a second
+  const back = clock.t;
+  st = lagRun(Net, m, clock, 100, 4000);
+  const calm = st.find((s) => s.ms <= 450).t, free = st.find((s) => !s.held).t;
+  assert.ok(free - calm >= 1000 && free - back < 2500, `calm at ${calm - back} ms, playing at ${free - back} ms`);
+  assert.equal(last(st).level, null);
+  // a link that stops answering pauses within half a second or so
+  const stall = clock.t;
+  st = lagRun(Net, m, clock, Infinity, 2000);
+  assert.ok(st.find((s) => s.held).t - stall <= 1000);
 });
 
 // ---------------- line calls ----------------

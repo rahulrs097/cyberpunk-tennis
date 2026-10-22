@@ -33,6 +33,16 @@ function loadEngine(seed = 1, globals = {}) {
   return sandbox.CT;
 }
 
+// The online link's helpers (net.js), on their own: it reads the page URL
+// when it loads, so it gets a plain one.
+function loadNet() {
+  const sandbox = { location: { search: '', hostname: '' }, console };
+  sandbox.window = sandbox;
+  vm.createContext(sandbox);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'js', 'net.js'), 'utf8'), sandbox, { filename: 'net.js' });
+  return sandbox.CT.Net;
+}
+
 // The CPU levels, as main.js picks them from the menu.
 function levelOpts(CT, level) {
   return CT.levelOpts(level);
@@ -111,4 +121,4 @@ function playSet(CT, opts) {
   return { games: g.match.games.slice(), winner: g.match.winner, finished: g.phase === 'matchOver', stats, game: g };
 }
 
-module.exports = { loadEngine, levelOpts, makeBot, playSet };
+module.exports = { loadEngine, levelOpts, makeBot, playSet, loadNet };

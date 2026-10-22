@@ -34,6 +34,7 @@ which only adds the doctype and viewport tags the artifact host normally supplie
 - **Camera.** Chase (behind and above you, the default) or first person (from your eyes, with your racket in the corner). Switch with the 1P/3P button in the HUD, the Camera option on the menu, or the C key; the choice is remembered (`setView` in `render.js`).
 - **Achievements and stats.** `createAchievementTracker` follows your side through a match from its `point` and `hit` events and says what each point earned; `main.js` saves it to localStorage (`ct.achievements`), puts each unlock on the billboard after the point's word (the common ones only the first time; an online guest sees the billboard over their own far court), and lists unlocked achievements and per-level stats on the Achievements screen. Locked ones aren't shown anywhere. Pro achievements only count against the Pro CPU; the tutorial doesn't count. A serve's speed (fastest serve, Rocket Serve) only counts once it has landed in.
 - **Serve clock.** Online, a server has 20 seconds to toss; running out costs the serve.
+- **Lag.** Online, the phones ping each other every half second (`createLagMeter` in `net.js`). Over 150 ms the ping takes the tag's place on the billboard, yellow, and red over 400 ms. Over 450 ms the host stops the match and both phones say Paused, until the ping has been back under 450 ms for a second; taps and swipes do nothing meanwhile. `?lag=200` on the page URL holds each message back 200 ms, to try it.
 
 ## Tests
 

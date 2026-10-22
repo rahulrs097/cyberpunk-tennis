@@ -398,11 +398,16 @@
   BOARD_PHOTO.src = 'img/billboard.jpg';
 
   // what the sign says now: the latest word until it expires, else the
-  // photo (or just the tag until the photo has loaded)
+  // photo (or just the tag until the photo has loaded). Online, a slow
+  // ping takes the tag's place, and a match paused for lag says so over
+  // everything else.
   function boardText(r, now) {
-    const b = r.board;
+    const b = r.board, p = r.ping;
+    const photo = BOARD_PHOTO.complete && BOARD_PHOTO.naturalWidth > 0;
+    if (p && p.held) return { text: p.ms + ' MS', label: 'PAUSED', color: PAL.warn, from: p.from, photo };
     if (b && now < b.until) return b;
-    return { text: BOARD.tag, color: '#25d9ff', from: b ? b.until : 0, photo: BOARD_PHOTO.complete && BOARD_PHOTO.naturalWidth > 0 };
+    if (p) return { text: p.ms + ' MS', label: 'PING', color: p.red ? PAL.warn : '#e4ff4a', from: Math.max(p.from, b ? b.until : 0), photo };
+    return { text: BOARD.tag, color: '#25d9ff', from: b ? b.until : 0, photo };
   }
 
   function boardTexture(r, text, color) {
@@ -434,8 +439,9 @@
   }
 
   // the photo in a square on the left, sliding slowly between the top and
-  // bottom of the picture, and the tag beside it (in BOARD_TEX coordinates)
-  function drawBoardPhoto(ctx, r, now) {
+  // bottom of the picture, and the tag (or the ping, under its label)
+  // beside it (in BOARD_TEX coordinates)
+  function drawBoardPhoto(ctx, r, now, cur) {
     const W = BOARD_TEX.w, H = BOARD_TEX.h, m = 12, img = BOARD_PHOTO;
     ctx.clearRect(0, 0, W, H);
     ctx.fillStyle = 'rgba(8,6,22,0.88)';
@@ -447,15 +453,20 @@
     ctx.strokeStyle = '#ff3fb4'; ctx.lineWidth = 6;
     ctx.strokeRect(8, 8, W - 16, H - 16);
     ctx.beginPath(); ctx.moveTo(m + side + 3, 8); ctx.lineTo(m + side + 3, H - 8); ctx.stroke();
-    const cx = (m + side + W) / 2;
-    ctx.font = '900 80px Tektur, sans-serif';
+    const cx = (m + side + W) / 2, tw = W - side - 60, y = cur.label ? H * 0.64 : H / 2 + 4;
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillStyle = '#25d9ff';
-    if (r.quality) { ctx.shadowColor = '#25d9ff'; ctx.shadowBlur = 18; }
-    ctx.fillText(BOARD.tag, cx, H / 2 + 4, W - side - 60);
+    if (cur.label) {
+      ctx.font = '700 32px Tektur, sans-serif';
+      ctx.fillStyle = '#e8f6ff';
+      ctx.fillText(cur.label, cx, H * 0.28, tw);
+    }
+    ctx.font = `900 ${cur.label ? 64 : 80}px Tektur, sans-serif`;
+    ctx.fillStyle = cur.color;
+    if (r.quality) { ctx.shadowColor = cur.color; ctx.shadowBlur = 18; }
+    ctx.fillText(cur.text, cx, y, tw);
     ctx.shadowBlur = 0;
     ctx.fillStyle = 'rgba(255,255,255,0.7)';
-    ctx.fillText(BOARD.tag, cx, H / 2 + 4, W - side - 60);
+    ctx.fillText(cur.text, cx, y, tw);
   }
 
   // A Hawk-Eye style close-up of a close call, looking down on the court the
@@ -576,7 +587,7 @@
     if (cur.photo || cur.call !== undefined) {
       src = r.boardPhotoTex || (r.boardPhotoTex = document.createElement('canvas'));
       if (src.width !== BOARD_TEX.w) { src.width = BOARD_TEX.w; src.height = BOARD_TEX.h; }
-      if (cur.photo) drawBoardPhoto(src.getContext('2d'), r, now);
+      if (cur.photo) drawBoardPhoto(src.getContext('2d'), r, now, cur);
       else drawBoardCall(src.getContext('2d'), r, cur.call, age);
     } else src = boardTexture(r, cur.text, cur.color);
     const d = r.dpr, W = BOARD_TEX.w, H = BOARD_TEX.h, N = 10, sw = W / N;
@@ -596,6 +607,15 @@
   // Flash a word on the billboard for `secs` seconds.
   function showBillboard(r, text, color, secs) {
     r.board = { text, color: color || '#e4ff4a', from: performance.now() / 1000, until: performance.now() / 1000 + (secs || 2.5) };
+  }
+
+  // Online lag for the billboard: { ms, red, held }, or null to hide it.
+  function showPing(r, p) {
+    const was = r.ping;
+    if (!p) { r.ping = null; return; }
+    // flickers on when it first shows, turns red, or pauses the match
+    const from = was && was.red === p.red && was.held === p.held ? was.from : performance.now() / 1000;
+    r.ping = { ...p, from };
   }
 
   // Put a close line call up on the billboard for `secs` seconds (the
@@ -1046,6 +1066,7 @@
   CT.renderGame = render;
   CT.showBillboard = showBillboard;
   CT.showLineCall = showLineCall;
+  CT.showPing = showPing;
   CT.unproject = unproject;
   CT.project = proj;
 })();
