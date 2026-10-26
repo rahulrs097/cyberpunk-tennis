@@ -19,6 +19,12 @@
   try { const v = localStorage.getItem('ct.autoMove'); if (v !== null) autoMove = v === '1'; } catch (e) { /* storage is optional */ }
   let musicOn = true;
   try { const v = localStorage.getItem('ct.music'); if (v !== null) musicOn = v === '1'; } catch (e) { /* storage is optional */ }
+  // Full screen during matches, where the browser supports it for pages
+  // (iPhones don't). On iPads Safari can stop a match with a "typing while
+  // in full screen" warning; players can switch it off there.
+  const canFull = !!(document.documentElement.requestFullscreen || document.documentElement.webkitRequestFullscreen);
+  let fullOn = canFull;
+  try { const v = localStorage.getItem('ct.full'); if (v !== null) fullOn = canFull && v === '1'; } catch (e) { /* storage is optional */ }
   // Zen mode: no HUD but the pause button, no guides; the score is on the billboard
   let zen = false;
   try { zen = localStorage.getItem('ct.zen') === '1'; } catch (e) { /* storage is optional */ }
@@ -612,17 +618,10 @@
     CT.resizeRenderer(renderer, W, H, hud.bottom + Math.min(80, H * 0.08), 56, hud.bottom);
   }
 
-  // iPads report themselves as Macs, so also check for a touch screen.
-  const isAppleTouch = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-
-  // Fill the screen (browsers only allow this from a tap). iPhones don't
-  // support it for web pages, and on iPads Safari stops the match with a
-  // "typing while in full screen" warning, so on both the game is best
-  // added to the home screen instead.
+  // Fill the screen when a match starts (browsers only allow this from a tap).
   function goFullscreen() {
     const el = document.documentElement;
-    if (isAppleTouch) return;
+    if (!fullOn) return;
     if (document.fullscreenElement || document.webkitFullscreenElement) return;
     const req = el.requestFullscreen || el.webkitRequestFullscreen;
     if (!req) return;
@@ -753,6 +752,13 @@
     CT.Music.setOn(on);
   }
 
+  function setFull(on) {
+    fullOn = on;
+    try { localStorage.setItem('ct.full', on ? '1' : '0'); } catch (e) { /* storage is optional */ }
+    document.querySelectorAll('[data-full]').forEach((b) => b.setAttribute('aria-pressed', String((b.dataset.full === 'on') === on)));
+    if (!on) leaveFullscreen();
+  }
+
   function setZen(on) {
     zen = on;
     try { localStorage.setItem('ct.zen', on ? '1' : '0'); } catch (e) { /* storage is optional */ }
@@ -859,6 +865,9 @@
     $('musicPause').textContent = musicOn ? 'Music on' : 'Music off';
     document.querySelectorAll('[data-zen]').forEach((b) => b.addEventListener('click', () => setZen(b.dataset.zen === 'on')));
     $('zenPause').addEventListener('click', () => setZen(!zen));
+    document.querySelectorAll('[data-full]').forEach((b) => b.addEventListener('click', () => setFull(b.dataset.full === 'on')));
+    // the setting does nothing where pages can't go full screen (iPhone)
+    $('fullLabel').hidden = $('fullSeg').hidden = !canFull;
     $('play').addEventListener('click', () => { ensureAudio(); startMatch(); });
     $('rematch').addEventListener('click', startMatch);
     $('toMenu').addEventListener('click', showMenu);
@@ -895,6 +904,7 @@
     pickChar('octopus');
     showMenu();
     setZen(zen);
+    setFull(fullOn);
     const fontsReady = document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve();
     fontsReady.then(() => { drawPortraits(); if (game) layout(); });
     drawPortraits();
