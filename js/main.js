@@ -732,7 +732,7 @@
   function setAutoMove(on) {
     autoMove = on;
     try { localStorage.setItem('ct.autoMove', on ? '1' : '0'); } catch (e) { /* storage is optional */ }
-    document.querySelectorAll('[data-auto]').forEach((b) => b.setAttribute('aria-pressed', String((b.dataset.auto === 'on') === on)));
+    document.querySelectorAll('[data-auto]').forEach((b) => b.setAttribute('aria-pressed', String(on)));
     const pb = $('autoPause');
     pb.setAttribute('aria-pressed', String(on));
     pb.textContent = on ? 'Automove on' : 'Automove off';
@@ -744,7 +744,7 @@
   function setMusic(on) {
     musicOn = on;
     try { localStorage.setItem('ct.music', on ? '1' : '0'); } catch (e) { /* storage is optional */ }
-    document.querySelectorAll('[data-music]').forEach((b) => b.setAttribute('aria-pressed', String((b.dataset.music === 'on') === on)));
+    document.querySelectorAll('[data-music]').forEach((b) => b.setAttribute('aria-pressed', String(on)));
     const pb = $('musicPause');
     pb.setAttribute('aria-pressed', String(on));
     pb.textContent = on ? 'Music on' : 'Music off';
@@ -755,14 +755,14 @@
   function setFull(on) {
     fullOn = on;
     try { localStorage.setItem('ct.full', on ? '1' : '0'); } catch (e) { /* storage is optional */ }
-    document.querySelectorAll('[data-full]').forEach((b) => b.setAttribute('aria-pressed', String((b.dataset.full === 'on') === on)));
+    document.querySelectorAll('[data-full]').forEach((b) => b.setAttribute('aria-pressed', String(on)));
     if (!on) leaveFullscreen();
   }
 
   function setZen(on) {
     zen = on;
     try { localStorage.setItem('ct.zen', on ? '1' : '0'); } catch (e) { /* storage is optional */ }
-    document.querySelectorAll('[data-zen]').forEach((b) => b.setAttribute('aria-pressed', String((b.dataset.zen === 'on') === on)));
+    document.querySelectorAll('[data-zen]').forEach((b) => b.setAttribute('aria-pressed', String(on)));
     const pb = $('zenPause');
     pb.setAttribute('aria-pressed', String(on));
     pb.textContent = on ? 'Zen mode on' : 'Zen mode off';
@@ -856,18 +856,18 @@
     };
     document.querySelectorAll('[data-level]').forEach((b) => b.addEventListener('click', () => pickLevel(b.dataset.level)));
     pickLevel(level);
-    document.querySelectorAll('[data-auto]').forEach((b) => b.addEventListener('click', () => setAutoMove(b.dataset.auto === 'on')));
+    document.querySelectorAll('[data-auto]').forEach((b) => b.addEventListener('click', () => setAutoMove(!autoMove)));
     $('autoPause').addEventListener('click', () => setAutoMove(!autoMove));
     setAutoMove(autoMove);
-    document.querySelectorAll('[data-music]').forEach((b) => b.addEventListener('click', () => setMusic(b.dataset.music === 'on')));
+    document.querySelectorAll('[data-music]').forEach((b) => b.addEventListener('click', () => setMusic(!musicOn)));
     $('musicPause').addEventListener('click', () => setMusic(!musicOn));
-    document.querySelectorAll('[data-music]').forEach((b) => b.setAttribute('aria-pressed', String((b.dataset.music === 'on') === musicOn)));
+    document.querySelectorAll('[data-music]').forEach((b) => b.setAttribute('aria-pressed', String(musicOn)));
     $('musicPause').textContent = musicOn ? 'Music on' : 'Music off';
-    document.querySelectorAll('[data-zen]').forEach((b) => b.addEventListener('click', () => setZen(b.dataset.zen === 'on')));
+    document.querySelectorAll('[data-zen]').forEach((b) => b.addEventListener('click', () => setZen(!zen)));
     $('zenPause').addEventListener('click', () => setZen(!zen));
-    document.querySelectorAll('[data-full]').forEach((b) => b.addEventListener('click', () => setFull(b.dataset.full === 'on')));
+    document.querySelectorAll('[data-full]').forEach((b) => b.addEventListener('click', () => setFull(!fullOn)));
     // the setting does nothing where pages can't go full screen (iPhone)
-    $('fullLabel').hidden = $('fullSeg').hidden = !canFull;
+    $('fullBtn').hidden = !canFull;
     $('play').addEventListener('click', () => { ensureAudio(); startMatch(); });
     $('rematch').addEventListener('click', startMatch);
     $('toMenu').addEventListener('click', showMenu);

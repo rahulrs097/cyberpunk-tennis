@@ -173,6 +173,8 @@
   .stats { margin: 0; display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; font-size: 14px; }
   .stats dt { color: var(--muted); }
   .stats dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+  .seg.toggles button { min-height: 40px; font-size: 12px; letter-spacing: 0.04em; padding: 0 2px; min-width: 0; }
+  .seg.toggles button[aria-pressed="false"] { color: var(--muted); }
   .seg.tabs button { min-height: 36px; font-size: 12px; letter-spacing: 0.04em; padding: 0 2px; min-width: 0; }
   @media (max-height: 760px) {
     .sheet { gap: 12px; }
@@ -226,11 +228,6 @@
       <button id="joinBtn">Join room</button>
     </div>
     <div class="opts">
-      <div class="label">Automove</div>
-      <div class="seg">
-        <button data-auto="on" aria-pressed="true">On</button>
-        <button data-auto="off" aria-pressed="false">Off</button>
-      </div>
       <div class="label">Level</div>
       <div class="seg">
         <button data-level="chill" aria-pressed="false">Chill</button>
@@ -242,21 +239,13 @@
         <button data-view="chase" aria-pressed="true">Chase</button>
         <button data-view="first" aria-pressed="false">First person</button>
       </div>
-      <div class="label">Music</div>
-      <div class="seg">
-        <button data-music="on" aria-pressed="true">On</button>
-        <button data-music="off" aria-pressed="false">Off</button>
-      </div>
-      <div class="label">Zen mode</div>
-      <div class="seg">
-        <button data-zen="on" aria-pressed="false">On</button>
-        <button data-zen="off" aria-pressed="true">Off</button>
-      </div>
-      <div class="label" id="fullLabel">Full screen</div>
-      <div class="seg" id="fullSeg">
-        <button data-full="on" aria-pressed="true">On</button>
-        <button data-full="off" aria-pressed="false">Off</button>
-      </div>
+    </div>
+    <!-- on/off settings: each button is lit while its setting is on -->
+    <div class="seg toggles">
+      <button data-auto aria-pressed="true">Automove</button>
+      <button data-music aria-pressed="true">Music</button>
+      <button data-zen aria-pressed="false">Zen</button>
+      <button data-full id="fullBtn" aria-pressed="true">Full screen</button>
     </div>
     <div class="seg">
       <button id="tutBtn">Tutorial</button>
