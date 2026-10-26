@@ -1,7 +1,8 @@
 // Renderer with two views: a raised chase camera behind the bottom player that
 // follows them across the baseline and turns towards the ball, or a
 // first-person view from the player's eyes. Plus the rooftop parking lot,
-// court, net, players, ball and touch guides.
+// court, net, players, ball and touch guides. In Cardboard VR (`r.vr`) the
+// first-person view is drawn twice, once per eye, and turns with your head.
 (function () {
   const CT = (window.CT = window.CT || {});
   const { COURT } = CT;
@@ -36,6 +37,7 @@
     return {
       canvas, ctx: canvas.getContext('2d', { alpha: false }),   // opaque: the sky covers every pixel, and the browser can skip blending the canvas
       view: 'chase',   // 'chase' or 'first'
+      vr: null,        // Cardboard VR: { yaw, pitch, roll (the head), fov (degrees across one eye), lens (mm between the lenses), aim, charge, prompt, sub }
       cam: { x: 0, y: -20, z: 6.4, lx: 0, ly: 0, lz: 0, f: 500, cx: 0, cy: 0, yaw: 0, pitch: 0, ready: false },
       W: 0, H: 0, dpr: 1, top: 92, bottom: 24, hudBottom: 0,
       sky: document.createElement('canvas'),
@@ -159,6 +161,7 @@
 
   // ---------------- camera control ----------------
   function updateCamera(r, g, human, dt) {
+    if (r.vr) { updateHead(r, g, human, dt); return; }
     if (r.view === 'first') { updateEye(r, g, human, dt); return; }
     const c = r.cam;
     const p = g.players[human];
@@ -226,6 +229,22 @@
     setBasis(c);
   }
 
+  // VR: the eyes ride with the player as in first person, but only your
+  // head turns them, never the game. No step back on the serve either: in a
+  // headset any move you didn't make yourself is a lurch.
+  function updateHead(r, g, human, dt) {
+    const c = r.cam, p = g.players[human], v = r.vr;
+    const tx = p.x, ty = p.y - p.fwd * EYE.back;
+    const kp = c.ready ? 1 - Math.exp(-dt * EYE.follow) : 1;
+    c.x += (tx - c.x) * kp; c.y += (ty - c.y) * kp; c.z = EYE.height;
+    const yaw = (p.fwd > 0 ? 0 : Math.PI) + v.yaw, pitch = CT.clamp(v.pitch, -1.5, 1.5);
+    c.lx = c.x + Math.sin(yaw) * Math.cos(pitch) * 10;
+    c.ly = c.y + Math.cos(yaw) * Math.cos(pitch) * 10;
+    c.lz = c.z + Math.sin(pitch) * 10;
+    c.ready = true;
+    setBasis(c);
+  }
+
   // a - b wrapped to (-PI, PI]: the short way round
   function angleDiff(a, b) {
     const d = a - b;
@@ -235,6 +254,19 @@
   function setView(r, view) {
     r.view = view === 'first' ? 'first' : 'chase';
     r.cam.ready = false;   // cut straight to the new view
+  }
+
+  // Turn VR on (settings { fov, lens }) or off (null). Two views cost about
+  // twice as much to draw, so VR starts no higher than the middle quality
+  // level. Call resizeRenderer after.
+  function setVR(r, opts) {
+    if (opts && !r.vr) {
+      r.qualityWas = r.quality;
+      r.quality = Math.min(r.quality, 1);
+      r.vr = { yaw: 0, pitch: 0, roll: 0, aim: null, charge: 0, prompt: '', sub: '', ...opts };
+    } else if (opts) Object.assign(r.vr, opts);
+    else if (r.vr) { r.vr = null; r.quality = Math.max(r.quality, r.qualityWas || 0); }
+    r.cam.ready = false;
   }
 
   function resize(r, W, H, top, bottom, hudBottom) {
@@ -250,9 +282,24 @@
     c.f = Math.min((W / 2) / Math.tan((21 * Math.PI) / 180), (H / 2) / Math.tan((30 * Math.PI) / 180));
     c.cx = W / 2;
     c.cy = top + (H - top - bottom) * 0.5;
+    if (r.vr) {
+      // each eye gets half the screen (r.W is one eye from here on), as wide
+      // as the headset's lenses show, centred under its lens
+      r.W = W / 2;
+      c.f = (r.W / 2) / Math.tan((r.vr.fov * Math.PI) / 360);
+      r.lensX = CT.clamp((r.vr.lens / 2) / MM_PER_PX, r.W * 0.3, r.W * 0.7);
+      c.cx = r.W / 2;
+      c.cy = H / 2;
+    }
     c.ready = false;
     buildSky(r);
   }
+
+  // Phone screens show about this many millimetres per CSS pixel; it places
+  // each eye's view under its lens.
+  const MM_PER_PX = 0.17;
+  // metres between the two eyes
+  const IPD = 0.064;
 
   // Quality levels, highest first. A phone that can't keep up steps down:
   // fewer pixels, no lamp pools, no glow blur on the players.
@@ -380,13 +427,17 @@
 
   function drawSky(ctx, r) {
     const c = r.cam;
+    // in VR the picture turns as you tilt your head: paint past the edges
+    const pad = r.vr ? r.W * 0.5 : 0;
     const horizon = c.cy + c.f * Math.tan(c.pitch);   // screen y of the horizon
     const oy = horizon - r.skyHz;
-    if (oy > 0) { ctx.fillStyle = '#02030a'; ctx.fillRect(0, 0, r.W, oy + 1); }
-    if (oy + r.skyH < r.H) { ctx.fillStyle = '#15161e'; ctx.fillRect(0, oy + r.skyH - 1, r.W, r.H); }
-    const sw = r.skyW, pan = -c.yaw * c.f;
+    if (oy > -pad) { ctx.fillStyle = '#02030a'; ctx.fillRect(-pad, -pad, r.W + 2 * pad, oy + 1 + pad); }
+    if (oy + r.skyH < r.H + pad) { ctx.fillStyle = '#15161e'; ctx.fillRect(-pad, oy + r.skyH - 1, r.W + 2 * pad, r.H + 2 * pad); }
+    // (the sky is far away, so both eyes see it at the same place around their centre)
+    const sw = r.skyW, pan = -c.yaw * c.f + c.cx - r.W / 2;
     let ox = ((pan - r.W) % sw + sw) % sw - sw;
-    for (; ox < r.W; ox += sw) ctx.drawImage(r.sky, ox, oy, sw, r.skyH);
+    while (ox > -pad) ox -= sw;
+    for (; ox < r.W + pad; ox += sw) ctx.drawImage(r.sky, ox, oy, sw, r.skyH);
   }
 
   // ---------------- sky billboard ----------------
@@ -615,7 +666,8 @@
       if (cur.photo || cur.score) drawBoardPhoto(src.getContext('2d'), r, now, cur);
       else drawBoardCall(src.getContext('2d'), r, cur.call, age);
     } else src = boardTexture(r, cur.text, cur.color);
-    const d = r.dpr, W = BOARD_TEX.w, H = BOARD_TEX.h, N = 10, sw = W / N;
+    const W = BOARD_TEX.w, H = BOARD_TEX.h, N = 10, sw = W / N;
+    const base = ctx.getTransform();   // (in VR: one eye's half of the screen, turned with your head)
     ctx.save();
     ctx.globalAlpha = on;
     ctx.imageSmoothingQuality = 'high';
@@ -623,7 +675,8 @@
     // Drawn as thin vertical strips, each mapped from its own corners.
     for (let i = 0; i < N; i++) {
       const a0 = at(i / N, z1), a1 = at((i + 1) / N, z1), b0 = at(i / N, B.z);
-      ctx.setTransform(d * (a1.x - a0.x) / sw, d * (a1.y - a0.y) / sw, d * (b0.x - a0.x) / H, d * (b0.y - a0.y) / H, d * a0.x, d * a0.y);
+      ctx.setTransform(base);
+      ctx.transform((a1.x - a0.x) / sw, (a1.y - a0.y) / sw, (b0.x - a0.x) / H, (b0.y - a0.y) / H, a0.x, a0.y);
       ctx.drawImage(src, i * sw, 0, Math.min(sw + 1, W - i * sw), H, 0, 0, Math.min(sw + 1, W - i * sw), H);
     }
     ctx.restore();
@@ -1069,6 +1122,86 @@
 
     const ctx = r.ctx;
     ctx.setTransform(r.dpr, 0, 0, r.dpr, 0, 0);
+    if (r.vr) drawStereo(ctx, r, g, human, info, land);
+    else drawScene(ctx, r, g, human, info, land);
+    watchFrameRate(r, dt, (performance.now() - now) / 1000);
+  }
+
+  // VR: the left half of the screen for the left eye, the right half for
+  // the right, each from its own eye 64 mm apart, turned with your head's tilt.
+  function drawStereo(ctx, r, g, human, info, land) {
+    const c = r.cam, v = r.vr, x0 = c.x, y0 = c.y;
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, r.W * 2, r.H);
+    for (let i = 0; i < 2; i++) {
+      const s = i ? 1 : -1;   // left eye, then right
+      ctx.save();
+      ctx.translate(i * r.W, 0);
+      ctx.beginPath(); ctx.rect(0, 0, r.W, r.H); ctx.clip();
+      c.cx = i ? r.lensX : r.W - r.lensX;   // under the lens: lensX either side of the screen's middle
+      c.x = x0 + c.R.x * s * IPD / 2; c.y = y0 + c.R.y * s * IPD / 2;
+      if (v.roll) { ctx.translate(c.cx, c.cy); ctx.rotate(v.roll); ctx.translate(-c.cx, -c.cy); }
+      drawScene(ctx, r, g, human, info, land);
+      drawHeadUp(ctx, r);
+      ctx.restore();
+    }
+    c.x = x0; c.y = y0; c.cx = r.W / 2;
+  }
+
+  // VR's own marks: the target you're looking at on the far court, the
+  // gaze dot in the middle of each eye (filling up as you hold the button)
+  // and any message, drawn into both eyes.
+  function drawHeadUp(ctx, r) {
+    const v = r.vr, c = r.cam;
+    if (v.aim) {
+      const A = v.aim;
+      const col = A.kind === 'drop' ? PAL.net : A.kind === 'lob' ? PAL.ball : PAL.guide;
+      ctx.save();
+      ctx.strokeStyle = col; ctx.lineWidth = 2;
+      if (groundEllipse(ctx, r, A.x, A.y, 0.45)) ctx.stroke();
+      ctx.globalAlpha = 0.5;
+      if (groundEllipse(ctx, r, A.x, A.y, 0.15)) ctx.stroke();
+      if (A.kind === 'lob') {
+        // a chevron standing over the target: up and over
+        const a = proj(r, A.x - 0.5, A.y, 1.2), b = proj(r, A.x, A.y, 1.8), d = proj(r, A.x + 0.5, A.y, 1.2);
+        if (!a.behind && !b.behind && !d.behind) {
+          ctx.globalAlpha = 1;
+          ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.lineTo(d.x, d.y); ctx.stroke();
+        }
+      }
+      ctx.restore();
+    }
+    ctx.save();
+    ctx.fillStyle = 'rgba(255,255,255,0.8)';
+    ctx.beginPath(); ctx.arc(c.cx, c.cy, 2, 0, Math.PI * 2); ctx.fill();
+    if (v.charge > 0) {
+      ctx.strokeStyle = PAL.ball; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(c.cx, c.cy, 9, -Math.PI / 2, -Math.PI / 2 + v.charge * Math.PI * 2); ctx.stroke();
+    }
+    if (v.prompt) {
+      const u = Math.min(r.W, r.H);
+      ctx.textAlign = 'center';
+      ctx.shadowColor = PAL.guide; ctx.shadowBlur = 12;
+      ctx.fillStyle = '#eae6ff';
+      // shrunk to fit the eye, and kept inside it (a phone held upright has narrow eyes)
+      const line = (text, weight, size, y) => {
+        ctx.font = `${weight} ${Math.round(size)}px ${weight > 500 ? 'Tektur' : '"Chakra Petch"'}, sans-serif`;
+        const w = ctx.measureText(text).width, k = Math.min(1, (r.W * 0.9) / w);
+        if (k < 1) ctx.font = `${weight} ${Math.floor(size * k)}px ${weight > 500 ? 'Tektur' : '"Chakra Petch"'}, sans-serif`;
+        const half = (w * k) / 2 + 4;
+        ctx.fillText(text, CT.clamp(c.cx, half, r.W - half), y);
+      };
+      line(v.prompt, 900, u * 0.075, c.cy - u * 0.12);
+      if (v.sub) {
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = '#9d95c9';
+        line(v.sub, 500, u * 0.045, c.cy + u * 0.16);
+      }
+    }
+    ctx.restore();
+  }
+
+  function drawScene(ctx, r, g, human, info, land) {
     drawSky(ctx, r);
     drawBillboard(ctx, r);
     drawLot(ctx, r);
@@ -1095,13 +1228,16 @@
     if (g.ball.active) items.push({ d: depth(g.ball.pos.x, g.ball.pos.y) - 0.01, draw: () => drawBall(ctx, r, g) });
     items.sort((a, b) => b.d - a.d);
     for (const it of items) it.draw();
-    if (r.view === 'first') { drawRacketView(ctx, r, g, g.players[human]); if (!r.zen) drawTimingRing(ctx, r, g, info); }
-    watchFrameRate(r, dt, (performance.now() - now) / 1000);
+    if (r.view === 'first') {
+      if (!r.vr) drawRacketView(ctx, r, g, g.players[human]);
+      if (!r.zen) drawTimingRing(ctx, r, g, info);
+    }
   }
 
   CT.createRenderer = createRenderer;
   CT.resizeRenderer = resize;
   CT.setView = setView;
+  CT.setVR = setVR;
   CT.renderGame = render;
   CT.showBillboard = showBillboard;
   CT.showLineCall = showLineCall;
