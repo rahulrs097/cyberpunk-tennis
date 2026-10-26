@@ -612,10 +612,17 @@
     CT.resizeRenderer(renderer, W, H, hud.bottom + Math.min(80, H * 0.08), 56, hud.bottom);
   }
 
+  // iPads report themselves as Macs, so also check for a touch screen.
+  const isAppleTouch = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
   // Fill the screen (browsers only allow this from a tap). iPhones don't
-  // support it for web pages; there the game is best added to the home screen.
+  // support it for web pages, and on iPads Safari stops the match with a
+  // "typing while in full screen" warning, so on both the game is best
+  // added to the home screen instead.
   function goFullscreen() {
     const el = document.documentElement;
+    if (isAppleTouch) return;
     if (document.fullscreenElement || document.webkitFullscreenElement) return;
     const req = el.requestFullscreen || el.webkitRequestFullscreen;
     if (!req) return;
@@ -661,6 +668,8 @@
   }
 
   function beginMatch(cfg) {
+    // a room code box left focused would keep the on-screen keyboard live
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
     goFullscreen();
     CT.Music.setPlaying(true);
     touch = null;
