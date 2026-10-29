@@ -81,6 +81,15 @@
     return fromCamToScreen(c, v);
   }
 
+  // Pixels per metre for something drawn flat at a world point. It follows
+  // the straight-line distance, not the depth along the view, so a glow or
+  // line width keeps its size when the head tilts up (depth shrinks as a
+  // point drops towards the edge of the view, which would blow it up).
+  function sizeAt(r, x, y, z) {
+    const c = r.cam;
+    return c.f / Math.max(NEAR, Math.hypot(x - c.x, y - c.y, z - c.z));
+  }
+
   // Screen point to a spot on the ground (for tap-to-move).
   function unproject(r, sx, sy) {
     const c = r.cam;
@@ -152,8 +161,9 @@
     const c = r.cam;
     const dist = Math.hypot(x - c.x, y - c.y, c.z);
     const squash = Math.max(0.12, c.z / dist);
+    const s = c.f / dist;
     ctx.beginPath();
-    ctx.ellipse(p.x, p.y, rad * p.s, rad * p.s * squash, 0, 0, Math.PI * 2);
+    ctx.ellipse(p.x, p.y, rad * s, rad * s * squash, 0, 0, Math.PI * 2);
     return p;
   }
 
@@ -745,8 +755,7 @@
     for (const pass of [0, 1]) {
       ctx.strokeStyle = pass ? PAL.line : PAL.lineGlow;
       for (const half of halves) {
-        const ref = proj(r, 0, half === halves[0] ? -L * 0.6 : L * 0.6, 0);
-        const w = Math.max(1, 0.06 * (ref.s || 10));
+        const w = Math.max(1, 0.06 * sizeAt(r, 0, half === halves[0] ? -L * 0.6 : L * 0.6, 0));
         ctx.lineWidth = pass ? w : w * 3.5;
         ctx.beginPath();
         for (const [x1, y1, x2, y2] of half) {
@@ -763,7 +772,7 @@
     for (const [x, y, col] of LAMPS) {
       const c = proj(r, x * 0.75, y, 0);
       if (c.behind) continue;
-      const rad = 6.5 * c.s;
+      const rad = 6.5 * sizeAt(r, x * 0.75, y, 0);
       const squash = Math.max(0.15, cam.z / Math.hypot(x * 0.75 - cam.x, y - cam.y, cam.z));
       ctx.drawImage(glowSprite(r, col, 0.3), c.x - rad, c.y - rad * squash, rad * 2, rad * 2 * squash);
     }
@@ -789,8 +798,7 @@
       }
     }
     ctx.stroke();
-    const mid = proj(r, 0, 0, 1);
-    const w = Math.max(2, 0.07 * (mid.s || 20));
+    const w = Math.max(2, 0.07 * sizeAt(r, 0, 0, 1));
     for (const pass of [0, 1]) {
       ctx.strokeStyle = pass ? PAL.net : 'rgba(255,63,180,0.3)';
       ctx.lineWidth = pass ? w : w * 4;
