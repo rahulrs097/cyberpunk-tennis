@@ -106,6 +106,12 @@
 
   // Clip a world polygon against the near plane and trace it as a path.
   function tracePoly(ctx, r, pts) {
+    ctx.beginPath();
+    return addPoly(ctx, r, pts);
+  }
+
+  // Same, added to the current path (to fill many shapes in one go).
+  function addPoly(ctx, r, pts) {
     const c = r.cam;
     const v = pts.map((p) => toCam(c, p[0], p[1], p[2] || 0));
     const out = [];
@@ -119,7 +125,6 @@
       }
     }
     if (out.length < 3) return false;
-    ctx.beginPath();
     out.forEach((p, i) => { const s = fromCamToScreen(c, p); i ? ctx.lineTo(s.x, s.y) : ctx.moveTo(s.x, s.y); });
     ctx.closePath();
     return true;
@@ -743,27 +748,28 @@
       [0, -COURT.SL, 0, COURT.SL],
       [0, -L, 0, -L + 0.3], [0, L, 0, L - 0.3],
     ];
-    // Glow pass, then the bright core. Lines are batched into one path per
-    // half of the court so each pass is only a couple of strokes.
-    const halves = [[], []];
-    for (const [x1, y1, x2, y2] of lines) {
-      if (y1 * y2 < 0) {
-        halves[0].push([x1, Math.min(y1, y2), x2, 0]);
-        halves[1].push([x1, 0, x2, Math.max(y1, y2)]);
-      } else halves[y1 + y2 > 0 ? 1 : 0].push([x1, y1, x2, y2]);
-    }
+    // Glow pass, then the bright core. Each line is a strip painted flat on
+    // the court, so it narrows with distance like the court does and stays
+    // put as you move or turn. Far away a strip is kept at least a pixel or
+    // so wide; long lines are cut into short pieces so that width can change
+    // along them. All the pieces of a pass are filled in one go.
     for (const pass of [0, 1]) {
-      ctx.strokeStyle = pass ? PAL.line : PAL.lineGlow;
-      for (const half of halves) {
-        const w = Math.max(1, 0.06 * sizeAt(r, 0, half === halves[0] ? -L * 0.6 : L * 0.6, 0));
-        ctx.lineWidth = pass ? w : w * 3.5;
-        ctx.beginPath();
-        for (const [x1, y1, x2, y2] of half) {
-          const sg = segment(r, [x1, y1], [x2, y2]);
-          if (sg) { ctx.moveTo(sg[0].x, sg[0].y); ctx.lineTo(sg[1].x, sg[1].y); }
+      const half = pass ? 0.04 : 0.15, minPx = pass ? 0.6 : 2;
+      const hw = (x, y) => Math.max(half, minPx / sizeAt(r, x, y, 0));
+      ctx.beginPath();
+      for (const [x1, y1, x2, y2] of lines) {
+        const len = Math.hypot(x2 - x1, y2 - y1);
+        const nx = -(y2 - y1) / len, ny = (x2 - x1) / len;
+        const n = Math.ceil(len / 1.5);
+        let ax = x1, ay = y1, aw = hw(ax, ay);
+        for (let i = 1; i <= n; i++) {
+          const bx = x1 + ((x2 - x1) * i) / n, by = y1 + ((y2 - y1) * i) / n, bw = hw(bx, by);
+          addPoly(ctx, r, [[ax + nx * aw, ay + ny * aw], [bx + nx * bw, by + ny * bw], [bx - nx * bw, by - ny * bw], [ax - nx * aw, ay - ny * aw]]);
+          ax = bx; ay = by; aw = bw;
         }
-        ctx.stroke();
       }
+      ctx.fillStyle = pass ? PAL.line : PAL.lineGlow;
+      ctx.fill();
     }
     // pools of lamp light on the asphalt (big blended areas, so top quality only)
     if (r.quality < 2) return;
