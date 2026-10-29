@@ -15,7 +15,8 @@ which only adds the doctype and viewport tags the artifact host normally supplie
 | `js/game.js` | Match engine: serving, hitting, timing, line calls, stamina, CPU |
 | `js/achievements.js` | Achievements and stats: what counts, the per-match tracker, the record saved in localStorage |
 | `js/render.js` | Perspective camera (chase or first person) and neon arena. A phone that can't keep up steps down a quality level (`watchFrameRate`): frames slower than ~40 fps while drawing one takes most of a 60 fps frame, or slower than ~22 fps. A steady 30 fps that draws quickly (an iPhone in Low Power Mode) keeps the full look |
-| `js/main.js` | Touch input, HUD, sound, frame loop, tutorial lessons |
+| `js/main.js` | Touch input, HUD, sound effects (realistic hits and bounces in zen mode), frame loop, tutorial lessons |
+| `js/music.js` | Synthesised music: the chiptune match track, and zen mode's slow ambient track over a rooftop wind |
 | `js/net.js`, `server/relay.js` | Online link: the Cloudflare Worker relay (one Durable Object per room code), its client, and the lag meter |
 | `tests/` | Engine and relay tests (`npm test`) and the balance simulation (`npm run sim`) |
 

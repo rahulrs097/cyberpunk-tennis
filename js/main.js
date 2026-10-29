@@ -145,6 +145,77 @@
     } catch (e) { /* audio is optional */ }
   }
 
+  // Zen mode swaps the chiptune blips for sounds closer to a real court: a
+  // noise burst through filters for the strings, a sine thump for the body.
+  // Sounds from the far end are quieter and duller. dist is 0 at your
+  // baseline and 1 at the far one.
+  let sfxNoise = null;
+  function noisy(t, dur, vol, type, f, q, dest) {
+    if (!sfxNoise) {
+      const len = audio.sampleRate * 0.5;
+      sfxNoise = audio.createBuffer(1, len, audio.sampleRate);
+      const d = sfxNoise.getChannelData(0);
+      let s = 4242;
+      for (let i = 0; i < len; i++) { s = (s * 1103515245 + 12345) & 0x7fffffff; d[i] = (s / 0x7fffffff) * 2 - 1; }
+    }
+    const src = audio.createBufferSource(), fl = audio.createBiquadFilter(), gn = audio.createGain();
+    src.buffer = sfxNoise;
+    fl.type = type; fl.frequency.value = f; fl.Q.value = q;
+    gn.gain.setValueAtTime(vol * SFX_GAIN, t);
+    gn.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    src.connect(fl).connect(gn).connect(dest);
+    src.start(t); src.stop(t + dur + 0.02);
+  }
+  function thump(t, f0, f1, dur, vol, dest) {
+    const o = audio.createOscillator(), gn = audio.createGain();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(f0, t);
+    o.frequency.exponentialRampToValueAtTime(f1, t + dur);
+    gn.gain.setValueAtTime(vol * SFX_GAIN, t);
+    gn.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(gn).connect(dest);
+    o.start(t); o.stop(t + dur + 0.02);
+  }
+  // a lowpass for distance, feeding the limiter
+  function distBus(t, dist) {
+    const lp = audio.createBiquadFilter();
+    lp.type = 'lowpass'; lp.frequency.value = 7500 - dist * 4500;
+    lp.connect(master);
+    return lp;
+  }
+  function distFrom(y) {
+    const base = me === 0 ? -CT.COURT.HL : CT.COURT.HL;
+    return Math.min(1, Math.abs(y - base) / (2 * CT.COURT.HL));
+  }
+  function realSfx(kind, d) {
+    if (!audio || muted) return;
+    try {
+      const t = audio.currentTime;
+      if (kind === 'hit') {
+        // the striker's end; faster swings crack brighter and louder
+        const dist = d.side === me ? 0 : 1;
+        const pace = Math.max(0, Math.min(1, ((d.kmh || 90) - 60) / 120));
+        const v = (1 - dist * 0.55) * (0.6 + pace * 0.5);
+        const bus = distBus(t, dist);
+        noisy(t, 0.035 + pace * 0.02, 0.11 * v, 'bandpass', 1500 + pace * 900, 1.2, bus);   // string crack
+        noisy(t, 0.012, 0.08 * v, 'highpass', 4000, 0.7, bus);                                // the first click
+        thump(t, 320 + pace * 120, 150, 0.06, 0.09 * v, bus);                                 // ball and frame
+        if (d.perfect) thump(t, 1150, 1100, 0.09, 0.012 * v, bus);                           // sweet-spot ring
+      } else if (kind === 'bounce') {
+        const dist = distFrom(d.y);
+        const v = 1 - dist * 0.6;
+        const bus = distBus(t, dist);
+        noisy(t, 0.03, 0.06 * v, 'lowpass', 1400, 0.8, bus);
+        thump(t, 170, 90, 0.05, 0.08 * v, bus);
+      } else if (kind === 'net') {
+        noisy(t, 0.16, 0.05, 'lowpass', 700, 0.7, master);
+        thump(t, 110, 60, 0.12, 0.06, master);
+      } else if (kind === 'fault') {
+        thump(t, 330, 300, 0.35, 0.03, master);
+      }
+    } catch (e) { /* audio is optional */ }
+  }
+
   // ---------------- HUD ----------------
   function showMsg(text, sub, tone) {
     const el = $('msg');
@@ -216,6 +287,7 @@
     const on = zenOn();
     document.body.classList.toggle('zen', on);
     CT.setZen(renderer, on);
+    CT.Music.setTrack(on ? 'zen' : 'match');
     if (!on) CT.showScore(renderer, null);
     if (game) layout();
   }
@@ -268,7 +340,7 @@
       lineCallShown = false;
       rallyShots = d.kind === 'serve' ? 1 : rallyShots + 1;
       if (!tut && (rallyShots === LONG_RALLY || (d.perfect && d.side === me && /power|overhead/i.test(d.kind)))) CT.showBillboard(renderer, 'WOW', '#ff3fb4', 1.8);
-      blip(d.kind === 'overhead' || d.kind === 'serve' ? 220 : 330, 0.07, 'square', 0.09, 140);
+      if (zenOn()) realSfx('hit', d); else blip(d.kind === 'overhead' || d.kind === 'serve' ? 220 : 330, 0.07, 'square', 0.09, 140);
       if (d.side === me) {
         const kind = { fh: 'Forehand', bh: 'Backhand' }[d.wing];
         const label = d.kind === 'serve' ? 'Serve' : d.kind === 'overhead' ? 'Overhead' : d.kind === 'volley' ? kind + ' volley' : d.kind === 'power' ? 'Power ' + kind.toLowerCase() : d.kind === 'powerVolley' ? 'Power ' + kind.toLowerCase() + ' volley' : kind;
@@ -280,20 +352,20 @@
       }
       hintForState();
     } else if (type === 'bounce') {
-      blip(120, 0.05, 'sine', 0.07);
+      if (zenOn()) realSfx('bounce', d); else blip(120, 0.05, 'sine', 0.07);
       if (net && net.role === 'guest') game.marks.push({ x: d.x, y: d.y, age: 0 });
     } else if (type === 'lineCall') {
       if (d.m > CLOSE_OUT || d.m < -CLOSE_IN) return;
       CT.showLineCall(renderer, d, 3);
       lineCallShown = true;
     } else if (type === 'net') {
-      blip(90, 0.12, 'sawtooth', 0.05);
+      if (zenOn()) realSfx('net', d); else blip(90, 0.12, 'sawtooth', 0.05);
     } else if (type === 'whiff') {
       if (d.side === me) showShot(d.reason);
     } else if (type === 'fault') {
       if (zenOn()) CT.showBillboard(renderer, d.text === 'Net' || d.text === 'Serve clock' ? d.text.toUpperCase() : 'FAULT', '#ffc23d', 1.6);
       showMsg(d.text === 'Net' || d.text === 'Serve clock' ? d.text : 'Fault', 'Second serve', 'warn');
-      blip(160, 0.2, 'sawtooth', 0.05, 90);
+      if (zenOn()) realSfx('fault', d); else blip(160, 0.2, 'sawtooth', 0.05, 90);
     } else if (type === 'point') {
       if (tut) { onDrill({ ok: d.winner === me, text: d.winner === me ? 'Point' : d.text }); updateHud(); return; }
       const youWon = d.winner === me;
