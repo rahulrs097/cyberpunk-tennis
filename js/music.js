@@ -4,14 +4,13 @@
 //    lead, noise drums, and a 7/8 verse that opens into a 4/4 drop.
 //  - zen: a slow neon-ambient track for zen mode. Soft detuned pads, a deep
 //    sine bass, a glassy pluck arp and a bell melody through a long echo, with
-//    a gentle kick and hats in the middle, over a gusting rooftop wind.
+//    a gentle kick and hats in the middle.
 (function () {
   const CT = (window.CT = window.CT || {});
 
   const LOOKAHEAD = 0.15;              // seconds scheduled ahead of the clock
   const VOLUME = 1.0;                  // master level; the game's limiter catches peaks
   const FADE = 0.6;                    // crossfade time constant when the track changes
-  const WIND = 0.3;                    // rooftop wind level in zen mode
 
   // MIDI note helpers
   const A2 = 45;
@@ -24,7 +23,7 @@
     Dm: [5, 8, 12], Bb: [1, 5, 8], E: [7, 11, 14], Em: [7, 10, 14],
   };
 
-  let ctx = null, out = null, noise = null, wind = null;
+  let ctx = null, out = null, noise = null;
   let on = true, playing = false, timer = null;
   let track = 'match';
   let section = 0, bar = 0, step = 0, nextTime = 0;
@@ -219,48 +218,6 @@
     }
   }
 
-  // Night wind across the rooftop, under the zen track: looping noise through a
-  // band-pass whose pitch and level drift with slow LFOs, so it gusts and
-  // sighs, plus a low rumble. It is ambience, not music: it plays through zen
-  // matches even with the music switched off.
-  function startWind(dest) {
-    // 6 seconds of smoothed (brownish) noise so the loop point isn't obvious
-    const len = ctx.sampleRate * 6;
-    const buf = ctx.createBuffer(1, len, ctx.sampleRate);
-    const d = buf.getChannelData(0);
-    let s = 987654, last = 0;
-    for (let i = 0; i < len; i++) {
-      s = (s * 1103515245 + 12345) & 0x7fffffff;
-      last = (last + 0.02 * ((s / 0x7fffffff) * 2 - 1)) / 1.02;
-      d[i] = last * 3.5;
-    }
-    // fade the loop's ends together
-    const x = Math.floor(ctx.sampleRate * 0.5);
-    for (let i = 0; i < x; i++) { const a = i / x; d[i] = d[i] * a + d[len - x + i] * (1 - a); }
-    const src = ctx.createBufferSource();
-    src.buffer = buf; src.loop = true; src.loopStart = 0; src.loopEnd = (len - x) / ctx.sampleRate;
-
-    const lfo = (hz, depth, param) => {
-      const o = ctx.createOscillator(), g = ctx.createGain();
-      o.frequency.value = hz; g.gain.value = depth;
-      o.connect(g).connect(param); o.start();
-    };
-    // the whistle: a band-pass that wanders between roughly 250 and 900 Hz
-    const bp = ctx.createBiquadFilter(), bg = ctx.createGain();
-    bp.type = 'bandpass'; bp.frequency.value = 520; bp.Q.value = 1.6;
-    bg.gain.value = 0.16;
-    lfo(0.071, 220, bp.frequency); lfo(0.023, 140, bp.frequency);
-    lfo(0.053, 0.1, bg.gain); lfo(0.017, 0.05, bg.gain);
-    // the body: a low rumble that swells slowly
-    const lp = ctx.createBiquadFilter(), lg = ctx.createGain();
-    lp.type = 'lowpass'; lp.frequency.value = 180;
-    lg.gain.value = 0.22;
-    lfo(0.031, 0.1, lg.gain);
-    src.connect(bp).connect(bg).connect(dest);
-    src.connect(lp).connect(lg).connect(dest);
-    src.start();
-  }
-
   // Attach to the game's AudioContext (created on the first tap).
   function start(audioCtx, dest) {
     if (ctx || !audioCtx) return;
@@ -296,20 +253,9 @@
     fbLp.connect(TRACKS.zen.gain);
 
     noise = makeNoise();
-    wind = ctx.createGain();
-    wind.gain.value = 0;
-    wind.connect(dest || ctx.destination);
-    startWind(wind);
     for (const k in TRACKS) TRACKS[k].gain.gain.value = k === track ? TRACKS[k].level : 0;
-    fadeWind(0.05);
     nextTime = ctx.currentTime + 0.1;
     timer = setInterval(schedule, 50);
-  }
-
-  function fadeWind(tc) {
-    if (!wind) return;
-    wind.gain.cancelScheduledValues(ctx.currentTime);
-    wind.gain.setTargetAtTime(playing && track === 'zen' ? WIND : 0, ctx.currentTime, tc);
   }
 
   function setOn(v) {
@@ -329,7 +275,6 @@
     if (!ctx) return;
     out.gain.cancelScheduledValues(ctx.currentTime);
     out.gain.setTargetAtTime(on && playing ? VOLUME : 0, ctx.currentTime, playing ? 0.05 : 0.25);
-    fadeWind(playing ? 0.8 : 0.25);
     if (v) nextTime = ctx.currentTime + 0.05;
   }
 
@@ -346,7 +291,6 @@
       g.cancelScheduledValues(now);
       g.setTargetAtTime(k === name ? TRACKS[k].level : 0, now, k === name ? FADE * 0.5 : FADE);
     }
-    fadeWind(FADE);
     nextTime = now + 0.05;
   }
 
