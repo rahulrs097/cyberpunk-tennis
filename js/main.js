@@ -146,7 +146,8 @@
   }
 
   // Zen mode swaps the chiptune blips for sounds closer to a real court: a
-  // noise burst through filters for the strings, a sine thump for the body.
+  // noise burst through filters for the strings, a sine thump for the body,
+  // and a little applause instead of a fanfare when you win a point.
   // Sounds from the far end are quieter and duller. dist is 0 at your
   // baseline and 1 at the far one.
   let sfxNoise = null;
@@ -212,6 +213,24 @@
         thump(t, 110, 60, 0.12, 0.06, master);
       } else if (kind === 'fault') {
         thump(t, 330, 300, 0.35, 0.03, master);
+      } else if (kind === 'won') {
+        // a few people clapping on the next rooftop: longer and fuller for a
+        // game or the set, over a soft rising chime in the zen track's key
+        const big = d.result === 'set' ? 2 : d.result === 'game' ? 1 : 0;
+        const claps = 14 + big * 16, len = 0.9 + big * 0.8;
+        let s = 777;
+        for (let i = 0; i < claps; i++) {
+          s = (s * 1103515245 + 12345) & 0x7fffffff;
+          const at = (i / claps) * len + (s % 1000) / 1000 * 0.06;
+          const fade = 1 - (i / claps) * 0.8;
+          noisy(t + at, 0.025, 0.05 * fade, 'bandpass', 1100 + (s % 7) * 180, 1.4, master);
+        }
+        thump(t, 440, 440, 0.6, 0.02, master);
+        thump(t + 0.14, 659, 659, 0.8 + big * 0.4, 0.018, master);
+      } else if (kind === 'lost') {
+        // a quiet falling tone, nothing more
+        thump(t, 330, 330, 0.5, 0.018, master);
+        thump(t + 0.16, 262, 250, 0.7, 0.016, master);
       }
     } catch (e) { /* audio is optional */ }
   }
@@ -375,7 +394,7 @@
       showMsg(d.text, sub, youWon ? 'good' : 'bad');
       const word = BOARD_WORDS[d.text];
       if (word && !lineCallShown) CT.showBillboard(renderer, word[0], word[1], 2.6);
-      blip(youWon ? 520 : 200, 0.25, 'triangle', 0.08, youWon ? 780 : 120);
+      if (zenOn()) realSfx(youWon ? 'won' : 'lost', d); else blip(youWon ? 520 : 200, 0.25, 'triangle', 0.08, youWon ? 780 : 120);
       updateHud();
     } else if (type === 'serveReady') {
       lineCallShown = false;
