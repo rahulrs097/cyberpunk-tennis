@@ -28,6 +28,13 @@
   // match in progress (none in the tutorial)
   const ach = CT.loadAchievements();
   let tracker = null;
+  // A match vs the CPU is saved after every point (localStorage 'ct.saved':
+  // the players, level, score, legs and achievement progress), so leaving
+  // the page or reloading it leaves a Resume button on the menu. It carries
+  // on from the next point. Online matches and the tutorial aren't saved.
+  const SAVE_KEY = 'ct.saved';
+  let canSave = false;     // the match in progress is one that's saved
+  let savedLevel = level;  // its CPU level (a resumed match keeps its own)
   let lastFrame = performance.now();
   const FRAME_MS = 1000 / 60;
   let frameDue = 0;
@@ -347,6 +354,7 @@
   function onEvent(type, d) {
     const names = game ? game.players.map((p) => p.ch.name) : ['', ''];
     track(type, d);
+    if (type === 'point' && canSave) saveMatch();
     if (type === 'hit') {
       lineCallShown = false;
       rallyShots = d.kind === 'serve' ? 1 : rallyShots + 1;
@@ -399,6 +407,45 @@
     } else if (type === 'drill') {
       if (tut) onDrill(d);
     }
+  }
+
+  function saveMatch() {
+    if (game.match.over) { clearSaved(); return; }
+    const s = { p0: game.players[0].ch.id, p1: game.players[1].ch.id, level: savedLevel,
+      game: CT.saveGameState(game), tracker: tracker && tracker.state() };
+    try { localStorage.setItem(SAVE_KEY, JSON.stringify(s)); } catch (e) { /* storage is optional */ }
+  }
+  function clearSaved() {
+    try { localStorage.removeItem(SAVE_KEY); } catch (e) { /* storage is optional */ }
+  }
+  function loadSaved() {
+    try {
+      const s = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null');
+      const m = s && s.game && s.game.match;
+      if (m && !m.over && CT.CHARACTERS[s.p0] && CT.CHARACTERS[s.p1] && CT.CPU_LEVELS[s.level]
+        && Array.isArray(m.games) && Array.isArray(m.points) && Array.isArray(s.game.stamina)) return s;
+    } catch (e) { /* storage is optional */ }
+    return null;
+  }
+  // the Resume button on the menu, with the score of the saved match
+  function showSaved() {
+    const s = loadSaved(), btn = $('resumeMatch');
+    btn.hidden = !s;
+    $('play').classList.toggle('primary', !s);
+    if (!s) return;
+    const m = s.game.match, name = (id) => CT.CHARACTERS[id].name;
+    const pts = m.tiebreak ? m.points.join('–') : m.points[0] + m.points[1] ? CT.pointLabel(m, 0) + '–' + CT.pointLabel(m, 1) : '';
+    $('resumeScore').textContent = [`${name(s.p0)} ${m.games[0]}–${m.games[1]} ${name(s.p1)}`, pts, s.level[0].toUpperCase() + s.level.slice(1)].filter(Boolean).join(' · ');
+  }
+  function resumeMatch() {
+    const s = loadSaved();
+    if (!s) { showSaved(); return; }
+    me = 0;
+    tut = null;
+    savedLevel = s.level;
+    canSave = true;
+    beginMatch({ p0: s.p0, p1: s.p1, control: ['human', 'cpu'], autoMove: [autoMove, false], ...CT.levelOpts(s.level),
+      resume: s.game, trackerState: s.tracker, mode: s.level });
   }
 
   function endMatch(winner) {
@@ -719,6 +766,8 @@
   function showMenu() {
     leaveOnline(true);
     tut = null;
+    canSave = false;
+    showSaved();
     tracker = null;
     achQueue = [];
     $('lobby').hidden = true;
@@ -739,6 +788,9 @@
     }
     me = 0;
     tut = null;
+    clearSaved();
+    savedLevel = level;
+    canSave = true;
     const cpuChar = humanChar === 'octopus' ? 'philosopher' : 'octopus';
     beginMatch({ p0: humanChar, p1: cpuChar, control: ['human', 'cpu'], autoMove: [autoMove, false], ...CT.levelOpts(level) });
   }
@@ -750,7 +802,7 @@
     // events fired while the game is being built are ignored; the HUD is
     // refreshed below once it exists. The host also forwards every event.
     let g = null;
-    tracker = tut || cfg.drill ? null : CT.createAchievementTracker(me, net ? 'online' : level);
+    tracker = tut || cfg.drill ? null : CT.createAchievementTracker(me, net ? 'online' : cfg.mode || level, cfg.trackerState);
     achQueue = []; achNew = [];
     g = CT.createGame({ ...cfg, firstServer: 0, onEvent: (t, d) => {
       if (!g || game !== g) return;
@@ -765,7 +817,10 @@
     applyZen();
     updateHud();
     hintForState();
-    if (!cfg.drill) showMsg('First to 6', 'Tiebreak at 6–6', 'neutral');
+    if (cfg.resume) {
+      const m = g.match;
+      showMsg('Match resumed', `${m.games[me]}–${m.games[1 - me]}` + (m.tiebreak ? ' · Tiebreak' : ''), 'neutral');
+    } else if (!cfg.drill) showMsg('First to 6', 'Tiebreak at 6–6', 'neutral');
   }
 
   function frame(now) {
@@ -934,6 +989,7 @@
     document.querySelectorAll('[data-zen]').forEach((b) => b.addEventListener('click', () => setZen(b.dataset.zen === 'on')));
     $('zenPause').addEventListener('click', () => setZen(!zen));
     $('play').addEventListener('click', () => { ensureAudio(); startMatch(); });
+    $('resumeMatch').addEventListener('click', () => { ensureAudio(); resumeMatch(); });
     $('rematch').addEventListener('click', startMatch);
     $('toMenu').addEventListener('click', showMenu);
     $('pauseBtn').addEventListener('click', () => setPaused(true));
@@ -944,7 +1000,8 @@
     });
     setView(view);
     $('resume').addEventListener('click', () => setPaused(false));
-    $('quit').addEventListener('click', () => { leaveFullscreen(); showMenu(); });
+    // quitting gives the match up; leaving the page doesn't
+    $('quit').addEventListener('click', () => { if (canSave) clearSaved(); leaveFullscreen(); showMenu(); });
     $('howBtn').addEventListener('click', () => { $('help').hidden = false; });
     $('tutBtn').addEventListener('click', () => { ensureAudio(); startTutorial(); });
     $('helpTut').addEventListener('click', () => { $('help').hidden = true; ensureAudio(); startTutorial(); });
