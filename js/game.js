@@ -82,7 +82,7 @@
       control: opts.control || ['human', 'cpu'],
       autoMove: opts.autoMove || [false, false],
       ball: CT.makeBall(),
-      match: CT.createMatch(opts.firstServer != null ? opts.firstServer : 0),
+      match: opts.resume ? opts.resume.match : CT.createMatch(opts.firstServer != null ? opts.firstServer : 0),
       phase: 'preServe',
       phaseWall: 0,
       peakT: null,
@@ -126,8 +126,26 @@
       drill: opts.drill || null,
     };
     g.players.forEach((p, i) => { if (g.control[i] === 'cpu') p.speedF = g.cpuSpeed; });
-    startPoint(g, true);
+    // A match picked up again (saveState) carries on from the point after
+    // the last one played, with the legs and the scouting it had
+    const r = opts.resume;
+    if (r) {
+      r.stamina.forEach(([st, cap], i) => { g.players[i].stamina = st; g.players[i].cap = cap; });
+      g.scout = r.scout;
+      g.lastGames = r.lastGames;
+    }
+    startPoint(g, !r);
     return g;
+  }
+
+  // What resuming a match needs (see opts.resume), taken between points
+  function saveState(g) {
+    return {
+      match: JSON.parse(JSON.stringify(g.match)),
+      stamina: g.players.map((p) => [p.stamina, p.cap]),
+      scout: JSON.parse(JSON.stringify(g.scout)),
+      lastGames: g.lastGames,
+    };
   }
 
   // CPU sides always run themselves; a human side does when automove is on.
@@ -1378,6 +1396,7 @@
   CT._applyShot = applyShot;
   CT._cpuPlan = cpuPlan;
   CT.updateGame = update;
+  CT.saveGameState = saveState;
   CT.requestMove = requestMove;
   CT.requestToss = requestToss;
   CT.requestSwipe = requestSwipe;
