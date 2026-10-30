@@ -1000,8 +1000,8 @@
     });
     setView(view);
     $('resume').addEventListener('click', () => setPaused(false));
-    // quitting gives the match up; leaving the page doesn't
-    $('quit').addEventListener('click', () => { if (canSave) clearSaved(); leaveFullscreen(); showMenu(); });
+    // the match stays saved, so the menu offers to resume it
+    $('quit').addEventListener('click', () => { leaveFullscreen(); showMenu(); });
     $('howBtn').addEventListener('click', () => { $('help').hidden = false; });
     $('tutBtn').addEventListener('click', () => { ensureAudio(); startTutorial(); });
     $('helpTut').addEventListener('click', () => { $('help').hidden = true; ensureAudio(); startTutorial(); });
