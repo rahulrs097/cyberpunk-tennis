@@ -505,6 +505,10 @@
       // swiped so fast it lost its margin (a full-pace drive or serve this
       // overhit lands long), so the player can tell why a good one went out
       overhit: shot.over >= OVERHIT && shot.kind !== 'overhead' && !shot.lob,
+      // (for the achievements) met beyond 60% of the player's reach, and the
+      // opponent inside their service line, i.e. at the net
+      stretched: shot.note === 'Stretched',
+      vsNet: Math.abs(g.players[1 - p.side].y) < COURT.SL,
     };
     g.lastShot = info;
     g.shots++;

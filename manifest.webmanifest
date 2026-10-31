@@ -1,7 +1,7 @@
 {
   "id": "./",
   "name": "Cyberpunk Tennis",
-  "short_name": "CT Tennis",
+  "short_name": "Cyberpunk Tennis",
   "description": "Neon tennis on a rooftop parking lot. Swipe to hit, tap to move. Play the CPU offline or a friend online.",
   "start_url": "./",
   "scope": "./",
