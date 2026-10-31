@@ -628,13 +628,27 @@
       return;
     }
     if (net && net.held) return;   // paused for lag
-    if (CT.VR.headPose(vr.head).pitch < CT.VR.PAUSE_PITCH) { setPaused(true); return; }
+    const pitch = CT.VR.headPose(vr.head).pitch;
+    if (pitch < CT.VR.PAUSE_PITCH) { setPaused(true); return; }
+    if (pitch > CT.VR.RECENTRE_PITCH) { vrRecentre(); return; }
     if (game.phase === 'preServe' && game.server === me) {
       if (isGuest()) send({ t: 'in', k: 'toss' }); else CT.requestToss(game, me);
       return;
     }
     vr.ignoreUp = false;
     vr.press = performance.now();
+  }
+
+  // Straight ahead becomes the way you face: at once (the pad's Recentre,
+  // or R on a keyboard), or at your next press, once you've looked back
+  // down the court (looking up at the sky and pressing, or the pause
+  // menu's Recentre). Only the turn changes: up and down come from gravity.
+  function vrRecentre(now) {
+    if (!vr) return;
+    vr.press = null;
+    if (now === true && !vr.wait) { CT.VR.recentre(vr.head); blip(880, 0.08, 'sine', 0.06); return; }
+    vr.wait = true;
+    if (paused) setPaused(false);
   }
 
   function vrRelease() {
@@ -696,6 +710,7 @@
     if (window.innerHeight > window.innerWidth) { v.prompt = 'TURN SIDEWAYS'; v.sub = 'Hold the phone in landscape'; }
     else if (vr.wait) { v.prompt = 'LOOK DOWN THE COURT'; v.sub = pad && pad.linked ? 'Tap the pad to play' : 'Press the button to play'; }
     else if (pose.pitch < CT.VR.PAUSE_PITCH) { v.prompt = 'PAUSE?'; v.sub = 'Press to pause'; }
+    else if (pose.pitch > CT.VR.RECENTRE_PITCH) { v.prompt = 'RECENTRE?'; v.sub = 'Press, then look down the court'; }
   }
 
   // ---------------- swipe pad ----------------
@@ -765,6 +780,7 @@
     if (m.t === 'pong') { if (Number.isFinite(m.at)) p.lag.answered(m.at, performance.now()); return; }
     if (m.t === 'bye') { p.linked = false; padStatus(); return; }
     if (!p.linked || !vr || !game) return;
+    if (m.t === 'recentre') { vrRecentre(true); return; }
     if (m.t === 'tap') {
       if (paused) { setPaused(false); return; }
       vrPress(); vrRelease();
@@ -836,6 +852,7 @@
 
   let padTouch = null;
   function padDown(e) {
+    if (e.target.closest && e.target.closest('button')) return;   // Recentre, Leave
     e.preventDefault();
     if (padTouch) return;
     try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) { /* optional */ }
@@ -1205,6 +1222,7 @@
     if (!game || game.phase === 'matchOver') return;
     paused = v;
     $('pauseMenu').hidden = !v;
+    $('vrRecentre').hidden = !vr;
     // back in the headset: look down the court and press to carry on
     if (vr) { vr.press = null; if (!v) vr.wait = true; }
   }
@@ -1305,6 +1323,7 @@
     document.addEventListener('keydown', (e) => {
       // on a laptop the space bar is the headset's button
       if (vr && e.key === ' ') { e.preventDefault(); if (!e.repeat) vrPress(); return; }
+      if (vr && (e.key === 'r' || e.key === 'R')) { vrRecentre(true); return; }
       if ((e.key === 'c' || e.key === 'C') && e.target === document.body) setView(view === 'first' ? 'chase' : 'first');
     });
     document.addEventListener('keyup', (e) => { if (vr && e.key === ' ') { e.preventDefault(); vrRelease(); } });
@@ -1340,6 +1359,8 @@
     $('padHost').addEventListener('click', hostPad);
     $('padJoin').addEventListener('click', () => { unlinkPad(); leavePad(); lobbyMode = 'pad'; lobby('Enter the 4-letter code on the headset phone.', '', true); $('codeInput').value = ''; $('codeInput').focus(); });
     $('padLeave').addEventListener('click', () => { leavePad(); showMenu(); });
+    $('padRecentre').addEventListener('click', () => { if (padSide && padSide.linked) { padSide.link.send({ t: 'recentre' }); buzz(15); } });
+    $('vrRecentre').addEventListener('click', () => vrRecentre());
     const padEl = $('pad');
     padEl.addEventListener('pointerdown', padDown, { passive: false });
     padEl.addEventListener('pointermove', padMove, { passive: false });

@@ -156,9 +156,11 @@
 
   // Looking this far down (at your feet) and pressing pauses the match.
   const PAUSE_PITCH = -0.95;
+  // Looking this far up (at the sky) and pressing recentres the view.
+  const RECENTRE_PITCH = 0.95;
 
   CT.VR = {
     screenPose, createHead, startHead, stopHead, recentre, headPose, askMotion, keepAwake,
-    autoShot, timeToHit, POWER_HOLD, PAUSE_PITCH,
+    autoShot, timeToHit, POWER_HOLD, PAUSE_PITCH, RECENTRE_PITCH,
   };
 })();

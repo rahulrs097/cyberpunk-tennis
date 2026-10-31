@@ -118,7 +118,7 @@
   #pad .pad-title { font: 900 28px var(--display); letter-spacing: 0.18em; text-transform: uppercase; color: var(--cyan); opacity: 0.6; }
   #pad .lede { max-width: 300px; opacity: 0.7; }
   #pad .warn { color: var(--ball); }
-  #pad #padLeave { position: absolute; bottom: calc(env(safe-area-inset-bottom, 0px) + 20px); }
+  #pad .pad-btns { display: flex; gap: 10px; position: absolute; bottom: calc(env(safe-area-inset-bottom, 0px) + 20px); }
   body.vr #hud, body.vr #msg, body.vr #shot, body.vr #hint { display: none !important; }
   .opts-sub { display: contents; }
   .opts-sub .lede { grid-column: 1 / 3; font-size: 13px; }
@@ -333,7 +333,7 @@
       <li><b>Timing</b><span>Swipe as the ring closes. Late forehands drift right, late backhands drift left. The yellow X shows where the ball will bounce, and on a serve it shows before the ring does.</span></li>
       <li><b>Stamina</b><span>Running, every swing and repeated power shots tire you, and you only get part of it back between points. Tired players run slower and have less time to swing. The striped part of the bar is gone for the set.</span></li>
       <li><b>Zen</b><span>Zen mode clears the screen: no scoreboard, hints, timing ring or landing X, just the pause button. The score goes up on the billboard in the sky. It has its own calm music, and the ball sounds closer to a real court.</span></li>
-      <li><b>VR</b><span>Pick VR under Camera and put the phone in a Cardboard headset. Look down the court and press the button to start. Watch the ball and press the button as it arrives: where the shot goes is picked for you. For a power shot, press early, hold, and let go as the ball arrives; the ring in the middle of your view fills when the hold is long enough. A small ring on the ball closes as it comes, and if you look away an arrow points to the ball and two ticks then a high beep count you down. On your serve, press to toss, then press again at the top. Look down at your feet and press to pause. Automove runs for you. For full swipe control, tap Link a phone under Swipe pad, then on a second phone pick VR, tap Be the pad and enter the code: swipe on that phone exactly as on the game screen. On a laptop the mouse is your head and the space bar is the button.</span></li>
+      <li><b>VR</b><span>Pick VR under Camera and put the phone in a Cardboard headset. Look down the court and press the button to start. Watch the ball and press the button as it arrives: where the shot goes is picked for you. For a power shot, press early, hold, and let go as the ball arrives; the ring in the middle of your view fills when the hold is long enough. A small ring on the ball closes as it comes, and if you look away an arrow points to the ball and two ticks then a high beep count you down. On your serve, press to toss, then press again at the top. Look down at your feet and press to pause; look straight up at the sky and press to recentre (then look down the court and press again). The white line down the middle lines the phone up with the headset's divider. Automove runs for you. For full swipe control, tap Link a phone under Swipe pad, then on a second phone pick VR, tap Be the pad and enter the code: swipe on that phone exactly as on the game screen. On a laptop the mouse is your head and the space bar is the button.</span></li>
       <li><b>Level</b><span>Chill is slower and the CPU covers less court. Pro is full speed against a CPU that rarely misses.</span></li>
     </ul>
     <div class="btns">
@@ -345,9 +345,12 @@
 
 <div id="pad" hidden>
   <div class="pad-title">Swipe pad</div>
-  <p class="lede">Swipe up to hit, as on the game screen. Tap to start, serve, or pause while you look at your feet.</p>
+  <p class="lede">Swipe up to hit, as on the game screen. Tap to start, serve, or pause while you look at your feet. Recentre makes the way you face straight ahead.</p>
   <p class="lede warn" id="padLost" hidden>Lost the headset phone. Check it's still in the match.</p>
-  <button class="btn" id="padLeave">Leave</button>
+  <div class="pad-btns">
+    <button class="btn" id="padRecentre">Recentre</button>
+    <button class="btn" id="padLeave">Leave</button>
+  </div>
 </div>
 <div class="overlay" id="lobby" hidden>
   <div class="sheet">
@@ -367,6 +370,7 @@
     <div class="title"><b>Paused</b></div>
     <div class="btns">
       <button class="btn primary" id="resume">Resume</button>
+      <button class="btn" id="vrRecentre" hidden>Recentre VR</button>
       <button class="btn" id="autoPause" aria-pressed="true">Automove on</button>
       <button class="btn" id="musicPause" aria-pressed="true">Music on</button>
       <button class="btn" id="zenPause" aria-pressed="false">Zen mode off</button>

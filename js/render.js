@@ -1212,6 +1212,9 @@
       drawHeadUp(ctx, r, g, human, info);
       ctx.restore();
     }
+    // a white line down the middle, to line up with the headset's divider
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.fillRect(eyeW - 1, 0, 2, eyeH);
     c.cx = eyeW / 2;
   }
 
