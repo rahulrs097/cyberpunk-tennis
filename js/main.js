@@ -619,7 +619,7 @@
   // Otherwise letting go hits, and a long enough hold makes it a power shot;
   // where it goes is picked for you.
   function vrPress() {
-    if (game && paused) { setPaused(false); vr.ignoreUp = true; return; }
+    if (game && paused) { vr.ignoreUp = true; vrMenuPick(); return; }
     if (!game || vr.press !== null) return;
     vr.ignoreUp = true;
     if (vr.wait) {
@@ -638,6 +638,29 @@
     }
     vr.ignoreUp = false;
     vr.press = performance.now();
+  }
+
+  // The pause menu in the headset: three choices around you, picked by
+  // turning to one and pressing.
+  const VR_MENU = [{ id: 'exit', label: 'EXIT VR', yaw: -0.55 }, { id: 'resume', label: 'RESUME', yaw: 0 }, { id: 'quit', label: 'QUIT', yaw: 0.55 }];
+  function vrMenuChoice() {
+    const yaw = CT.VR.headPose(vr.head).yaw;
+    let best = VR_MENU[1];
+    for (const it of VR_MENU) if (Math.abs(yaw - it.yaw) < Math.abs(yaw - best.yaw)) best = it;
+    return best;
+  }
+  function vrMenuPick() {
+    const it = vrMenuChoice();
+    if (it.id === 'resume') setPaused(false);
+    else if (it.id === 'quit') { leaveFullscreen(); showMenu(); }
+    else {
+      // back to the normal screen, still paused, to carry on when ready
+      exitVR();
+      setView('chase');
+      layout();
+      goFullscreen('portrait');
+      setPaused(true);
+    }
   }
 
   // Straight ahead becomes the way you face: at once (the pad's Recentre,
@@ -708,7 +731,9 @@
     }
     vr.lastT = hit && hit.reach ? hit.t : null;
     v.prompt = ''; v.sub = '';
-    if (window.innerHeight > window.innerWidth) { v.prompt = 'TURN SIDEWAYS'; v.sub = 'Hold the phone in landscape'; }
+    v.menu = paused ? { items: VR_MENU, sel: vrMenuChoice().id } : null;
+    if (paused) { v.prompt = 'PAUSED'; v.sub = 'Turn to choose, press to pick'; }
+    else if (window.innerHeight > window.innerWidth) { v.prompt = 'TURN SIDEWAYS'; v.sub = 'Hold the phone in landscape'; }
     else if (vr.wait) { v.prompt = 'LOOK DOWN THE COURT'; v.sub = pad && pad.linked ? 'Tap the pad to play' : 'Press the button to play'; }
     else if (pose.pitch < CT.VR.PAUSE_PITCH) { v.prompt = 'PAUSE?'; v.sub = 'Press to pause'; }
     else if (pose.pitch > CT.VR.RECENTRE_PITCH) { v.prompt = 'RECENTRE?'; v.sub = 'Press, then look down the court'; }
@@ -783,7 +808,6 @@
     if (!p.linked || !vr || !game) return;
     if (m.t === 'recentre') { vrRecentre(true); return; }
     if (m.t === 'tap') {
-      if (paused) { setPaused(false); return; }
       vrPress(); vrRelease();
       return;
     }
@@ -1236,7 +1260,6 @@
     if (!game || game.phase === 'matchOver') return;
     paused = v;
     $('pauseMenu').hidden = !v;
-    $('vrRecentre').hidden = !vr;
     // back in the headset: look down the court and press to carry on
     if (vr) { vr.press = null; if (!v) vr.wait = true; }
   }
@@ -1373,12 +1396,9 @@
     $('padHost').addEventListener('click', hostPad);
     $('padJoin').addEventListener('click', () => { unlinkPad(); leavePad(); lobbyMode = 'pad'; lobby('Enter the 4-letter code on the headset phone.', '', true); $('codeInput').value = ''; $('codeInput').focus(); });
     $('padLeave').addEventListener('click', () => { leavePad(); showMenu(); });
-    $('vrRecentre').addEventListener('click', () => vrRecentre());
-    // in a headset the pause menu's buttons can't be aimed at: the headset's
-    // button (a touch anywhere but on a button), space or A carries on
-    $('pauseMenu').addEventListener('pointerdown', (e) => {
-      if (vr && !(e.target.closest && e.target.closest('button'))) { e.preventDefault(); setPaused(false); vr.ignoreUp = true; }
-    });
+    // in a headset the pause menu is drawn in each eye instead (vrFrame),
+    // and a press anywhere picks from it
+    $('pauseMenu').addEventListener('pointerdown', (e) => { if (vr) { e.preventDefault(); vrPress(); } });
     const padEl = $('pad');
     padEl.addEventListener('pointerdown', padDown, { passive: false });
     padEl.addEventListener('pointermove', padMove, { passive: false });

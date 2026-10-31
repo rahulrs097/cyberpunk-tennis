@@ -1245,6 +1245,22 @@
       ctx.strokeStyle = v.charge >= 1 ? PAL.net : PAL.ball; ctx.lineWidth = 3;
       ctx.beginPath(); ctx.arc(c.cx, c.cy, 9, -Math.PI / 2, -Math.PI / 2 + v.charge * Math.PI * 2); ctx.stroke();
     }
+    // the pause menu: choices fixed around you, the one you face lit up
+    if (v.menu) {
+      const u = Math.min(r.W, r.H);
+      ctx.textAlign = 'center';
+      for (const it of v.menu.items) {
+        const x = c.cx + c.f * Math.tan(CT.clamp(it.yaw - v.yaw, -1.2, 1.2)), y = c.cy + u * 0.03;
+        const on = it.id === v.menu.sel;
+        ctx.font = `900 ${Math.round(u * (on ? 0.06 : 0.048))}px Tektur, sans-serif`;
+        const w = ctx.measureText(it.label).width + u * 0.06, h = u * 0.11;
+        ctx.fillStyle = on ? 'rgba(255,63,180,0.25)' : 'rgba(10,8,30,0.7)';
+        ctx.strokeStyle = on ? PAL.net : 'rgba(157,149,201,0.6)'; ctx.lineWidth = on ? 2 : 1;
+        ctx.beginPath(); ctx.rect(x - w / 2, y - h * 0.68, w, h); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = on ? '#ffffff' : '#9d95c9';
+        ctx.fillText(it.label, x, y);
+      }
+    }
     if (v.prompt) {
       const u = Math.min(r.W, r.H);
       ctx.textAlign = 'center';
