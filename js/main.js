@@ -633,10 +633,13 @@
     playShot(CT.VR.shotInput(game, me, vr.aim, hold));
   }
 
+  // the countdown's beeps: [seconds before the moment to let go, pitch]
+  const VR_TICKS = [[0.5, 660], [0.25, 660], [0, 1320]];
+
   // VR is for matches; the tutorial's lessons need their hints on screen.
   function enterVR() {
     if (!vr) {
-      vr = { head: CT.VR.createHead(), wait: true, press: null, ignoreUp: false, aim: null, pad: false };
+      vr = { head: CT.VR.createHead(), wait: true, press: null, ignoreUp: false, aim: null, pad: false, lastT: null };
       CT.VR.startHead(vr.head);
       CT.VR.keepAwake(true);
       document.body.classList.add('vr');
@@ -669,6 +672,13 @@
     try { for (const gp of navigator.getGamepads ? navigator.getGamepads() : []) if (gp && gp.buttons[0] && gp.buttons[0].pressed) down = true; } catch (e) { /* no gamepads here */ }
     if (down !== vr.pad) { vr.pad = down; if (down) vrPress(); else vrRelease(); }
     v.charge = vr.press === null ? 0 : CT.VR.holdPace((performance.now() - vr.press) / 1000);
+    // a countdown you can hear wherever you're looking: two ticks, then a
+    // higher one on the moment to let go
+    const hit = !paused && !vr.wait ? CT.VR.timeToHit(game, me, CT.incomingInfo(game, me)) : null;
+    if (hit && hit.reach && vr.lastT !== null) {
+      for (const [at, freq] of VR_TICKS) if (vr.lastT > at && hit.t <= at) blip(freq, 0.06, 'sine', 0.06);
+    }
+    vr.lastT = hit && hit.reach ? hit.t : null;
     v.prompt = ''; v.sub = '';
     if (window.innerHeight > window.innerWidth) { v.prompt = 'TURN SIDEWAYS'; v.sub = 'Hold the phone in landscape'; }
     else if (vr.wait) { v.prompt = 'LOOK DOWN THE COURT'; v.sub = 'Press the button to play'; }

@@ -1156,7 +1156,7 @@
       c.x = x0 + c.R.x * s * IPD / 2; c.y = y0 + c.R.y * s * IPD / 2;
       if (v.roll) { ctx.translate(c.cx, c.cy); ctx.rotate(v.roll); ctx.translate(-c.cx, -c.cy); }
       drawScene(ctx, r, g, human, info, land);
-      drawHeadUp(ctx, r);
+      drawHeadUp(ctx, r, g, human, info);
       ctx.restore();
     }
     c.x = x0; c.y = y0; c.cx = r.W / 2;
@@ -1165,8 +1165,31 @@
   // VR's own marks: the target you're looking at on the far court, the
   // gaze dot in the middle of each eye (filling up as you hold the button)
   // and any message, drawn into both eyes.
-  function drawHeadUp(ctx, r) {
+  function drawHeadUp(ctx, r, g, human, info) {
     const v = r.vr, c = r.cam;
+    // the timing ring closes round the middle of your view wherever you're
+    // looking, and an arrow at the edge points to a ball you can't see
+    const hit = CT.VR.timeToHit(g, human, info);
+    if (hit && hit.t < 0.9 && hit.t > -0.15) {
+      const col = hit.reach ? PAL.guide : PAL.warn, base = 14;
+      ctx.save();
+      ctx.strokeStyle = col; ctx.lineWidth = 2;
+      ctx.globalAlpha = 0.35 + 0.65 * (1 - Math.max(0, hit.t) / 0.9);
+      ctx.beginPath(); ctx.arc(c.cx, c.cy, base + Math.max(0, hit.t) * 70, 0, Math.PI * 2); ctx.stroke();
+      ctx.globalAlpha = 0.9;
+      ctx.beginPath(); ctx.arc(c.cx, c.cy, base, 0, Math.PI * 2); ctx.stroke();
+      const b = g.ball, bv = toCam(c, b.pos.x, b.pos.y, b.pos.z);
+      const p = bv.z > NEAR ? fromCamToScreen(c, bv) : null;
+      const m = 24;
+      if (b.active && (!p || p.x < m || p.x > r.W - m || p.y < m || p.y > r.H - m)) {
+        const a = Math.atan2(-bv.y, bv.x || 1e-6), d = Math.min(r.W, r.H) * 0.36;
+        const x = c.cx + Math.cos(a) * d, y = c.cy + Math.sin(a) * d;
+        ctx.fillStyle = PAL.ball;
+        ctx.translate(x, y); ctx.rotate(a);
+        ctx.beginPath(); ctx.moveTo(10, 0); ctx.lineTo(-6, -8); ctx.lineTo(-2, 0); ctx.lineTo(-6, 8); ctx.closePath(); ctx.fill();
+      }
+      ctx.restore();
+    }
     if (v.aim) {
       const A = v.aim;
       const col = A.kind === 'drop' ? PAL.net : A.kind === 'lob' ? PAL.ball : PAL.guide;

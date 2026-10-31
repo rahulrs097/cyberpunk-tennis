@@ -169,11 +169,24 @@
     return { aim: 0, landX: a.x, pace, spinDir: 1, curve: 0, depth: a.depth };
   }
 
+  // How long until the moment to let go (seconds of game time, below zero
+  // once it's past): the ball reaching you, or on your serve the top of the
+  // toss. null when there's nothing coming. In a headset you're often
+  // looking at your target, not the ball, so this drives a ring round the
+  // middle of your view and a countdown of beeps.
+  function timeToHit(g, side, info) {
+    const b = g.ball;
+    if (g.phase === 'toss' && g.server === side && b.active) {
+      return { t: g.peakT !== null ? g.peakT - g.time : Math.max(0, b.vel.z) / CT.PHYS.G, reach: true };
+    }
+    return info ? { t: info.t, reach: info.reach } : null;
+  }
+
   // Looking this far down (at your feet) and pressing pauses the match.
   const PAUSE_PITCH = -0.95;
 
   CT.VR = {
     screenPose, createHead, startHead, stopHead, recentre, headPose, askMotion, keepAwake,
-    updateAim, defaultAim, shotInput, holdPace, HOLD, PAUSE_PITCH,
+    updateAim, defaultAim, shotInput, holdPace, timeToHit, HOLD, PAUSE_PITCH,
   };
 })();

@@ -108,3 +108,19 @@ test('a serve goes towards the side of the box you looked at', () => {
   }
   assert.ok(xs[0] < xs[1], `left look serves left of a right look: ${xs}`);
 });
+
+test('the moment to let go counts down to the top of the toss, and to the ball reaching you', () => {
+  const CT = loadEngine(1, {}, ['vr.js']);
+  const g = CT.createGame({ p0: 'octopus', p1: 'philosopher', control: ['human', 'cpu'], firstServer: 0 });
+  assert.equal(CT.VR.timeToHit(g, 0, null), null);
+  CT.requestToss(g, 0);
+  CT.updateGame(g, 1 / 60);
+  const first = CT.VR.timeToHit(g, 0, null).t;
+  assert.ok(first > 0.2, `toss starts ${first}s from its top`);
+  let t = first;
+  while (g.peakT === null) { CT.updateGame(g, 1 / 120); t = CT.VR.timeToHit(g, 0, null).t; }
+  near(t, 0, 0.02, 'zero at the top');
+  const info = { t: 0.4, reach: false };
+  g.phase = 'rally';
+  assert.deepEqual({ ...CT.VR.timeToHit(g, 0, info) }, { t: 0.4, reach: false });
+});
