@@ -619,7 +619,8 @@
   // Otherwise letting go hits, and a long enough hold makes it a power shot;
   // where it goes is picked for you.
   function vrPress() {
-    if (!game || paused || vr.press !== null) return;
+    if (game && paused) { setPaused(false); vr.ignoreUp = true; return; }
+    if (!game || vr.press !== null) return;
     vr.ignoreUp = true;
     if (vr.wait) {
       CT.VR.recentre(vr.head);
@@ -850,11 +851,14 @@
     CT.VR.keepAwake(false);
   }
 
-  let padTouch = null;
+  let padTouch = null, padFingers = 0, padTwo = false;
   function padDown(e) {
-    if (e.target.closest && e.target.closest('button')) return;   // Recentre, Leave
+    if (e.target.closest && e.target.closest('button')) return;   // Leave
     e.preventDefault();
-    if (padTouch) return;
+    padFingers++;
+    // a second finger down: a two-finger tap, which recentres
+    if (padTouch) { padTwo = true; return; }
+    padTwo = false;
     try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) { /* optional */ }
     padTouch = { id: e.pointerId, pts: [{ x: e.clientX, y: e.clientY, t: performance.now() }] };
   }
@@ -864,6 +868,16 @@
     padTouch.pts.push({ x: e.clientX, y: e.clientY, t: performance.now() });
   }
   function padUp(e) {
+    padFingers = Math.max(0, padFingers - 1);
+    if (padTwo) {
+      if (padFingers === 0) {
+        padTwo = false;
+        const quick = padTouch && performance.now() - padTouch.pts[0].t < 600;
+        padTouch = null;
+        if (quick && padSide && padSide.linked) { padSide.link.send({ t: 'recentre' }); buzz([20, 60, 20]); }
+      }
+      return;
+    }
     if (!padTouch || e.pointerId !== padTouch.id) return;
     e.preventDefault();
     padTouch.pts.push({ x: e.clientX, y: e.clientY, t: performance.now() });
@@ -1359,13 +1373,17 @@
     $('padHost').addEventListener('click', hostPad);
     $('padJoin').addEventListener('click', () => { unlinkPad(); leavePad(); lobbyMode = 'pad'; lobby('Enter the 4-letter code on the headset phone.', '', true); $('codeInput').value = ''; $('codeInput').focus(); });
     $('padLeave').addEventListener('click', () => { leavePad(); showMenu(); });
-    $('padRecentre').addEventListener('click', () => { if (padSide && padSide.linked) { padSide.link.send({ t: 'recentre' }); buzz(15); } });
     $('vrRecentre').addEventListener('click', () => vrRecentre());
+    // in a headset the pause menu's buttons can't be aimed at: the headset's
+    // button (a touch anywhere but on a button), space or A carries on
+    $('pauseMenu').addEventListener('pointerdown', (e) => {
+      if (vr && !(e.target.closest && e.target.closest('button'))) { e.preventDefault(); setPaused(false); vr.ignoreUp = true; }
+    });
     const padEl = $('pad');
     padEl.addEventListener('pointerdown', padDown, { passive: false });
     padEl.addEventListener('pointermove', padMove, { passive: false });
     padEl.addEventListener('pointerup', padUp, { passive: false });
-    padEl.addEventListener('pointercancel', () => { padTouch = null; });
+    padEl.addEventListener('pointercancel', () => { padTouch = null; padFingers = 0; padTwo = false; });
     padStatus();
     window.addEventListener('pagehide', () => { leaveOnline(true); unlinkPad(); leavePad(); });
     $('mute').addEventListener('click', () => {
