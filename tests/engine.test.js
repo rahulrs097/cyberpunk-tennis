@@ -347,6 +347,40 @@ test('a CPU-vs-CPU set finishes with a valid score, and stamina runs down', () =
   assert.ok(Math.min(...r.stats.minStamina) < 50, `lowest stamina ${r.stats.minStamina}`);
 });
 
+test('a match saved between points resumes at the same score, server and stamina, and plays on to the end', () => {
+  const CT = loadEngine(3);
+  const opts = { p0: 'octopus', p1: 'philosopher', control: ['cpu', 'cpu'], ...levelOpts(CT, 'club') };
+  let saved = null;
+  const g = CT.createGame({ ...opts, onEvent: (t) => {
+    if (t === 'point' && !saved && g.match.games[0] + g.match.games[1] >= 3 && g.match.points[0] + g.match.points[1] === 1) saved = JSON.stringify(CT.saveGameState(g));
+  } });
+  for (let i = 0; i < 60 * 60 * 20 && !saved; i++) CT.updateGame(g, 1 / 60);
+  assert.ok(saved, 'got to a save point');
+  // the original carries on to its next serve, which is where the resumed one starts
+  while (g.phase !== 'preServe') CT.updateGame(g, 1 / 60);
+  const r = CT.createGame({ ...opts, resume: JSON.parse(saved) });
+  assert.deepEqual(plain(r.match), plain(g.match));
+  assert.equal(r.server, g.server);
+  assert.equal(r.phase, 'preServe');
+  assert.deepEqual(plain(r.players.map((p) => [p.stamina, p.cap, p.x, p.y])), plain(g.players.map((p) => [p.stamina, p.cap, p.x, p.y])));
+  assert.deepEqual(plain(r.scout), plain(g.scout));
+  for (let i = 0; i < 60 * 60 * 30 && !r.match.over; i++) CT.updateGame(r, 1 / 60);
+  assert.ok(r.match.over, 'the resumed set finished');
+});
+
+test('the achievement tracker picks up a resumed match where it left off', () => {
+  const CT = loadEngine();
+  // a love game of aces, interrupted after the third ace: still a tetra ace
+  const m = CT.createMatch(0);
+  const point = (t) => { const server = CT.currentServer(m); const result = CT.awardPoint(m, 0);
+    return t.point({ winner: 0, text: 'Ace', result, server, shots: 1, tiebreak: false, games: m.games.slice() }); };
+  let t = CT.createAchievementTracker(0, 'pro');
+  for (let i = 0; i < 3; i++) point(t);
+  t = CT.createAchievementTracker(0, 'pro', JSON.parse(JSON.stringify(t.state())));
+  const earned = point(t).earned;
+  assert.ok(earned.includes('tetraAce') && earned.includes('loveGame'), plain(earned).join());
+});
+
 test('the levels get harder: the same player wins more games on Chill than on Pro', () => {
   const games = {};
   for (const level of ['chill', 'pro']) {

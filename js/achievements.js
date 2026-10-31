@@ -33,7 +33,8 @@
   // tiebreak, games) and hit(d) each 'hit'; both return what they changed:
   // { earned: [ids, in list order], stats: { name: amount }, best: { name: value },
   // over: { won } once the match is over }.
-  function createTracker(side, mode) {
+  // `saved`: what state() returned, to carry on a resumed match.
+  function createTracker(side, mode, saved) {
     const opp = 1 - side, pro = mode === 'pro';
     let aces = 0;                  // aces this game
     let won = [0, 0];              // points each side has in the current game
@@ -43,6 +44,8 @@
     // our last serve's speed: it only counts (fastest serve, rocket) once
     // it has landed in, i.e. they returned it or the point was played out
     let serveKmh = 0;
+    if (saved) ({ aces, won, everyGame, lostPoint, maxBehind } = saved);
+    const state = () => ({ aces, won: won.slice(), everyGame, lostPoint, maxBehind });
     function out(got, stats, best, over) {
       return { earned: ACHIEVEMENTS.filter((x) => got.has(x.id) && (pro || !x.pro)).map((x) => x.id), stats, best, over };
     }
@@ -103,7 +106,7 @@
       else if (d.side === opp) serveIn(got, best);
       return out(got, {}, best, null);
     }
-    return { side, mode, point, hit };
+    return { side, mode, point, hit, state };
   }
 
   // ---------------- saved record ----------------
