@@ -19,6 +19,12 @@
   try { const v = localStorage.getItem('ct.autoMove'); if (v !== null) autoMove = v === '1'; } catch (e) { /* storage is optional */ }
   let musicOn = true;
   try { const v = localStorage.getItem('ct.music'); if (v !== null) musicOn = v === '1'; } catch (e) { /* storage is optional */ }
+  // Full screen during matches, where the browser supports it for pages
+  // (iPhones don't). On iPads Safari can stop a match with a "typing while
+  // in full screen" warning; players can switch it off there.
+  const canFull = !!(document.documentElement.requestFullscreen || document.documentElement.webkitRequestFullscreen);
+  let fullOn = canFull;
+  try { const v = localStorage.getItem('ct.full'); if (v !== null) fullOn = canFull && v === '1'; } catch (e) { /* storage is optional */ }
   // Zen mode: no HUD but the pause button, no guides; the score is on the billboard
   let zen = false;
   try { zen = localStorage.getItem('ct.zen') === '1'; } catch (e) { /* storage is optional */ }
@@ -1089,11 +1095,12 @@
     CT.resizeRenderer(renderer, W, H, hud.bottom + Math.min(80, H * 0.08), 56, hud.bottom);
   }
 
-  // Fill the screen (browsers only allow this from a tap). iPhones don't
-  // support it for web pages; there the game is best added to the home screen.
+  // Fill the screen when a match starts (browsers only allow this from a
+  // tap), turned the way the view needs (landscape for VR).
   function goFullscreen(orient) {
     const lock = () => { try { screen.orientation.lock(orient || 'portrait').catch(() => {}); } catch (e) { /* optional */ } };
     const el = document.documentElement;
+    if (!fullOn) return;
     if (document.fullscreenElement || document.webkitFullscreenElement) { lock(); return; }
     const req = el.requestFullscreen || el.webkitRequestFullscreen;
     if (!req) return;
@@ -1113,6 +1120,7 @@
   // A CPU-vs-CPU rally plays behind the menu.
   function showMenu() {
     exitVR();
+    showFull(fullOn);
     leaveOnline(true);
     tut = null;
     canSave = false;
@@ -1145,8 +1153,11 @@
   }
 
   function beginMatch(cfg) {
+    // a room code box left focused would keep the on-screen keyboard live
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
     const inVR = view === 'vr' && !cfg.drill;
     goFullscreen(inVR ? 'landscape' : 'portrait');
+    showFull(isFullscreen());   // turns on when the browser says it went full screen
     CT.Music.setPlaying(true);
     touch = null;
     // events fired while the game is being built are ignored; the HUD is
@@ -1215,7 +1226,7 @@
   function setAutoMove(on) {
     autoMove = on;
     try { localStorage.setItem('ct.autoMove', on ? '1' : '0'); } catch (e) { /* storage is optional */ }
-    document.querySelectorAll('[data-auto]').forEach((b) => b.setAttribute('aria-pressed', String((b.dataset.auto === 'on') === on)));
+    document.querySelectorAll('[data-auto]').forEach((b) => b.setAttribute('aria-pressed', String(on)));
     const pb = $('autoPause');
     pb.setAttribute('aria-pressed', String(on));
     pb.textContent = on ? 'Automove on' : 'Automove off';
@@ -1227,7 +1238,7 @@
   function setMusic(on) {
     musicOn = on;
     try { localStorage.setItem('ct.music', on ? '1' : '0'); } catch (e) { /* storage is optional */ }
-    document.querySelectorAll('[data-music]').forEach((b) => b.setAttribute('aria-pressed', String((b.dataset.music === 'on') === on)));
+    document.querySelectorAll('[data-music]').forEach((b) => b.setAttribute('aria-pressed', String(on)));
     const pb = $('musicPause');
     pb.setAttribute('aria-pressed', String(on));
     pb.textContent = on ? 'Music on' : 'Music off';
@@ -1235,10 +1246,31 @@
     CT.Music.setOn(on);
   }
 
+  function inMatch() { return !!game && $('menu').hidden; }
+  function isFullscreen() { return !!(document.fullscreenElement || document.webkitFullscreenElement); }
+
+  // In a match the buttons show whether the page really is full screen (the
+  // browser can leave it on its own, e.g. when switching apps); in the menu
+  // they show the setting.
+  function showFull(on) {
+    document.querySelectorAll('[data-full]').forEach((b) => b.setAttribute('aria-pressed', String(on)));
+    const pb = $('fullPause');
+    pb.setAttribute('aria-pressed', String(on));
+    pb.textContent = on ? 'Full screen on' : 'Full screen off';
+  }
+
+  function setFull(on) {
+    fullOn = on;
+    try { localStorage.setItem('ct.full', on ? '1' : '0'); } catch (e) { /* storage is optional */ }
+    showFull(on);
+    // from the pause menu, the tap itself can go full screen
+    if (!on) leaveFullscreen(); else if (inMatch()) goFullscreen(vr ? 'landscape' : 'portrait');
+  }
+
   function setZen(on) {
     zen = on;
     try { localStorage.setItem('ct.zen', on ? '1' : '0'); } catch (e) { /* storage is optional */ }
-    document.querySelectorAll('[data-zen]').forEach((b) => b.setAttribute('aria-pressed', String((b.dataset.zen === 'on') === on)));
+    document.querySelectorAll('[data-zen]').forEach((b) => b.setAttribute('aria-pressed', String(on)));
     const pb = $('zenPause');
     pb.setAttribute('aria-pressed', String(on));
     pb.textContent = on ? 'Zen mode on' : 'Zen mode off';
@@ -1341,15 +1373,22 @@
     };
     document.querySelectorAll('[data-level]').forEach((b) => b.addEventListener('click', () => pickLevel(b.dataset.level)));
     pickLevel(level);
-    document.querySelectorAll('[data-auto]').forEach((b) => b.addEventListener('click', () => setAutoMove(b.dataset.auto === 'on')));
+    document.querySelectorAll('[data-auto]').forEach((b) => b.addEventListener('click', () => setAutoMove(!autoMove)));
     $('autoPause').addEventListener('click', () => setAutoMove(!autoMove));
     setAutoMove(autoMove);
-    document.querySelectorAll('[data-music]').forEach((b) => b.addEventListener('click', () => setMusic(b.dataset.music === 'on')));
+    document.querySelectorAll('[data-music]').forEach((b) => b.addEventListener('click', () => setMusic(!musicOn)));
     $('musicPause').addEventListener('click', () => setMusic(!musicOn));
-    document.querySelectorAll('[data-music]').forEach((b) => b.setAttribute('aria-pressed', String((b.dataset.music === 'on') === musicOn)));
+    document.querySelectorAll('[data-music]').forEach((b) => b.setAttribute('aria-pressed', String(musicOn)));
     $('musicPause').textContent = musicOn ? 'Music on' : 'Music off';
-    document.querySelectorAll('[data-zen]').forEach((b) => b.addEventListener('click', () => setZen(b.dataset.zen === 'on')));
+    document.querySelectorAll('[data-zen]').forEach((b) => b.addEventListener('click', () => setZen(!zen)));
     $('zenPause').addEventListener('click', () => setZen(!zen));
+    document.querySelectorAll('[data-full]').forEach((b) => b.addEventListener('click', () => setFull(!fullOn)));
+    // the setting does nothing where pages can't go full screen (iPhone)
+    $('fullPause').addEventListener('click', () => setFull($('fullPause').getAttribute('aria-pressed') !== 'true'));
+    const onFullChange = () => showFull(inMatch() ? isFullscreen() : fullOn);
+    document.addEventListener('fullscreenchange', onFullChange);
+    document.addEventListener('webkitfullscreenchange', onFullChange);
+    $('fullBtn').hidden = $('fullPause').hidden = !canFull;
     $('play').addEventListener('click', () => { ensureAudio(); startMatch(); });
     $('resumeMatch').addEventListener('click', () => { ensureAudio(); resumeMatch(); });
     $('rematch').addEventListener('click', startMatch);
@@ -1414,6 +1453,7 @@
     pickChar('octopus');
     showMenu();
     setZen(zen);
+    setFull(fullOn);
     const fontsReady = document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve();
     fontsReady.then(() => { drawPortraits(); if (game) layout(); });
     drawPortraits();
