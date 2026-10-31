@@ -26,6 +26,15 @@
   let fullOn = canFull;
   try { const v = localStorage.getItem('ct.full'); if (v !== null) fullOn = canFull && v === '1'; } catch (e) { /* storage is optional */ }
   // Zen mode: no HUD but the pause button, no guides; the score is on the billboard
+  // Swipe sensitivity, as multipliers (1 = the original feel). Depth scales
+  // the swipe's length before it picks how deep the ball goes; speed scales
+  // its speed before it picks the pace (and the overhit).
+  const SENS_MIN = 0.5, SENS_MAX = 2;
+  const sens = { depth: 1, speed: 1 };
+  try {
+    const v = JSON.parse(localStorage.getItem('ct.sens'));
+    for (const k of ['depth', 'speed']) if (v && Number.isFinite(v[k])) sens[k] = CT.clamp(v[k], SENS_MIN, SENS_MAX);
+  } catch (e) { /* storage is optional */ }
   let zen = false;
   try { zen = localStorage.getItem('ct.zen') === '1'; } catch (e) { /* storage is optional */ }
   let view = 'chase';  // camera: 'chase' (behind and above), 'first' (your eyes) or 'vr' (Cardboard)
@@ -565,12 +574,13 @@
     while (k > 0 && end.t - pts[k].t < 110) k--;
     const tail = Math.hypot(end.x - pts[k].x, end.y - pts[k].y) / Math.max(16, end.t - pts[k].t);
     const v = Math.max(tail, chord / dur) * 1000;                // px per second
-    const u = v / dim;  // screens per second
+    const u = v / dim * sens.speed;  // screens per second, after the speed setting
     // A normal phone flick (about half the screen in ~150 ms) is close to full pace.
     const pace = CT.clamp((u - 0.7) / (3.8 - 0.7), 0, 1);
     // Swipe length sets depth: a short swipe drops the ball short, a swipe
     // of about 40% of the screen or more goes to the baseline.
-    const depth = CT.clamp((chord / dim - 0.1) / 0.3, 0, 1);
+    // The depth setting scales the length first.
+    const depth = CT.clamp((chord / dim * sens.depth - 0.1) / 0.3, 0, 1);
     const over = CT.clamp((u - 7) / 4, 0, 1);
     const spinDir = dy < 0 ? 1 : -1;
     // A slow, long upward swipe lofts a topspin lob. Judged on the whole
@@ -1279,6 +1289,19 @@
     if (!on) leaveFullscreen(); else if (inMatch()) goFullscreen(vr ? 'landscape' : 'portrait');
   }
 
+  function setSens(k, pct) {
+    sens[k] = CT.clamp(pct / 100, SENS_MIN, SENS_MAX);
+    try { localStorage.setItem('ct.sens', JSON.stringify(sens)); } catch (e) { /* storage is optional */ }
+    showSens();
+  }
+  function showSens() {
+    for (const k of ['depth', 'speed']) {
+      const pct = Math.round(sens[k] * 100);
+      document.querySelectorAll(`[data-sens="${k}"]`).forEach((r) => { r.value = String(pct); });
+      document.querySelectorAll(`[data-sens-out="${k}"]`).forEach((o) => { o.textContent = pct + '%'; });
+    }
+  }
+
   function setZen(on) {
     zen = on;
     try { localStorage.setItem('ct.zen', on ? '1' : '0'); } catch (e) { /* storage is optional */ }
@@ -1401,6 +1424,8 @@
     document.addEventListener('fullscreenchange', onFullChange);
     document.addEventListener('webkitfullscreenchange', onFullChange);
     $('fullBtn').hidden = $('fullPause').hidden = !canFull;
+    document.querySelectorAll('[data-sens]').forEach((r) => r.addEventListener('input', () => setSens(r.dataset.sens, Number(r.value))));
+    showSens();
     $('play').addEventListener('click', () => { ensureAudio(); startMatch(); });
     $('resumeMatch').addEventListener('click', () => { ensureAudio(); resumeMatch(); });
     $('rematch').addEventListener('click', startMatch);
