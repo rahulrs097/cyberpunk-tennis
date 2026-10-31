@@ -770,6 +770,7 @@
 
   // A CPU-vs-CPU rally plays behind the menu.
   function showMenu() {
+    showFull(fullOn);
     leaveOnline(true);
     tut = null;
     canSave = false;
@@ -805,6 +806,7 @@
     // a room code box left focused would keep the on-screen keyboard live
     if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
     goFullscreen();
+    showFull(isFullscreen());   // turns on when the browser says it went full screen
     CT.Music.setPlaying(true);
     touch = null;
     // events fired while the game is being built are ignored; the HUD is
@@ -890,11 +892,25 @@
     CT.Music.setOn(on);
   }
 
+  function inMatch() { return !!game && $('menu').hidden; }
+  function isFullscreen() { return !!(document.fullscreenElement || document.webkitFullscreenElement); }
+
+  // In a match the buttons show whether the page really is full screen (the
+  // browser can leave it on its own, e.g. when switching apps); in the menu
+  // they show the setting.
+  function showFull(on) {
+    document.querySelectorAll('[data-full]').forEach((b) => b.setAttribute('aria-pressed', String(on)));
+    const pb = $('fullPause');
+    pb.setAttribute('aria-pressed', String(on));
+    pb.textContent = on ? 'Full screen on' : 'Full screen off';
+  }
+
   function setFull(on) {
     fullOn = on;
     try { localStorage.setItem('ct.full', on ? '1' : '0'); } catch (e) { /* storage is optional */ }
-    document.querySelectorAll('[data-full]').forEach((b) => b.setAttribute('aria-pressed', String(on)));
-    if (!on) leaveFullscreen();
+    showFull(on);
+    // from the pause menu, the tap itself can go full screen
+    if (!on) leaveFullscreen(); else if (inMatch()) goFullscreen();
   }
 
   function setZen(on) {
@@ -1005,7 +1021,11 @@
     $('zenPause').addEventListener('click', () => setZen(!zen));
     document.querySelectorAll('[data-full]').forEach((b) => b.addEventListener('click', () => setFull(!fullOn)));
     // the setting does nothing where pages can't go full screen (iPhone)
-    $('fullBtn').hidden = !canFull;
+    $('fullPause').addEventListener('click', () => setFull($('fullPause').getAttribute('aria-pressed') !== 'true'));
+    const onFullChange = () => showFull(inMatch() ? isFullscreen() : fullOn);
+    document.addEventListener('fullscreenchange', onFullChange);
+    document.addEventListener('webkitfullscreenchange', onFullChange);
+    $('fullBtn').hidden = $('fullPause').hidden = !canFull;
     $('play').addEventListener('click', () => { ensureAudio(); startMatch(); });
     $('resumeMatch').addEventListener('click', () => { ensureAudio(); resumeMatch(); });
     $('rematch').addEventListener('click', startMatch);
