@@ -480,8 +480,10 @@
     $('endNote').hidden = !fresh.length;
     $('rematch').textContent = 'Rematch';
     $('end').hidden = false;
-    exitVR();
-    leaveFullscreen();
+    // in a headset the result goes up in each eye instead, with a choice of
+    // what next (the end screen waits behind it for Exit VR)
+    if (vr) vr.end = { title: $('endTitle').textContent.toUpperCase(), score, note: $('endNote').textContent };
+    else leaveFullscreen();
     CT.Music.setPlaying(false);
   }
 
@@ -625,7 +627,7 @@
   // Otherwise letting go hits, and a long enough hold makes it a power shot;
   // where it goes is picked for you.
   function vrPress() {
-    if (game && paused) { vr.ignoreUp = true; vrMenuPick(); return; }
+    if (game && (paused || vr.end)) { vr.ignoreUp = true; vrMenuPick(); return; }
     if (!game || vr.press !== null) return;
     vr.ignoreUp = true;
     if (vr.wait) {
@@ -648,18 +650,27 @@
 
   // The pause menu in the headset: three choices around you, picked by
   // turning to one and pressing.
+  // The same at the end of a match, with Rematch in the middle.
   const VR_MENU = [{ id: 'exit', label: 'EXIT VR', yaw: -0.55 }, { id: 'resume', label: 'RESUME', yaw: 0 }, { id: 'quit', label: 'QUIT', yaw: 0.55 }];
+  const VR_END_MENU = [{ id: 'exit', label: 'EXIT VR', yaw: -0.55 }, { id: 'rematch', label: 'REMATCH', yaw: 0 }, { id: 'quit', label: 'MENU', yaw: 0.55 }];
   function vrMenuChoice() {
-    const yaw = CT.VR.headPose(vr.head).yaw;
-    let best = VR_MENU[1];
-    for (const it of VR_MENU) if (Math.abs(yaw - it.yaw) < Math.abs(yaw - best.yaw)) best = it;
+    const items = vr.end ? VR_END_MENU : VR_MENU, yaw = CT.VR.headPose(vr.head).yaw;
+    let best = items[1];
+    for (const it of items) if (Math.abs(yaw - it.yaw) < Math.abs(yaw - best.yaw)) best = it;
     return best;
   }
   function vrMenuPick() {
     const it = vrMenuChoice();
     if (it.id === 'resume') setPaused(false);
+    else if (it.id === 'rematch') startMatch();
     else if (it.id === 'quit') { leaveFullscreen(); showMenu(); }
-    else {
+    else if (vr.end) {
+      // to the normal end screen
+      exitVR();
+      setView('chase');
+      layout();
+      leaveFullscreen();
+    } else {
       // back to the normal screen, still paused, to carry on when ready
       exitVR();
       setView('chase');
@@ -701,7 +712,7 @@
       CT.VR.keepAwake(true);
       document.body.classList.add('vr');
     }
-    vr.wait = true; vr.press = null;
+    vr.wait = true; vr.press = null; vr.end = null;
     CT.setVR(renderer, { fov: VR_FOV[vrFit.fov], lens: VR_LENS[vrFit.lens], gfx: VR_GFX[vrFit.gfx] });
     // in a headset you can only look and press, so automove always runs
     if (game.control[me] === 'human') CT.setAutoMove(game, me, true);
@@ -737,8 +748,9 @@
     }
     vr.lastT = hit && hit.reach ? hit.t : null;
     v.prompt = ''; v.sub = '';
-    v.menu = paused ? { items: VR_MENU, sel: vrMenuChoice().id } : null;
-    if (paused) { v.prompt = 'PAUSED'; v.sub = 'Turn to choose, press to pick'; }
+    v.menu = vr.end ? { items: VR_END_MENU, sel: vrMenuChoice().id } : paused ? { items: VR_MENU, sel: vrMenuChoice().id } : null;
+    if (vr.end) { v.prompt = vr.end.title + ' ' + vr.end.score; v.sub = (vr.end.note ? vr.end.note + ' · ' : '') + 'Turn to choose, press to pick'; }
+    else if (paused) { v.prompt = 'PAUSED'; v.sub = 'Turn to choose, press to pick'; }
     else if (window.innerHeight > window.innerWidth) { v.prompt = 'TURN SIDEWAYS'; v.sub = 'Hold the phone in landscape'; }
     else if (vr.wait) { v.prompt = 'LOOK DOWN THE COURT'; v.sub = pad && pad.linked ? 'Tap the pad to play' : 'Press the button to play'; }
     else if (pose.pitch < CT.VR.PAUSE_PITCH) { v.prompt = 'PAUSE?'; v.sub = 'Press to pause'; }
@@ -1438,6 +1450,7 @@
     // in a headset the pause menu is drawn in each eye instead (vrFrame),
     // and a press anywhere picks from it
     $('pauseMenu').addEventListener('pointerdown', (e) => { if (vr) { e.preventDefault(); vrPress(); } });
+    $('end').addEventListener('pointerdown', (e) => { if (vr) { e.preventDefault(); vrPress(); } });
     const padEl = $('pad');
     padEl.addEventListener('pointerdown', padDown, { passive: false });
     padEl.addEventListener('pointermove', padMove, { passive: false });
