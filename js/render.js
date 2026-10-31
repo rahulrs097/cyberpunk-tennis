@@ -1084,22 +1084,34 @@
   // the bottom of the view on a groundstroke or down from above on a serve.
   // Your racket in the headset, in the world rather than stuck to the
   // screen, so each eye sees it from its own side and it meets the ball
-  // where the ball really is. It waits in front of you, takes a backswing
-  // as the ball comes, sweeps through the spot the ball was struck at and
-  // follows through across your body (a serve or smash: up and over). A
-  // faint trail shows the sweep. Pure decoration: it's worked out from the
-  // swing the game already plays, never fed back to it.
+  // where the ball really is. It waits in front of you, eases into a
+  // backswing as the ball comes, and on the shot sweeps through the spot
+  // the ball was struck at and follows through across your body (a serve
+  // or smash: up and over), leaving a faint trail. Pure decoration: it's
+  // worked out from the swing the game already plays, never fed back to it.
+  const SWING = { into: 0.07, through: 0.42, back: 0.5 };   // seconds: into the ball, follow-through, back to ready
+
   // (both eyes draw the same frame, so it moves on once per game step)
   function racketHead(r, g, p) {
-    const k = r.racket || (r.racket = { was: -1, contact: null, wing: 'fh', trail: [], t: -1, at: null, head: null });
+    const k = r.racket || (r.racket = { was: -1, contact: null, wing: 'fh', trail: [], tossT: -1, at: null, head: null, t0: -1, from: null, sd: 1 });
     if (k.at === g.time && k.head) return k.head;
+    const dt = k.at === null ? 0 : Math.max(0, Math.min(0.1, (g.time - k.at) / (g.timeScale || 1)));
     k.at = g.time;
-    if (g.phase === 'toss' && g.server === p.side) { if (k.t < 0) k.t = g.time; } else k.t = -1;
-    k.head = racketPose(r, g, p, k);
+    if (g.phase === 'toss' && g.server === p.side) { if (k.tossT < 0) k.tossT = g.time; } else k.tossT = -1;
+    const swinging = k.t0 >= 0 || (p.swing >= 0 && k.was < 0);
+    const target = racketPose(r, g, p, k);
+    // a stroke follows its path exactly; the rest of the time the racket
+    // glides towards where it wants to be, so it never jumps
+    if (swinging || !k.head) k.head = target;
+    else {
+      const e = 1 - Math.exp(-dt * 9);
+      k.head = { x: k.head.x + (target.x - k.head.x) * e, y: k.head.y + (target.y - k.head.y) * e, z: k.head.z + (target.z - k.head.z) * e };
+    }
     k.trail.push(k.head);
-    if (k.trail.length > 7) k.trail.shift();
+    if (k.trail.length > 8) k.trail.shift();
     return k.head;
   }
+
   function racketPose(r, g, p, k) {
     const b = g.ball, fwd = p.fwd;
     const f = { x: 0, y: fwd }, rt = { x: fwd, y: 0 };   // forward, and to your right
@@ -1109,81 +1121,122 @@
       const cx = Math.cos(ang), sy = Math.sin(ang);
       return { x: S.x + 0.85 * (rt.x * sd * cx + f.x * sy), y: S.y + 0.85 * (rt.y * sd * cx + f.y * sy), z };
     };
-    // the moment of contact: remember where the ball was
+    const ease = (x) => { x = Math.min(1, Math.max(0, x)); return x * x * (3 - 2 * x); };
+    const lerp = (a, c, t) => ({ x: a.x + (c.x - a.x) * t, y: a.y + (c.y - a.y) * t, z: a.z + (c.z - a.z) * t });
+    const ready = at(1, 1.0, 1.05);
+    // the moment of contact: remember where the ball was, and where the racket was
     if (p.swing >= 0 && k.was < 0) {
       k.wing = p.swingWing;
       const back = Math.min(0.1, p.swing * 0.28);
       k.contact = b.active ? { x: b.pos.x - b.vel.x * back, y: b.pos.y - b.vel.y * back, z: b.pos.z - b.vel.z * back } : null;
+      k.t0 = g.time;
+      k.from = k.head || ready;
     }
     k.was = p.swing;
-    const ease = (x) => 1 - Math.pow(1 - Math.min(1, Math.max(0, x)), 3);
-    const lerp = (a, c, t) => ({ x: a.x + (c.x - a.x) * t, y: a.y + (c.y - a.y) * t, z: a.z + (c.z - a.z) * t });
-    const ready = at(1, 1.0, 1.0);
-    if (p.swing >= 0) {
+    if (k.t0 >= 0) {
+      const t = (g.time - k.t0) / (g.timeScale || 1);
       const up = k.wing === 'serve' || k.wing === 'oh';
       const sd = k.wing === 'bh' ? -1 : 1;
       const hit = k.contact || (up ? at(1, 0.6, 2.5) : at(sd, 0.35, 1.0));
-      const e = ease(p.swing / 0.55);
-      // through the ball and round to the other side (overhead: down across)
-      const finish = up ? at(-1, 1.2, 0.8) : at(-sd, 1.0, 1.6);
-      let head = lerp(hit, finish, e);
-      if (p.swing > 0.7) head = lerp(head, ready, ease((p.swing - 0.7) / 0.5));
-      return head;
+      const finish = up ? at(-1, 1.2, 0.85) : at(-sd, 1.05, 1.55);
+      if (t < SWING.into) return lerp(k.from, hit, ease(t / SWING.into));
+      if (t < SWING.into + SWING.through) {
+        // through the ball and round to the other side, bowing out a little
+        const u = ease((t - SWING.into) / SWING.through);
+        const mid = up ? at(0.2, 1.1, 1.9) : at(0, 1.25, (hit.z + finish.z) / 2 + 0.1);
+        const a1 = lerp(hit, mid, u), a2 = lerp(mid, finish, u);
+        return lerp(a1, a2, u);
+      }
+      if (t < SWING.into + SWING.through + SWING.back) return lerp(finish, ready, ease((t - SWING.into - SWING.through) / SWING.back));
+      k.t0 = -1;
     }
-    // a backswing as the ball comes; on your serve, behind your head under the toss
-    if (g.phase === 'toss' && g.server === p.side) return lerp(ready, at(1, -0.9, 1.9), ease((g.time - k.t) * 3));
-    let prep = 0, sd = 1;
+    // on your serve, behind your head under the toss
+    if (k.tossT >= 0) return lerp(ready, at(1, -0.9, 1.9), ease((g.time - k.tossT) / (g.timeScale || 1) * 2.5));
+    // a backswing as the ball comes, on the side it's coming to (decided
+    // once, when the backswing starts, so it doesn't flip mid-way)
+    let prep = 0;
     if (g.phase === 'rally' && b.active && b.inFlight && b.lastHitter !== p.side) {
       const closing = -fwd * b.vel.y, dist = fwd * (b.pos.y - p.y);
-      if (closing > 1 && dist > -0.5) prep = Math.max(0, Math.min(1, 1 - (dist / closing - 0.08) / 0.5));
-      sd = (b.pos.x - p.x) * fwd >= -0.05 ? 1 : -1;
+      if (closing > 1 && dist > -0.5) prep = Math.max(0, Math.min(1, 1 - (dist / closing - 0.15) / 0.6));
     }
-    return lerp(ready, at(sd, -1.2, 1.15), ease(prep));
+    if (prep === 0) k.sd = (b.pos.x - p.x) * fwd >= -0.05 ? 1 : -1;
+    else if (k.prepWas === 0) k.sd = (b.pos.x - p.x) * fwd >= -0.05 ? 1 : -1;
+    k.prepWas = prep;
+    return lerp(ready, at(k.sd, -1.15, 1.2), ease(prep));
   }
 
   function drawRacketWorld(ctx, r, g, p, head) {
     const k = r.racket, col = p.ch.colors.glow;
-    // the sweep's trail
-    const moved = k.trail.length > 1 && Math.hypot(head.x - k.trail[0].x, head.y - k.trail[0].y, head.z - k.trail[0].z) > 0.6;
-    ctx.save();
-    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-    if (moved) {
-      ctx.strokeStyle = hexA(col, 0.2); ctx.lineWidth = Math.max(2, sizeAt(r, head.x, head.y, head.z) * 0.07);
-      ctx.beginPath();
-      let started = false;
-      for (const q of k.trail) { const s = proj(r, q.x, q.y, q.z); if (s.behind) continue; if (started) ctx.lineTo(s.x, s.y); else { ctx.moveTo(s.x, s.y); started = true; } }
-      ctx.stroke();
-    }
-    // shaft from the hand (between shoulder and head) to the head
+    const P = (q) => proj(r, q.x, q.y, q.z);
+    const add = (a, v, m) => ({ x: a.x + v.x * m, y: a.y + v.y * m, z: a.z + v.z * m });
+    // the frame's axes: u along the shaft, w across the face (upright when it can be)
     const S = { x: p.x, y: p.y, z: 1.35 };
     const d = { x: head.x - S.x, y: head.y - S.y, z: head.z - S.z }, L = Math.hypot(d.x, d.y, d.z) || 1;
     const u = { x: d.x / L, y: d.y / L, z: d.z / L };
-    const hand = { x: head.x - u.x * 0.5, y: head.y - u.y * 0.5, z: head.z - u.z * 0.5 };
-    const neck = { x: head.x - u.x * 0.17, y: head.y - u.y * 0.17, z: head.z - u.z * 0.17 };
-    // the face stands upright, facing down the court (on a shaft that's
-    // upright itself, across it)
     let w = { x: -u.z * u.x, y: -u.z * u.y, z: 1 - u.z * u.z };
     let wl = Math.hypot(w.x, w.y, w.z);
     if (wl < 0.3) { w = { x: -u.y, y: u.x, z: 0 }; wl = Math.hypot(w.x, w.y) || 1; }
     w = { x: w.x / wl, y: w.y / wl, z: w.z / wl };
-    const pts = [];
-    for (let i = 0; i <= 20; i++) {
-      const t = (i / 20) * Math.PI * 2;
-      const q = proj(r, head.x + u.x * 0.16 * Math.cos(t) + w.x * 0.13 * Math.sin(t), head.y + u.y * 0.16 * Math.cos(t) + w.y * 0.13 * Math.sin(t), head.z + u.z * 0.16 * Math.cos(t) + w.z * 0.13 * Math.sin(t));
-      if (q.behind) { ctx.restore(); return; }
-      pts.push(q);
-    }
-    const A = proj(r, hand.x, hand.y, hand.z), N = proj(r, neck.x, neck.y, neck.z);
-    if (A.behind || N.behind) { ctx.restore(); return; }
+    const RU = 0.17, RW = 0.135;   // the head's half-length and half-width (m)
+    const onHead = (t, m) => add(add(head, u, RU * (m || 1) * Math.cos(t)), w, RW * (m || 1) * Math.sin(t));
     const px = sizeAt(r, head.x, head.y, head.z);
-    ctx.strokeStyle = '#1c1b2a'; ctx.lineWidth = Math.max(2, px * 0.03);
-    ctx.beginPath(); ctx.moveTo(A.x, A.y); ctx.lineTo(N.x, N.y); ctx.stroke();
+    if (P(head).behind) return;
+    ctx.save();
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    // the sweep's trail
+    const tr = k.trail;
+    if (tr.length > 2 && Math.hypot(head.x - tr[0].x, head.y - tr[0].y, head.z - tr[0].z) > 0.5) {
+      for (let i = 1; i < tr.length; i++) {
+        const a = P(tr[i - 1]), c = P(tr[i]);
+        if (a.behind || c.behind) continue;
+        ctx.strokeStyle = hexA(col, 0.22 * (i / tr.length));
+        ctx.lineWidth = Math.max(2, px * 0.2 * (i / tr.length));
+        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(c.x, c.y); ctx.stroke();
+      }
+    }
+    // handle: butt, grip, and the throat's two arms opening into the head
+    const throat = add(head, u, -RU - 0.11), butt = add(head, u, -RU - 0.47), gripTop = add(head, u, -RU - 0.25);
+    const arms = [onHead(Math.PI - 0.55), onHead(Math.PI + 0.55)];
+    const T = P(throat), B = P(butt), G = P(gripTop), A0 = P(arms[0]), A1 = P(arms[1]);
+    if ([T, B, G, A0, A1].some((q) => q.behind)) { ctx.restore(); return; }
+    ctx.strokeStyle = '#0d0c18'; ctx.lineWidth = Math.max(3, px * 0.034);
+    ctx.beginPath(); ctx.moveTo(B.x, B.y); ctx.lineTo(G.x, G.y); ctx.stroke();   // grip
+    ctx.strokeStyle = '#2b2846'; ctx.lineWidth = Math.max(1, px * 0.01);
+    for (let i = 1; i < 6; i++) {   // grip wrap
+      const q = P(add(butt, u, 0.04 * i)), n = P(add(add(butt, u, 0.04 * i + 0.02), w, 0.012));
+      if (!q.behind && !n.behind) { ctx.beginPath(); ctx.moveTo(q.x, q.y); ctx.lineTo(n.x, n.y); ctx.stroke(); }
+    }
+    ctx.fillStyle = col;
+    ctx.beginPath(); ctx.arc(B.x, B.y, Math.max(1.5, px * 0.02), 0, Math.PI * 2); ctx.fill();   // butt cap
+    const beam = (a, c) => {
+      ctx.strokeStyle = '#16142a'; ctx.lineWidth = Math.max(2.5, px * 0.024);
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(c.x, c.y); ctx.stroke();
+      ctx.strokeStyle = col; ctx.lineWidth = Math.max(1, px * 0.008);
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(c.x, c.y); ctx.stroke();
+    };
+    beam(G, T); beam(T, A0); beam(T, A1);
+    // the string bed: crossing strings over a faint fill
+    const ring = [];
+    for (let i = 0; i <= 28; i++) { const q = P(onHead((i / 28) * Math.PI * 2)); if (q.behind) { ctx.restore(); return; } ring.push(q); }
+    const outline = () => { ctx.beginPath(); ring.forEach((q, i) => (i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y))); ctx.closePath(); };
+    outline();
+    ctx.fillStyle = 'rgba(234,230,255,0.06)'; ctx.fill();
+    ctx.save(); ctx.clip();
+    ctx.strokeStyle = 'rgba(234,230,255,0.3)'; ctx.lineWidth = Math.max(0.6, px * 0.0035);
     ctx.beginPath();
-    pts.forEach((q, i) => (i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y)));
-    ctx.fillStyle = hexA(PAL.line, 0.12); ctx.fill();
-    ctx.shadowColor = col; ctx.shadowBlur = r.quality ? Math.min(20, px * 0.05) : 0;
-    ctx.strokeStyle = col; ctx.lineWidth = Math.max(1.5, px * 0.018);
+    for (let i = -7; i <= 7; i++) {
+      const m1 = P(add(add(head, w, RW * i / 8), u, -RU)), m2 = P(add(add(head, w, RW * i / 8), u, RU));
+      const c1 = P(add(add(head, u, RU * i / 8), w, -RW)), c2 = P(add(add(head, u, RU * i / 8), w, RW));
+      if (!m1.behind && !m2.behind) { ctx.moveTo(m1.x, m1.y); ctx.lineTo(m2.x, m2.y); }
+      if (!c1.behind && !c2.behind) { ctx.moveTo(c1.x, c1.y); ctx.lineTo(c2.x, c2.y); }
+    }
     ctx.stroke();
+    ctx.restore();
+    // the frame: a dark rim with a neon edge
+    outline();
+    ctx.strokeStyle = '#16142a'; ctx.lineWidth = Math.max(3, px * 0.03); ctx.stroke();
+    ctx.shadowColor = col; ctx.shadowBlur = r.quality ? Math.min(18, px * 0.04) : 0;
+    ctx.strokeStyle = col; ctx.lineWidth = Math.max(1.2, px * 0.011); ctx.stroke();
     ctx.restore();
   }
 
