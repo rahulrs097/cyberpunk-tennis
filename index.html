@@ -188,6 +188,10 @@
   .stats dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
   .seg.toggles button { min-height: 40px; font-size: 12px; letter-spacing: 0.04em; padding: 0 2px; min-width: 0; }
   .seg.toggles button[aria-pressed="false"] { color: var(--muted); }
+  .sens { display: flex; align-items: center; gap: 10px; }
+  .sens input { flex: 1; min-width: 0; height: 28px; accent-color: var(--cyan); }
+  .sens output { width: 44px; text-align: right; font-variant-numeric: tabular-nums; color: var(--ball); font-size: 13px; }
+  .sens-pause { display: grid; grid-template-columns: 96px 1fr; align-items: center; gap: 10px; }
   .seg.tabs button { min-height: 36px; font-size: 12px; letter-spacing: 0.04em; padding: 0 2px; min-width: 0; }
   @media (max-height: 760px) {
     .sheet { gap: 12px; }
@@ -282,6 +286,11 @@
         </div>
         <p class="lede" id="padState"></p>
       </div>
+      <!-- swipe sensitivity: 100% is the original feel -->
+      <div class="label">Swipe depth</div>
+      <div class="sens"><input type="range" min="50" max="200" step="10" value="100" data-sens="depth" aria-label="Swipe depth"><output data-sens-out="depth">100%</output></div>
+      <div class="label">Swipe speed</div>
+      <div class="sens"><input type="range" min="50" max="200" step="10" value="100" data-sens="speed" aria-label="Swipe speed"><output data-sens-out="speed">100%</output></div>
     </div>
     <!-- on/off settings: each button is lit while its setting is on -->
     <div class="seg toggles">
@@ -328,6 +337,7 @@
       <li><b>Lob</b><span>Swipe up slowly over a quarter of the screen or more to loft the ball deep, over a player at the net. Start the swipe as the ball arrives: a lob is timed from the middle of the swipe, and forgives more mistiming than a drive.</span></li>
       <li><b>Timing</b><span>Swipe as the ring closes. Late forehands drift right, late backhands drift left. The yellow X shows where the ball will bounce, and on a serve it shows before the ring does.</span></li>
       <li><b>Stamina</b><span>Running, every swing and repeated power shots tire you, and you only get part of it back between points. Tired players run slower and have less time to swing. The striped part of the bar is gone for the set.</span></li>
+      <li><b>Swipe</b><span>Swipe depth and Swipe speed, in the menu and the pause menu, tune how your swipes feel. Raise depth if your shots land short, so a shorter swipe goes deep. Raise speed if your shots feel slow, so a gentler flick hits hard (and a hard one overhits sooner). 100% is the standard feel.</span></li>
       <li><b>Zen</b><span>Zen mode clears the screen: no scoreboard, hints, timing ring or landing X, just the pause button. The score goes up on the billboard in the sky. It has its own calm music, and the ball sounds closer to a real court.</span></li>
       <li><b>VR</b><span>Pick VR under Camera and put the phone in a Cardboard headset. Look down the court and press the button to start. Watch the ball and press the button as it arrives: where the shot goes is picked for you. For a power shot, press early, hold, and let go as the ball arrives; the ring in the middle of your view fills when the hold is long enough. You see your racket swing through the ball. A small ring on the ball closes as it comes, and if you look away an arrow points to the ball and two ticks then a high beep count you down. On your serve, press to toss, then press again at the top. Look down at your feet and press to pause. The pause menu appears in the headset: turn to Exit VR on the left, Resume ahead or Quit on the right, and press. At the end of a match the score shows the same way, with Rematch ahead and Menu on the right. Look straight up at the sky and press to recentre (then look down the court and press again), or tap the pad with two fingers. The white line down the middle lines the phone up with the headset's divider. Automove runs for you. For full swipe control, tap Link a phone under Swipe pad, then on a second phone pick VR, tap Be the pad and enter the code: swipe on that phone exactly as on the game screen. On a laptop the mouse is your head and the space bar is the button.</span></li>
       <li><b>Full screen</b><span>The game fills the screen when a match starts. If Safari on iPad stops the match with a "typing while in full screen" warning, switch it off. On iPhone and iPad, Add to Home Screen plays full screen anyway.</span></li>
@@ -370,6 +380,8 @@
       <button class="btn" id="musicPause" aria-pressed="true">Music on</button>
       <button class="btn" id="zenPause" aria-pressed="false">Zen mode off</button>
       <button class="btn" id="fullPause" aria-pressed="true">Full screen on</button>
+      <div class="sens-pause"><span class="label">Swipe depth</span><div class="sens"><input type="range" min="50" max="200" step="10" value="100" data-sens="depth" aria-label="Swipe depth"><output data-sens-out="depth">100%</output></div></div>
+      <div class="sens-pause"><span class="label">Swipe speed</span><div class="sens"><input type="range" min="50" max="200" step="10" value="100" data-sens="speed" aria-label="Swipe speed"><output data-sens-out="speed">100%</output></div></div>
       <button class="btn" id="mute" aria-pressed="false">Sound on</button>
       <button class="btn" id="quit">Quit match</button>
     </div>
