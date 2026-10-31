@@ -1,7 +1,8 @@
 // Renderer with two views: a raised chase camera behind the bottom player that
 // follows them across the baseline and turns towards the ball, or a
 // first-person view from the player's eyes. Plus the rooftop parking lot,
-// court, net, players, ball and touch guides.
+// court, net, players, ball and touch guides. In Cardboard VR (`r.vr`) the
+// first-person view is drawn twice, once per eye, and turns with your head.
 (function () {
   const CT = (window.CT = window.CT || {});
   const { COURT } = CT;
@@ -36,6 +37,7 @@
     return {
       canvas, ctx: canvas.getContext('2d', { alpha: false }),   // opaque: the sky covers every pixel, and the browser can skip blending the canvas
       view: 'chase',   // 'chase' or 'first'
+      vr: null,        // Cardboard VR: { yaw, pitch, roll (the head), fov (degrees across one eye), lens (mm between the lenses), gfx, charge, prompt, sub }
       cam: { x: 0, y: -20, z: 6.4, lx: 0, ly: 0, lz: 0, f: 500, cx: 0, cy: 0, yaw: 0, pitch: 0, ready: false },
       W: 0, H: 0, dpr: 1, top: 92, bottom: 24, hudBottom: 0,
       sky: document.createElement('canvas'),
@@ -174,6 +176,7 @@
 
   // ---------------- camera control ----------------
   function updateCamera(r, g, human, dt) {
+    if (r.vr) { updateHead(r, g, human, dt); return; }
     if (r.view === 'first') { updateEye(r, g, human, dt); return; }
     const c = r.cam;
     const p = g.players[human];
@@ -241,6 +244,22 @@
     setBasis(c);
   }
 
+  // VR: the eyes ride with the player as in first person, but only your
+  // head turns them, never the game. No step back on the serve either: in a
+  // headset any move you didn't make yourself is a lurch.
+  function updateHead(r, g, human, dt) {
+    const c = r.cam, p = g.players[human], v = r.vr;
+    const tx = p.x, ty = p.y - p.fwd * EYE.back;
+    const kp = c.ready ? 1 - Math.exp(-dt * EYE.follow) : 1;
+    c.x += (tx - c.x) * kp; c.y += (ty - c.y) * kp; c.z = EYE.height;
+    const yaw = (p.fwd > 0 ? 0 : Math.PI) + v.yaw, pitch = CT.clamp(v.pitch, -1.5, 1.5);
+    c.lx = c.x + Math.sin(yaw) * Math.cos(pitch) * 10;
+    c.ly = c.y + Math.cos(yaw) * Math.cos(pitch) * 10;
+    c.lz = c.z + Math.sin(pitch) * 10;
+    c.ready = true;
+    setBasis(c);
+  }
+
   // a - b wrapped to (-PI, PI]: the short way round
   function angleDiff(a, b) {
     const d = a - b;
@@ -250,6 +269,23 @@
   function setView(r, view) {
     r.view = view === 'first' ? 'first' : 'chase';
     r.cam.ready = false;   // cut straight to the new view
+  }
+
+  // Turn VR on (settings { fov, lens, gfx }) or off (null). gfx is the
+  // quality level (0 smooth, 1 balanced, 2 sharp) or 'auto': start sharp
+  // and step down while drawing both eyes is too slow (drawStereo). Call
+  // resizeRenderer after.
+  function setVR(r, opts) {
+    if (opts) {
+      if (!r.vr) {
+        r.qualityWas = r.quality;
+        r.vr = { yaw: 0, pitch: 0, roll: 0, charge: 0, prompt: '', sub: '' };
+      }
+      Object.assign(r.vr, opts);
+      r.quality = r.vr.gfx === 'auto' ? 2 : r.vr.gfx;
+      r.vrHalf = false; r.vrWork = [];
+    } else if (r.vr) { r.vr = null; r.quality = r.qualityWas; }
+    r.cam.ready = false;
   }
 
   function resize(r, W, H, top, bottom, hudBottom) {
@@ -265,9 +301,24 @@
     c.f = Math.min((W / 2) / Math.tan((21 * Math.PI) / 180), (H / 2) / Math.tan((30 * Math.PI) / 180));
     c.cx = W / 2;
     c.cy = top + (H - top - bottom) * 0.5;
+    if (r.vr) {
+      // each eye gets half the screen (r.W is one eye from here on), as wide
+      // as the headset's lenses show, centred under its lens
+      r.W = W / 2;
+      c.f = (r.W / 2) / Math.tan((r.vr.fov * Math.PI) / 360);
+      r.lensX = CT.clamp((r.vr.lens / 2) / MM_PER_PX, r.W * 0.3, r.W * 0.7);
+      c.cx = r.W / 2;
+      c.cy = H / 2;
+    }
     c.ready = false;
     buildSky(r);
   }
+
+  // Phone screens show about this many millimetres per CSS pixel; it places
+  // each eye's view under its lens.
+  const MM_PER_PX = 0.17;
+  // metres between the two eyes
+  const IPD = 0.064;
 
   // Quality levels, highest first. A phone that can't keep up steps down:
   // fewer pixels, no lamp pools, no glow blur on the players.
@@ -279,7 +330,7 @@
   // that only shows 30 frames a second but draws each one quickly (an
   // iPhone in Low Power Mode) keeps the full look.
   function watchFrameRate(r, dt, work) {
-    if (!dt || dt >= 0.1 || r.quality === 0) return;   // skip pauses and tab switches
+    if (!dt || dt >= 0.1 || r.quality === 0 || r.vr) return;   // skip pauses and tab switches
     r.frames.push([dt, work]);
     if (r.frames.length < 90) return;
     const avg = (i) => r.frames.reduce((a, f) => a + f[i], 0) / r.frames.length;
@@ -399,7 +450,8 @@
     const oy = horizon - r.skyHz;
     if (oy > 0) { ctx.fillStyle = '#02030a'; ctx.fillRect(0, 0, r.W, oy + 1); }
     if (oy + r.skyH < r.H) { ctx.fillStyle = '#15161e'; ctx.fillRect(0, oy + r.skyH - 1, r.W, r.H); }
-    const sw = r.skyW, pan = -c.yaw * c.f;
+    // (the sky is far away, so in VR both eyes see it at the same place around their centre)
+    const sw = r.skyW, pan = -c.yaw * c.f + c.cx - r.W / 2;
     let ox = ((pan - r.W) % sw + sw) % sw - sw;
     for (; ox < r.W; ox += sw) ctx.drawImage(r.sky, ox, oy, sw, r.skyH);
   }
@@ -630,7 +682,8 @@
       if (cur.photo || cur.score) drawBoardPhoto(src.getContext('2d'), r, now, cur);
       else drawBoardCall(src.getContext('2d'), r, cur.call, age);
     } else src = boardTexture(r, cur.text, cur.color);
-    const d = r.dpr, W = BOARD_TEX.w, H = BOARD_TEX.h, N = 10, sw = W / N;
+    const W = BOARD_TEX.w, H = BOARD_TEX.h, N = 10, sw = W / N;
+    const base = ctx.getTransform();   // (in VR: one eye's half of the screen, turned with your head)
     ctx.save();
     ctx.globalAlpha = on;
     ctx.imageSmoothingQuality = 'high';
@@ -638,7 +691,8 @@
     // Drawn as thin vertical strips, each mapped from its own corners.
     for (let i = 0; i < N; i++) {
       const a0 = at(i / N, z1), a1 = at((i + 1) / N, z1), b0 = at(i / N, B.z);
-      ctx.setTransform(d * (a1.x - a0.x) / sw, d * (a1.y - a0.y) / sw, d * (b0.x - a0.x) / H, d * (b0.y - a0.y) / H, d * a0.x, d * a0.y);
+      ctx.setTransform(base);
+      ctx.transform((a1.x - a0.x) / sw, (a1.y - a0.y) / sw, (b0.x - a0.x) / H, (b0.y - a0.y) / H, a0.x, a0.y);
       ctx.drawImage(src, i * sw, 0, Math.min(sw + 1, W - i * sw), H, 0, 0, Math.min(sw + 1, W - i * sw), H);
     }
     ctx.restore();
@@ -978,12 +1032,14 @@
     const first = r.view === 'first';
     const c = first ? ringOnBall(r, g.ball) : proj(r, info.x, info.y, info.z);
     if (c.behind) return;
-    const base = first ? 16 : Math.max(9, 0.16 * c.s);
-    const rad = base + info.t * 70;
+    // (half size in VR, where it sits in front of the ball you're watching)
+    const k = r.vr ? 0.5 : 1;
+    const base = (first ? 16 : Math.max(9, 0.16 * c.s)) * k;
+    const rad = base + info.t * 70 * k;
     ctx.save();
     ctx.strokeStyle = info.reach ? PAL.guide : PAL.warn;
     ctx.globalAlpha = 0.35 + 0.65 * (1 - info.t / 0.9);
-    ctx.lineWidth = 2;
+    ctx.lineWidth = r.vr ? 1.5 : 2;
     ctx.beginPath(); ctx.arc(c.x, c.y, rad, 0, Math.PI * 2); ctx.stroke();
     ctx.globalAlpha = 0.9;
     ctx.beginPath(); ctx.arc(c.x, c.y, base, 0, Math.PI * 2); ctx.stroke();
@@ -1026,6 +1082,164 @@
   // First person: your racket in the corner of the screen. It sits ready on
   // the forehand side, drops back as the ball comes in, and sweeps across
   // the bottom of the view on a groundstroke or down from above on a serve.
+  // Your racket in the headset, in the world rather than stuck to the
+  // screen, so each eye sees it from its own side and it meets the ball
+  // where the ball really is. It waits in front of you, eases into a
+  // backswing as the ball comes, and on the shot sweeps through the spot
+  // the ball was struck at and follows through across your body (a serve
+  // or smash: up and over), leaving a faint trail. Pure decoration: it's
+  // worked out from the swing the game already plays, never fed back to it.
+  const SWING = { into: 0.07, through: 0.42, back: 0.5 };   // seconds: into the ball, follow-through, back to ready
+
+  // (both eyes draw the same frame, so it moves on once per game step)
+  function racketHead(r, g, p) {
+    const k = r.racket || (r.racket = { was: -1, contact: null, wing: 'fh', trail: [], tossT: -1, at: null, head: null, t0: -1, from: null, sd: 1 });
+    if (k.at === g.time && k.head) return k.head;
+    const dt = k.at === null ? 0 : Math.max(0, Math.min(0.1, (g.time - k.at) / (g.timeScale || 1)));
+    k.at = g.time;
+    if (g.phase === 'toss' && g.server === p.side) { if (k.tossT < 0) k.tossT = g.time; } else k.tossT = -1;
+    const swinging = k.t0 >= 0 || (p.swing >= 0 && k.was < 0);
+    const target = racketPose(r, g, p, k);
+    // a stroke follows its path exactly; the rest of the time the racket
+    // glides towards where it wants to be, so it never jumps
+    if (swinging || !k.head) k.head = target;
+    else {
+      const e = 1 - Math.exp(-dt * 9);
+      k.head = { x: k.head.x + (target.x - k.head.x) * e, y: k.head.y + (target.y - k.head.y) * e, z: k.head.z + (target.z - k.head.z) * e };
+    }
+    k.trail.push(k.head);
+    if (k.trail.length > 8) k.trail.shift();
+    return k.head;
+  }
+
+  function racketPose(r, g, p, k) {
+    const b = g.ball, fwd = p.fwd;
+    const f = { x: 0, y: fwd }, rt = { x: fwd, y: 0 };   // forward, and to your right
+    const at = (sd, ang, z) => {
+      // round the shoulder on side `sd`: 0 = straight out to that side, + = forward
+      const S = { x: p.x + rt.x * sd * 0.2, y: p.y + rt.y * sd * 0.2 };
+      const cx = Math.cos(ang), sy = Math.sin(ang);
+      return { x: S.x + 0.85 * (rt.x * sd * cx + f.x * sy), y: S.y + 0.85 * (rt.y * sd * cx + f.y * sy), z };
+    };
+    const ease = (x) => { x = Math.min(1, Math.max(0, x)); return x * x * (3 - 2 * x); };
+    const lerp = (a, c, t) => ({ x: a.x + (c.x - a.x) * t, y: a.y + (c.y - a.y) * t, z: a.z + (c.z - a.z) * t });
+    const ready = at(1, 1.0, 1.05);
+    // the moment of contact: remember where the ball was, and where the racket was
+    if (p.swing >= 0 && k.was < 0) {
+      k.wing = p.swingWing;
+      const back = Math.min(0.1, p.swing * 0.28);
+      k.contact = b.active ? { x: b.pos.x - b.vel.x * back, y: b.pos.y - b.vel.y * back, z: b.pos.z - b.vel.z * back } : null;
+      k.t0 = g.time;
+      k.from = k.head || ready;
+    }
+    k.was = p.swing;
+    if (k.t0 >= 0) {
+      const t = (g.time - k.t0) / (g.timeScale || 1);
+      const up = k.wing === 'serve' || k.wing === 'oh';
+      const sd = k.wing === 'bh' ? -1 : 1;
+      const hit = k.contact || (up ? at(1, 0.6, 2.5) : at(sd, 0.35, 1.0));
+      const finish = up ? at(-1, 1.2, 0.85) : at(-sd, 1.05, 1.55);
+      if (t < SWING.into) return lerp(k.from, hit, ease(t / SWING.into));
+      if (t < SWING.into + SWING.through) {
+        // through the ball and round to the other side, bowing out a little
+        const u = ease((t - SWING.into) / SWING.through);
+        const mid = up ? at(0.2, 1.1, 1.9) : at(0, 1.25, (hit.z + finish.z) / 2 + 0.1);
+        const a1 = lerp(hit, mid, u), a2 = lerp(mid, finish, u);
+        return lerp(a1, a2, u);
+      }
+      if (t < SWING.into + SWING.through + SWING.back) return lerp(finish, ready, ease((t - SWING.into - SWING.through) / SWING.back));
+      k.t0 = -1;
+    }
+    // on your serve, behind your head under the toss
+    if (k.tossT >= 0) return lerp(ready, at(1, -0.9, 1.9), ease((g.time - k.tossT) / (g.timeScale || 1) * 2.5));
+    // a backswing as the ball comes, on the side it's coming to (decided
+    // once, when the backswing starts, so it doesn't flip mid-way)
+    let prep = 0;
+    if (g.phase === 'rally' && b.active && b.inFlight && b.lastHitter !== p.side) {
+      const closing = -fwd * b.vel.y, dist = fwd * (b.pos.y - p.y);
+      if (closing > 1 && dist > -0.5) prep = Math.max(0, Math.min(1, 1 - (dist / closing - 0.15) / 0.6));
+    }
+    if (prep === 0) k.sd = (b.pos.x - p.x) * fwd >= -0.05 ? 1 : -1;
+    else if (k.prepWas === 0) k.sd = (b.pos.x - p.x) * fwd >= -0.05 ? 1 : -1;
+    k.prepWas = prep;
+    return lerp(ready, at(k.sd, -1.15, 1.2), ease(prep));
+  }
+
+  function drawRacketWorld(ctx, r, g, p, head) {
+    const k = r.racket, col = p.ch.colors.glow;
+    const P = (q) => proj(r, q.x, q.y, q.z);
+    const add = (a, v, m) => ({ x: a.x + v.x * m, y: a.y + v.y * m, z: a.z + v.z * m });
+    // the frame's axes: u along the shaft, w across the face (upright when it can be)
+    const S = { x: p.x, y: p.y, z: 1.35 };
+    const d = { x: head.x - S.x, y: head.y - S.y, z: head.z - S.z }, L = Math.hypot(d.x, d.y, d.z) || 1;
+    const u = { x: d.x / L, y: d.y / L, z: d.z / L };
+    let w = { x: -u.z * u.x, y: -u.z * u.y, z: 1 - u.z * u.z };
+    let wl = Math.hypot(w.x, w.y, w.z);
+    if (wl < 0.3) { w = { x: -u.y, y: u.x, z: 0 }; wl = Math.hypot(w.x, w.y) || 1; }
+    w = { x: w.x / wl, y: w.y / wl, z: w.z / wl };
+    const RU = 0.17, RW = 0.135;   // the head's half-length and half-width (m)
+    const onHead = (t, m) => add(add(head, u, RU * (m || 1) * Math.cos(t)), w, RW * (m || 1) * Math.sin(t));
+    const px = sizeAt(r, head.x, head.y, head.z);
+    if (P(head).behind) return;
+    ctx.save();
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    // the sweep's trail
+    const tr = k.trail;
+    if (tr.length > 2 && Math.hypot(head.x - tr[0].x, head.y - tr[0].y, head.z - tr[0].z) > 0.5) {
+      for (let i = 1; i < tr.length; i++) {
+        const a = P(tr[i - 1]), c = P(tr[i]);
+        if (a.behind || c.behind) continue;
+        ctx.strokeStyle = hexA(col, 0.22 * (i / tr.length));
+        ctx.lineWidth = Math.max(2, px * 0.2 * (i / tr.length));
+        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(c.x, c.y); ctx.stroke();
+      }
+    }
+    // handle: butt, grip, and the throat's two arms opening into the head
+    const throat = add(head, u, -RU - 0.11), butt = add(head, u, -RU - 0.47), gripTop = add(head, u, -RU - 0.25);
+    const arms = [onHead(Math.PI - 0.55), onHead(Math.PI + 0.55)];
+    const T = P(throat), B = P(butt), G = P(gripTop), A0 = P(arms[0]), A1 = P(arms[1]);
+    if ([T, B, G, A0, A1].some((q) => q.behind)) { ctx.restore(); return; }
+    ctx.strokeStyle = '#0d0c18'; ctx.lineWidth = Math.max(3, px * 0.034);
+    ctx.beginPath(); ctx.moveTo(B.x, B.y); ctx.lineTo(G.x, G.y); ctx.stroke();   // grip
+    ctx.strokeStyle = '#2b2846'; ctx.lineWidth = Math.max(1, px * 0.01);
+    for (let i = 1; i < 6; i++) {   // grip wrap
+      const q = P(add(butt, u, 0.04 * i)), n = P(add(add(butt, u, 0.04 * i + 0.02), w, 0.012));
+      if (!q.behind && !n.behind) { ctx.beginPath(); ctx.moveTo(q.x, q.y); ctx.lineTo(n.x, n.y); ctx.stroke(); }
+    }
+    ctx.fillStyle = col;
+    ctx.beginPath(); ctx.arc(B.x, B.y, Math.max(1.5, px * 0.02), 0, Math.PI * 2); ctx.fill();   // butt cap
+    const beam = (a, c) => {
+      ctx.strokeStyle = '#16142a'; ctx.lineWidth = Math.max(2.5, px * 0.024);
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(c.x, c.y); ctx.stroke();
+      ctx.strokeStyle = col; ctx.lineWidth = Math.max(1, px * 0.008);
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(c.x, c.y); ctx.stroke();
+    };
+    beam(G, T); beam(T, A0); beam(T, A1);
+    // the string bed: crossing strings over a faint fill
+    const ring = [];
+    for (let i = 0; i <= 28; i++) { const q = P(onHead((i / 28) * Math.PI * 2)); if (q.behind) { ctx.restore(); return; } ring.push(q); }
+    const outline = () => { ctx.beginPath(); ring.forEach((q, i) => (i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y))); ctx.closePath(); };
+    outline();
+    ctx.fillStyle = 'rgba(234,230,255,0.06)'; ctx.fill();
+    ctx.save(); ctx.clip();
+    ctx.strokeStyle = 'rgba(234,230,255,0.3)'; ctx.lineWidth = Math.max(0.6, px * 0.0035);
+    ctx.beginPath();
+    for (let i = -7; i <= 7; i++) {
+      const m1 = P(add(add(head, w, RW * i / 8), u, -RU)), m2 = P(add(add(head, w, RW * i / 8), u, RU));
+      const c1 = P(add(add(head, u, RU * i / 8), w, -RW)), c2 = P(add(add(head, u, RU * i / 8), w, RW));
+      if (!m1.behind && !m2.behind) { ctx.moveTo(m1.x, m1.y); ctx.lineTo(m2.x, m2.y); }
+      if (!c1.behind && !c2.behind) { ctx.moveTo(c1.x, c1.y); ctx.lineTo(c2.x, c2.y); }
+    }
+    ctx.stroke();
+    ctx.restore();
+    // the frame: a dark rim with a neon edge
+    outline();
+    ctx.strokeStyle = '#16142a'; ctx.lineWidth = Math.max(3, px * 0.03); ctx.stroke();
+    ctx.shadowColor = col; ctx.shadowBlur = r.quality ? Math.min(18, px * 0.04) : 0;
+    ctx.strokeStyle = col; ctx.lineWidth = Math.max(1.2, px * 0.011); ctx.stroke();
+    ctx.restore();
+  }
+
   function drawRacketView(ctx, r, g, p) {
     const a = playerAnim(r, g, p, { x: r.W / 2, s: 1 });
     const u = Math.min(r.W, r.H - r.top);
@@ -1083,6 +1297,152 @@
 
     const ctx = r.ctx;
     ctx.setTransform(r.dpr, 0, 0, r.dpr, 0, 0);
+    if (r.vr) drawStereo(ctx, r, g, human, info, land);
+    else drawScene(ctx, r, g, human, info, land);
+    watchFrameRate(r, dt, (performance.now() - now) / 1000);
+  }
+
+  // VR: the left half of the screen for the left eye, the right half for
+  // the right, each from its own eye 64 mm apart.
+  //
+  // Each eye's scene is drawn into its own picture, a little bigger than
+  // the eye (WARP spare all round), and every frame that picture is shown
+  // moved and turned by however far your head has gone since it was drawn.
+  // So the view keeps up with your head every frame even on a phone that
+  // can only draw the scene every other frame: when drawing both eyes takes
+  // longer than VR_SLOW, Auto graphics first steps the quality down; at the
+  // lowest (or a fixed) level the scene is then redrawn every second frame
+  // and only the head-turn shift runs every frame (what VR headsets call
+  // timewarp).
+  const WARP = 0.1;
+  const VR_SLOW = 0.009, VR_FAST = 0.005;   // seconds to draw both eyes: go to half rate above, back to full below
+
+  function eyeBuffer(r, i, w, h) {
+    const bufs = r.eyeBufs || (r.eyeBufs = [0, 1].map(() => { const cv = document.createElement('canvas'); return { cv, ctx: cv.getContext('2d', { alpha: false }) }; }));
+    const b = bufs[i], pw = Math.round(w * r.dpr), ph = Math.round(h * r.dpr);
+    if (b.cv.width !== pw || b.cv.height !== ph) { b.cv.width = pw; b.cv.height = ph; }
+    return b;
+  }
+
+  function drawStereo(ctx, r, g, human, info, land) {
+    const c = r.cam, v = r.vr, eyeW = r.W, eyeH = r.H;
+    const mx = Math.round(eyeW * WARP), my = Math.round(eyeH * WARP), bw = eyeW + 2 * mx, bh = eyeH + 2 * my;
+    const cxOf = (i) => (i ? r.lensX : eyeW - r.lensX);   // under the lens: lensX either side of the screen's middle
+    r.vrOdd = !r.vrOdd;
+    if (!r.eyePose || !r.vrHalf || r.vrOdd) {
+      const t0 = performance.now();
+      const x0 = c.x, y0 = c.y, cy0 = c.cy;
+      r.W = bw; r.H = bh; c.cy = my + eyeH / 2;
+      for (let i = 0; i < 2; i++) {
+        const s = i ? 1 : -1;   // left eye, then right
+        const b = eyeBuffer(r, i, bw, bh);
+        b.ctx.setTransform(r.dpr, 0, 0, r.dpr, 0, 0);
+        c.cx = mx + cxOf(i);
+        c.x = x0 + c.R.x * s * IPD / 2; c.y = y0 + c.R.y * s * IPD / 2;
+        drawScene(b.ctx, r, g, human, info, land);
+      }
+      r.W = eyeW; r.H = eyeH; c.cy = cy0; c.x = x0; c.y = y0;
+      r.eyePose = { yaw: v.yaw, pitch: v.pitch };
+      r.vrWork.push((performance.now() - t0) / 1000);
+      if (r.vrWork.length >= 30) {
+        const work = r.vrWork.reduce((a, w) => a + w, 0) / r.vrWork.length;
+        r.vrWork.length = 0;
+        if (work > VR_SLOW && v.gfx === 'auto' && r.quality > 0 && !r.vrHalf) { r.quality--; resize(r, ...r.args); }
+        else if (work > VR_SLOW) r.vrHalf = true;
+        else if (work < VR_FAST) r.vrHalf = false;
+      }
+    }
+    // turning right moves the picture left; looking up moves it down
+    const dYaw = angleDiff(v.yaw, r.eyePose.yaw), dPitch = v.pitch - r.eyePose.pitch;
+    const sx = -c.f * Math.tan(dYaw), sy = c.f * Math.tan(dPitch);
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, eyeW * 2, eyeH);
+    for (let i = 0; i < 2; i++) {
+      ctx.save();
+      ctx.translate(i * eyeW, 0);
+      ctx.beginPath(); ctx.rect(0, 0, eyeW, eyeH); ctx.clip();
+      c.cx = cxOf(i);
+      ctx.save();
+      // tilting your head turns the picture the other way
+      if (v.roll) { ctx.translate(c.cx, c.cy); ctx.rotate(v.roll); ctx.translate(-c.cx, -c.cy); }
+      ctx.drawImage(r.eyeBufs[i].cv, sx - mx, sy - my, bw, bh);
+      ctx.restore();
+      drawHeadUp(ctx, r, g, human, info);
+      ctx.restore();
+    }
+    // a white line down the middle, to line up with the headset's divider
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.fillRect(eyeW - 1, 0, 2, eyeH);
+    c.cx = eyeW / 2;
+  }
+
+  // VR's marks that stay with your head, drawn fresh every frame: an arrow
+  // to a ball on its way that you can't see, a ring in the middle of each
+  // eye filling up while you hold the button (full: a power shot), and any
+  // message.
+  function drawHeadUp(ctx, r, g, human, info) {
+    const v = r.vr, c = r.cam;
+    // an arrow at the edge points to a ball on its way that you can't see
+    const hit = CT.VR.timeToHit(g, human, info);
+    if (hit && hit.t < 0.9 && hit.t > -0.15) {
+      ctx.save();
+      const b = g.ball, bv = toCam(c, b.pos.x, b.pos.y, b.pos.z);
+      const p = bv.z > NEAR ? fromCamToScreen(c, bv) : null;
+      const m = 24;
+      if (b.active && (!p || p.x < m || p.x > r.W - m || p.y < m || p.y > r.H - m)) {
+        const a = Math.atan2(-bv.y, bv.x || 1e-6), d = Math.min(r.W, r.H) * 0.36;
+        const x = c.cx + Math.cos(a) * d, y = c.cy + Math.sin(a) * d;
+        ctx.fillStyle = PAL.ball;
+        ctx.translate(x, y); ctx.rotate(a);
+        ctx.beginPath(); ctx.moveTo(10, 0); ctx.lineTo(-6, -8); ctx.lineTo(-2, 0); ctx.lineTo(-6, 8); ctx.closePath(); ctx.fill();
+      }
+      ctx.restore();
+    }
+    ctx.save();
+    if (v.charge > 0) {
+      ctx.strokeStyle = v.charge >= 1 ? PAL.net : PAL.ball; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(c.cx, c.cy, 9, -Math.PI / 2, -Math.PI / 2 + v.charge * Math.PI * 2); ctx.stroke();
+    }
+    // the pause menu: choices fixed around you, the one you face lit up
+    if (v.menu) {
+      const u = Math.min(r.W, r.H);
+      ctx.textAlign = 'center';
+      for (const it of v.menu.items) {
+        const x = c.cx + c.f * Math.tan(CT.clamp(it.yaw - v.yaw, -1.2, 1.2)), y = c.cy + u * 0.03;
+        const on = it.id === v.menu.sel;
+        ctx.font = `900 ${Math.round(u * (on ? 0.06 : 0.048))}px Tektur, sans-serif`;
+        const w = ctx.measureText(it.label).width + u * 0.06, h = u * 0.11;
+        ctx.fillStyle = on ? 'rgba(255,63,180,0.25)' : 'rgba(10,8,30,0.7)';
+        ctx.strokeStyle = on ? PAL.net : 'rgba(157,149,201,0.6)'; ctx.lineWidth = on ? 2 : 1;
+        ctx.beginPath(); ctx.rect(x - w / 2, y - h * 0.68, w, h); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = on ? '#ffffff' : '#9d95c9';
+        ctx.fillText(it.label, x, y);
+      }
+    }
+    if (v.prompt) {
+      const u = Math.min(r.W, r.H);
+      ctx.textAlign = 'center';
+      ctx.shadowColor = PAL.guide; ctx.shadowBlur = 12;
+      ctx.fillStyle = '#eae6ff';
+      // shrunk to fit the eye, and kept inside it (a phone held upright has narrow eyes)
+      const line = (text, weight, size, y) => {
+        ctx.font = `${weight} ${Math.round(size)}px ${weight > 500 ? 'Tektur' : '"Chakra Petch"'}, sans-serif`;
+        const w = ctx.measureText(text).width, k = Math.min(1, (r.W * 0.9) / w);
+        if (k < 1) ctx.font = `${weight} ${Math.floor(size * k)}px ${weight > 500 ? 'Tektur' : '"Chakra Petch"'}, sans-serif`;
+        const half = (w * k) / 2 + 4;
+        ctx.fillText(text, CT.clamp(c.cx, half, r.W - half), y);
+      };
+      line(v.prompt, 900, u * 0.075, c.cy - u * 0.12);
+      if (v.sub) {
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = '#9d95c9';
+        line(v.sub, 500, u * 0.045, c.cy + u * 0.16);
+      }
+    }
+    ctx.restore();
+  }
+
+  function drawScene(ctx, r, g, human, info, land) {
     drawSky(ctx, r);
     drawBillboard(ctx, r);
     drawLot(ctx, r);
@@ -1101,6 +1461,10 @@
     const items = [];
     for (const car of CARS) items.push({ d: depth(car.x, car.y), draw: () => drawCar(ctx, r, car) });
     for (const lamp of LAMPS) items.push({ d: depth(lamp[0], lamp[1]), draw: () => drawLamp(ctx, r, lamp) });
+    if (r.vr) {
+      const me = g.players[human], head = racketHead(r, g, me);
+      items.push({ d: depth(head.x, head.y), draw: () => drawRacketWorld(ctx, r, g, me, head) });
+    }
     for (const p of g.players) {
       if (r.view === 'first' && p.side === human) continue;   // you are the camera
       items.push({ d: depth(p.x, p.y), draw: () => drawPlayer(ctx, r, g, p) });
@@ -1109,13 +1473,16 @@
     if (g.ball.active) items.push({ d: depth(g.ball.pos.x, g.ball.pos.y) - 0.01, draw: () => drawBall(ctx, r, g) });
     items.sort((a, b) => b.d - a.d);
     for (const it of items) it.draw();
-    if (r.view === 'first') { drawRacketView(ctx, r, g, g.players[human]); if (!r.zen) drawTimingRing(ctx, r, g, info); }
-    watchFrameRate(r, dt, (performance.now() - now) / 1000);
+    if (r.view === 'first') {
+      if (!r.vr) drawRacketView(ctx, r, g, g.players[human]);
+      if (!r.zen) drawTimingRing(ctx, r, g, info);
+    }
   }
 
   CT.createRenderer = createRenderer;
   CT.resizeRenderer = resize;
   CT.setView = setView;
+  CT.setVR = setVR;
   CT.renderGame = render;
   CT.showBillboard = showBillboard;
   CT.showLineCall = showLineCall;

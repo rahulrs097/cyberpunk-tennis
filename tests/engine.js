@@ -18,14 +18,15 @@ function seeded(seed) {
   };
 }
 
-// globals: extra globals for the sandbox (a fake localStorage, say)
-function loadEngine(seed = 1, globals = {}) {
+// globals: extra globals for the sandbox (a fake localStorage, say);
+// extra: more js/ files to load after the engine (vr.js, say)
+function loadEngine(seed = 1, globals = {}, extra = []) {
   const math = Object.create(Math);
   math.random = seeded(seed);
   const sandbox = { Math: math, console, ...globals };
   sandbox.window = sandbox;
   vm.createContext(sandbox);
-  for (const f of FILES) {
+  for (const f of [...FILES, ...extra]) {
     const src = fs.readFileSync(path.join(__dirname, '..', 'js', f), 'utf8');
     vm.runInContext(src, sandbox, { filename: f });
   }
