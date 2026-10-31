@@ -1364,7 +1364,8 @@
   }
 
   // ---------------- achievements screen ----------------
-  // Only unlocked achievements are listed; locked ones stay hidden.
+  // Unlocked achievements come first; locked ones follow, greyed out, with
+  // how to earn them.
   const STAT_ROWS = [['Matches', (s) => s.played], ['Won', (s) => s.won + (s.played ? ' (' + Math.round(100 * s.won / s.played) + '%)' : '')],
     ['Win streak', (s) => s.streak], ['Best streak', (s) => s.bestStreak], ['Games won', (s) => s.games], ['Points won', (s) => s.points],
     ['Aces', (s) => s.aces], ['Double faults', (s) => s.doubleFaults], ['Longest rally', (s) => s.longestRally ? s.longestRally + ' shots' : '–'],
@@ -1372,14 +1373,17 @@
   let statMode = 'all';
   function showTrophies() {
     const got = CT.ACHIEVEMENTS.filter((a) => ach.earned[a.id]);
+    const locked = CT.ACHIEVEMENTS.filter((a) => !ach.earned[a.id]);
     const list = $('achList');
     list.textContent = '';
-    for (const a of got) {
+    for (const a of [...got, ...locked]) {
+      const e = ach.earned[a.id];
       const li = document.createElement('li');
+      if (!e) li.className = 'locked';
       const nm = document.createElement('b'); nm.textContent = a.name;
       if (a.pro) { const t = document.createElement('i'); t.textContent = 'Pro'; nm.append(' ', t); }
       const ds = document.createElement('span'); ds.textContent = a.desc;
-      const n = document.createElement('em'); n.textContent = '×' + ach.earned[a.id].n;
+      const n = document.createElement('em'); n.textContent = e ? '×' + e.n : 'Locked';
       li.append(nm, n, ds);
       list.append(li);
     }
