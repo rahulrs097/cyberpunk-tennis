@@ -19,6 +19,7 @@ which only adds the doctype and viewport tags the artifact host normally supplie
 | `js/main.js` | Touch input, HUD, sound effects (realistic hits and bounces in zen mode), frame loop, tutorial lessons |
 | `js/music.js` | Synthesised music: the chiptune match track, and zen mode's slow ambient track |
 | `js/net.js`, `server/relay.js` | Online link: the Cloudflare Worker relay (one Durable Object per room code), its client, and the lag meter |
+| `sw.js`, `manifest.webmanifest`, `icons/` | The installable app: the service worker keeps the CPU game, tutorial and VR playable offline (online matches still need the network). It asks the network first for every file and only falls back to its cache when offline, so a new build loads as soon as there's a connection. Add any new file the page loads to `SHELL` in `sw.js` (a test checks). `icons/icon.svg` is the source; the PNGs are rendered from it |
 | `tests/` | Engine and relay tests (`npm test`) and the balance simulation (`npm run sim`) |
 
 ## How the spec maps to the code
