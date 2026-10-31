@@ -1,9 +1,20 @@
 {
+  "id": "./",
   "name": "Cyberpunk Tennis",
   "short_name": "CT Tennis",
-  "start_url": ".",
+  "description": "Neon tennis on a rooftop parking lot. Swipe to hit, tap to move. Play the CPU offline or a friend online.",
+  "start_url": "./",
+  "scope": "./",
   "display": "fullscreen",
+  "display_override": ["fullscreen", "standalone"],
   "orientation": "portrait",
   "background_color": "#05040c",
-  "theme_color": "#05040c"
+  "theme_color": "#05040c",
+  "categories": ["games", "sports"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
 }

@@ -22,7 +22,10 @@
   // Full screen during matches, where the browser supports it for pages
   // (iPhones don't). On iPads Safari can stop a match with a "typing while
   // in full screen" warning; players can switch it off there.
-  const canFull = !!(document.documentElement.requestFullscreen || document.documentElement.webkitRequestFullscreen);
+  // Installed to the home screen, the game already opens full screen, so the
+  // setting goes and only the screen's turn (landscape for VR) is managed.
+  const installed = (() => { try { return navigator.standalone === true || matchMedia('(display-mode: fullscreen), (display-mode: standalone)').matches; } catch (e) { return false; } })();
+  const canFull = !installed && !!(document.documentElement.requestFullscreen || document.documentElement.webkitRequestFullscreen);
   let fullOn = canFull;
   try { const v = localStorage.getItem('ct.full'); if (v !== null) fullOn = canFull && v === '1'; } catch (e) { /* storage is optional */ }
   // Zen mode: no HUD but the pause button, no guides; the score is on the billboard
@@ -1112,6 +1115,7 @@
   function goFullscreen(orient) {
     const lock = () => { try { screen.orientation.lock(orient || 'portrait').catch(() => {}); } catch (e) { /* optional */ } };
     const el = document.documentElement;
+    if (installed) { lock(); return; }
     if (!fullOn) return;
     if (document.fullscreenElement || document.webkitFullscreenElement) { lock(); return; }
     const req = el.requestFullscreen || el.webkitRequestFullscreen;
@@ -1123,6 +1127,8 @@
   }
 
   function leaveFullscreen() {
+    // installed, the app's own way up (portrait) comes back
+    if (installed) { try { screen.orientation.unlock(); } catch (e) { /* optional */ } return; }
     try {
       if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {});
       else if (document.webkitFullscreenElement && document.webkitExitFullscreen) document.webkitExitFullscreen();
@@ -1271,6 +1277,33 @@
     pb.textContent = on ? 'Full screen on' : 'Full screen off';
   }
 
+  // The game as an app: a service worker keeps it playable offline (sw.js),
+  // and the menu offers Install app. Android's browser hands over its own
+  // install prompt; iPhones and iPads install from Share, so the button
+  // says how. Once installed, the button goes.
+  function setupInstall() {
+    if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
+      navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(() => { /* plays fine without it */ });
+    }
+    const btn = $('installBtn'), hint = $('installHint');
+    if (!btn || installed) return;
+    let prompt = null;
+    const apple = /iPhone|iPad|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+    btn.hidden = !apple;
+    window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); prompt = e; btn.hidden = false; });
+    window.addEventListener('appinstalled', () => { prompt = null; btn.hidden = hint.hidden = true; });
+    btn.addEventListener('click', () => {
+      if (prompt) {
+        // a prompt works once; the browser offers a fresh one later if declined
+        prompt.prompt().catch(() => {});
+        prompt = null;
+        btn.hidden = true;
+      } else {
+        hint.hidden = !hint.hidden;
+      }
+    });
+  }
+
   function setFull(on) {
     fullOn = on;
     try { localStorage.setItem('ct.full', on ? '1' : '0'); } catch (e) { /* storage is optional */ }
@@ -1401,6 +1434,7 @@
     document.addEventListener('fullscreenchange', onFullChange);
     document.addEventListener('webkitfullscreenchange', onFullChange);
     $('fullBtn').hidden = $('fullPause').hidden = !canFull;
+    setupInstall();
     $('play').addEventListener('click', () => { ensureAudio(); startMatch(); });
     $('resumeMatch').addEventListener('click', () => { ensureAudio(); resumeMatch(); });
     $('rematch').addEventListener('click', startMatch);
