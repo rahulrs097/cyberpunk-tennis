@@ -272,12 +272,13 @@
   }
 
   // Turn VR on (settings { fov, lens }) or off (null). Two views cost about
-  // twice as much to draw, so VR starts no higher than the middle quality
-  // level. Call resizeRenderer after.
+  // twice as much to draw, and a slow frame in a headset hurts, so VR plays
+  // at the lowest quality level (no glow blur). Call resizeRenderer after.
   function setVR(r, opts) {
     if (opts && !r.vr) {
       r.qualityWas = r.quality;
-      r.quality = Math.min(r.quality, 1);
+      r.quality = 0;
+      r.vrHalf = false; r.vrWork = [];
       r.vr = { yaw: 0, pitch: 0, roll: 0, aim: null, charge: 0, prompt: '', sub: '', ...opts };
     } else if (opts) Object.assign(r.vr, opts);
     else if (r.vr) { r.vr = null; r.quality = Math.max(r.quality, r.qualityWas || 0); }
@@ -326,7 +327,7 @@
   // that only shows 30 frames a second but draws each one quickly (an
   // iPhone in Low Power Mode) keeps the full look.
   function watchFrameRate(r, dt, work) {
-    if (!dt || dt >= 0.1 || r.quality === 0) return;   // skip pauses and tab switches
+    if (!dt || dt >= 0.1 || r.quality === 0 || r.vr) return;   // skip pauses and tab switches
     r.frames.push([dt, work]);
     if (r.frames.length < 90) return;
     const avg = (i) => r.frames.reduce((a, f) => a + f[i], 0) / r.frames.length;
@@ -442,17 +443,14 @@
 
   function drawSky(ctx, r) {
     const c = r.cam;
-    // in VR the picture turns as you tilt your head: paint past the edges
-    const pad = r.vr ? r.W * 0.5 : 0;
     const horizon = c.cy + c.f * Math.tan(c.pitch);   // screen y of the horizon
     const oy = horizon - r.skyHz;
-    if (oy > -pad) { ctx.fillStyle = '#02030a'; ctx.fillRect(-pad, -pad, r.W + 2 * pad, oy + 1 + pad); }
-    if (oy + r.skyH < r.H + pad) { ctx.fillStyle = '#15161e'; ctx.fillRect(-pad, oy + r.skyH - 1, r.W + 2 * pad, r.H + 2 * pad); }
-    // (the sky is far away, so both eyes see it at the same place around their centre)
+    if (oy > 0) { ctx.fillStyle = '#02030a'; ctx.fillRect(0, 0, r.W, oy + 1); }
+    if (oy + r.skyH < r.H) { ctx.fillStyle = '#15161e'; ctx.fillRect(0, oy + r.skyH - 1, r.W, r.H); }
+    // (the sky is far away, so in VR both eyes see it at the same place around their centre)
     const sw = r.skyW, pan = -c.yaw * c.f + c.cx - r.W / 2;
     let ox = ((pan - r.W) % sw + sw) % sw - sw;
-    while (ox > -pad) ox -= sw;
-    for (; ox < r.W + pad; ox += sw) ctx.drawImage(r.sky, ox, oy, sw, r.skyH);
+    for (; ox < r.W; ox += sw) ctx.drawImage(r.sky, ox, oy, sw, r.skyH);
   }
 
   // ---------------- sky billboard ----------------
@@ -1142,29 +1140,97 @@
   }
 
   // VR: the left half of the screen for the left eye, the right half for
-  // the right, each from its own eye 64 mm apart, turned with your head's tilt.
+  // the right, each from its own eye 64 mm apart.
+  //
+  // Each eye's scene is drawn into its own picture, a little bigger than
+  // the eye (WARP spare all round), and every frame that picture is shown
+  // moved and turned by however far your head has gone since it was drawn.
+  // So the view keeps up with your head every frame even on a phone that
+  // can only draw the scene every other frame: when drawing both eyes takes
+  // longer than VR_SLOW, the scene is redrawn every second frame and only
+  // the head-turn shift runs every frame (what VR headsets call timewarp).
+  const WARP = 0.1;
+  const VR_SLOW = 0.009, VR_FAST = 0.005;   // seconds to draw both eyes: go to half rate above, back to full below
+
+  function eyeBuffer(r, i, w, h) {
+    const bufs = r.eyeBufs || (r.eyeBufs = [0, 1].map(() => { const cv = document.createElement('canvas'); return { cv, ctx: cv.getContext('2d', { alpha: false }) }; }));
+    const b = bufs[i], pw = Math.round(w * r.dpr), ph = Math.round(h * r.dpr);
+    if (b.cv.width !== pw || b.cv.height !== ph) { b.cv.width = pw; b.cv.height = ph; }
+    return b;
+  }
+
   function drawStereo(ctx, r, g, human, info, land) {
-    const c = r.cam, v = r.vr, x0 = c.x, y0 = c.y;
+    const c = r.cam, v = r.vr, eyeW = r.W, eyeH = r.H;
+    const mx = Math.round(eyeW * WARP), my = Math.round(eyeH * WARP), bw = eyeW + 2 * mx, bh = eyeH + 2 * my;
+    const cxOf = (i) => (i ? r.lensX : eyeW - r.lensX);   // under the lens: lensX either side of the screen's middle
+    r.vrOdd = !r.vrOdd;
+    if (!r.eyePose || !r.vrHalf || r.vrOdd) {
+      const t0 = performance.now();
+      const x0 = c.x, y0 = c.y, cy0 = c.cy;
+      r.W = bw; r.H = bh; c.cy = my + eyeH / 2;
+      for (let i = 0; i < 2; i++) {
+        const s = i ? 1 : -1;   // left eye, then right
+        const b = eyeBuffer(r, i, bw, bh);
+        b.ctx.setTransform(r.dpr, 0, 0, r.dpr, 0, 0);
+        c.cx = mx + cxOf(i);
+        c.x = x0 + c.R.x * s * IPD / 2; c.y = y0 + c.R.y * s * IPD / 2;
+        drawScene(b.ctx, r, g, human, info, land);
+        drawAim(b.ctx, r);
+      }
+      r.W = eyeW; r.H = eyeH; c.cy = cy0; c.x = x0; c.y = y0;
+      r.eyePose = { yaw: v.yaw, pitch: v.pitch };
+      r.vrWork.push((performance.now() - t0) / 1000);
+      if (r.vrWork.length >= 30) {
+        const work = r.vrWork.reduce((a, w) => a + w, 0) / r.vrWork.length;
+        r.vrWork.length = 0;
+        if (work > VR_SLOW) r.vrHalf = true; else if (work < VR_FAST) r.vrHalf = false;
+      }
+    }
+    // turning right moves the picture left; looking up moves it down
+    const dYaw = angleDiff(v.yaw, r.eyePose.yaw), dPitch = v.pitch - r.eyePose.pitch;
+    const sx = -c.f * Math.tan(dYaw), sy = c.f * Math.tan(dPitch);
     ctx.fillStyle = '#000';
-    ctx.fillRect(0, 0, r.W * 2, r.H);
+    ctx.fillRect(0, 0, eyeW * 2, eyeH);
     for (let i = 0; i < 2; i++) {
-      const s = i ? 1 : -1;   // left eye, then right
       ctx.save();
-      ctx.translate(i * r.W, 0);
-      ctx.beginPath(); ctx.rect(0, 0, r.W, r.H); ctx.clip();
-      c.cx = i ? r.lensX : r.W - r.lensX;   // under the lens: lensX either side of the screen's middle
-      c.x = x0 + c.R.x * s * IPD / 2; c.y = y0 + c.R.y * s * IPD / 2;
+      ctx.translate(i * eyeW, 0);
+      ctx.beginPath(); ctx.rect(0, 0, eyeW, eyeH); ctx.clip();
+      c.cx = cxOf(i);
+      ctx.save();
+      // tilting your head turns the picture the other way
       if (v.roll) { ctx.translate(c.cx, c.cy); ctx.rotate(v.roll); ctx.translate(-c.cx, -c.cy); }
-      drawScene(ctx, r, g, human, info, land);
+      ctx.drawImage(r.eyeBufs[i].cv, sx - mx, sy - my, bw, bh);
+      ctx.restore();
       drawHeadUp(ctx, r, g, human, info);
       ctx.restore();
     }
-    c.x = x0; c.y = y0; c.cx = r.W / 2;
+    c.cx = eyeW / 2;
   }
 
-  // VR's own marks: the target you're looking at on the far court, the
-  // gaze dot in the middle of each eye (filling up as you hold the button)
-  // and any message, drawn into both eyes.
+  // The target you're looking at on the far court: a ring on the ground
+  // (pink for a drop shot), with a chevron standing over it for a lob.
+  function drawAim(ctx, r) {
+    const A = r.vr.aim;
+    if (!A) return;
+    const col = A.kind === 'drop' ? PAL.net : A.kind === 'lob' ? PAL.ball : PAL.guide;
+    ctx.save();
+    ctx.strokeStyle = col; ctx.lineWidth = 2;
+    if (groundEllipse(ctx, r, A.x, A.y, 0.45)) ctx.stroke();
+    ctx.globalAlpha = 0.5;
+    if (groundEllipse(ctx, r, A.x, A.y, 0.15)) ctx.stroke();
+    if (A.kind === 'lob') {
+      const a = proj(r, A.x - 0.5, A.y, 1.2), b = proj(r, A.x, A.y, 1.8), d = proj(r, A.x + 0.5, A.y, 1.2);
+      if (!a.behind && !b.behind && !d.behind) {
+        ctx.globalAlpha = 1;
+        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.lineTo(d.x, d.y); ctx.stroke();
+      }
+    }
+    ctx.restore();
+  }
+
+  // VR's marks that stay with your head, drawn fresh every frame: the gaze
+  // dot in the middle of each eye (filling up as you hold the button), the
+  // timing ring round it, an arrow to an unseen ball, and any message.
   function drawHeadUp(ctx, r, g, human, info) {
     const v = r.vr, c = r.cam;
     // the timing ring closes round the middle of your view wherever you're
@@ -1187,24 +1253,6 @@
         ctx.fillStyle = PAL.ball;
         ctx.translate(x, y); ctx.rotate(a);
         ctx.beginPath(); ctx.moveTo(10, 0); ctx.lineTo(-6, -8); ctx.lineTo(-2, 0); ctx.lineTo(-6, 8); ctx.closePath(); ctx.fill();
-      }
-      ctx.restore();
-    }
-    if (v.aim) {
-      const A = v.aim;
-      const col = A.kind === 'drop' ? PAL.net : A.kind === 'lob' ? PAL.ball : PAL.guide;
-      ctx.save();
-      ctx.strokeStyle = col; ctx.lineWidth = 2;
-      if (groundEllipse(ctx, r, A.x, A.y, 0.45)) ctx.stroke();
-      ctx.globalAlpha = 0.5;
-      if (groundEllipse(ctx, r, A.x, A.y, 0.15)) ctx.stroke();
-      if (A.kind === 'lob') {
-        // a chevron standing over the target: up and over
-        const a = proj(r, A.x - 0.5, A.y, 1.2), b = proj(r, A.x, A.y, 1.8), d = proj(r, A.x + 0.5, A.y, 1.2);
-        if (!a.behind && !b.behind && !d.behind) {
-          ctx.globalAlpha = 1;
-          ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.lineTo(d.x, d.y); ctx.stroke();
-        }
       }
       ctx.restore();
     }
@@ -1267,7 +1315,8 @@
     for (const it of items) it.draw();
     if (r.view === 'first') {
       if (!r.vr) drawRacketView(ctx, r, g, g.players[human]);
-      if (!r.zen) drawTimingRing(ctx, r, g, info);
+      // (in VR the ring goes round the middle of your view instead: drawHeadUp)
+      if (!r.zen && !r.vr) drawTimingRing(ctx, r, g, info);
     }
   }
 
