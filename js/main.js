@@ -35,6 +35,13 @@
   // match in progress (none in the tutorial)
   const ach = CT.loadAchievements();
   let tracker = null;
+  // A match vs the CPU is saved after every point (localStorage 'ct.saved':
+  // the players, level, score, legs and achievement progress), so leaving
+  // the page or reloading it leaves a Resume button on the menu. It carries
+  // on from the next point. Online matches and the tutorial aren't saved.
+  const SAVE_KEY = 'ct.saved';
+  let canSave = false;     // the match in progress is one that's saved
+  let savedLevel = level;  // its CPU level (a resumed match keeps its own)
   let lastFrame = performance.now();
   const FRAME_MS = 1000 / 60;
   let frameDue = 0;
@@ -152,6 +159,88 @@
     } catch (e) { /* audio is optional */ }
   }
 
+  // Zen mode swaps the chiptune blips for sounds closer to a real court: a
+  // noise burst through filters for the strings, a sine thump for the body,
+  // and soft chimes for points.
+  // Sounds from the far end are quieter and duller. dist is 0 at your
+  // baseline and 1 at the far one.
+  let sfxNoise = null;
+  function noisy(t, dur, vol, type, f, q, dest) {
+    if (!sfxNoise) {
+      const len = audio.sampleRate * 0.5;
+      sfxNoise = audio.createBuffer(1, len, audio.sampleRate);
+      const d = sfxNoise.getChannelData(0);
+      let s = 4242;
+      for (let i = 0; i < len; i++) { s = (s * 1103515245 + 12345) & 0x7fffffff; d[i] = (s / 0x7fffffff) * 2 - 1; }
+    }
+    const src = audio.createBufferSource(), fl = audio.createBiquadFilter(), gn = audio.createGain();
+    src.buffer = sfxNoise;
+    fl.type = type; fl.frequency.value = f; fl.Q.value = q;
+    gn.gain.setValueAtTime(vol * SFX_GAIN, t);
+    gn.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    src.connect(fl).connect(gn).connect(dest);
+    src.start(t); src.stop(t + dur + 0.02);
+  }
+  function thump(t, f0, f1, dur, vol, dest) {
+    const o = audio.createOscillator(), gn = audio.createGain();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(f0, t);
+    o.frequency.exponentialRampToValueAtTime(f1, t + dur);
+    gn.gain.setValueAtTime(vol * SFX_GAIN, t);
+    gn.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(gn).connect(dest);
+    o.start(t); o.stop(t + dur + 0.02);
+  }
+  // a lowpass for distance, feeding the limiter
+  function distBus(t, dist) {
+    const lp = audio.createBiquadFilter();
+    lp.type = 'lowpass'; lp.frequency.value = 7500 - dist * 4500;
+    lp.connect(master);
+    return lp;
+  }
+  function distFrom(y) {
+    const base = me === 0 ? -CT.COURT.HL : CT.COURT.HL;
+    return Math.min(1, Math.abs(y - base) / (2 * CT.COURT.HL));
+  }
+  function realSfx(kind, d) {
+    if (!audio || muted) return;
+    try {
+      const t = audio.currentTime;
+      if (kind === 'hit') {
+        // the striker's end; faster swings crack brighter and louder
+        const dist = d.side === me ? 0 : 1;
+        const pace = Math.max(0, Math.min(1, ((d.kmh || 90) - 60) / 120));
+        const v = (1 - dist * 0.55) * (0.6 + pace * 0.5);
+        const bus = distBus(t, dist);
+        noisy(t, 0.035 + pace * 0.02, 0.11 * v, 'bandpass', 1500 + pace * 900, 1.2, bus);   // string crack
+        noisy(t, 0.012, 0.08 * v, 'highpass', 4000, 0.7, bus);                                // the first click
+        thump(t, 320 + pace * 120, 150, 0.06, 0.09 * v, bus);                                 // ball and frame
+        if (d.perfect) thump(t, 1150, 1100, 0.09, 0.012 * v, bus);                           // sweet-spot ring
+      } else if (kind === 'bounce') {
+        const dist = distFrom(d.y);
+        const v = 1 - dist * 0.6;
+        const bus = distBus(t, dist);
+        noisy(t, 0.03, 0.06 * v, 'lowpass', 1400, 0.8, bus);
+        thump(t, 170, 90, 0.05, 0.08 * v, bus);
+      } else if (kind === 'net') {
+        noisy(t, 0.16, 0.05, 'lowpass', 700, 0.7, master);
+        thump(t, 110, 60, 0.12, 0.06, master);
+      } else if (kind === 'fault') {
+        thump(t, 330, 300, 0.35, 0.03, master);
+      } else if (kind === 'won') {
+        // a soft rising chime in the zen track's key, ringing longer for a
+        // game or the set
+        const big = d.result === 'set' ? 2 : d.result === 'game' ? 1 : 0;
+        thump(t, 440, 440, 0.6, 0.02, master);
+        thump(t + 0.14, 659, 659, 0.8 + big * 0.4, 0.018, master);
+      } else if (kind === 'lost') {
+        // a quiet falling tone, nothing more
+        thump(t, 330, 330, 0.5, 0.018, master);
+        thump(t + 0.16, 262, 250, 0.7, 0.016, master);
+      }
+    } catch (e) { /* audio is optional */ }
+  }
+
   // ---------------- HUD ----------------
   function showMsg(text, sub, tone) {
     const el = $('msg');
@@ -226,6 +315,7 @@
     const on = zenOn();
     document.body.classList.toggle('zen', boardScore());
     CT.setZen(renderer, on);
+    CT.Music.setTrack(on ? 'zen' : 'match');
     if (!boardScore()) CT.showScore(renderer, null);
     if (game) layout();
   }
@@ -274,11 +364,12 @@
   function onEvent(type, d) {
     const names = game ? game.players.map((p) => p.ch.name) : ['', ''];
     track(type, d);
+    if (type === 'point' && canSave) saveMatch();
     if (type === 'hit') {
       lineCallShown = false;
       rallyShots = d.kind === 'serve' ? 1 : rallyShots + 1;
       if (!tut && (rallyShots === LONG_RALLY || (d.perfect && d.side === me && /power|overhead/i.test(d.kind)))) CT.showBillboard(renderer, 'WOW', '#ff3fb4', 1.8);
-      blip(d.kind === 'overhead' || d.kind === 'serve' ? 220 : 330, 0.07, 'square', 0.09, 140);
+      if (zenOn()) realSfx('hit', d); else blip(d.kind === 'overhead' || d.kind === 'serve' ? 220 : 330, 0.07, 'square', 0.09, 140);
       if (d.side === me) {
         const kind = { fh: 'Forehand', bh: 'Backhand' }[d.wing];
         const label = d.kind === 'serve' ? 'Serve' : d.kind === 'overhead' ? 'Overhead' : d.kind === 'volley' ? kind + ' volley' : d.kind === 'power' ? 'Power ' + kind.toLowerCase() : d.kind === 'powerVolley' ? 'Power ' + kind.toLowerCase() + ' volley' : kind;
@@ -290,20 +381,20 @@
       }
       hintForState();
     } else if (type === 'bounce') {
-      blip(120, 0.05, 'sine', 0.07);
+      if (zenOn()) realSfx('bounce', d); else blip(120, 0.05, 'sine', 0.07);
       if (net && net.role === 'guest') game.marks.push({ x: d.x, y: d.y, age: 0 });
     } else if (type === 'lineCall') {
       if (d.m > CLOSE_OUT || d.m < -CLOSE_IN) return;
       CT.showLineCall(renderer, d, 3);
       lineCallShown = true;
     } else if (type === 'net') {
-      blip(90, 0.12, 'sawtooth', 0.05);
+      if (zenOn()) realSfx('net', d); else blip(90, 0.12, 'sawtooth', 0.05);
     } else if (type === 'whiff') {
       if (d.side === me) showShot(d.reason);
     } else if (type === 'fault') {
       if (boardScore()) CT.showBillboard(renderer, d.text === 'Net' || d.text === 'Serve clock' ? d.text.toUpperCase() : 'FAULT', '#ffc23d', 1.6);
       showMsg(d.text === 'Net' || d.text === 'Serve clock' ? d.text : 'Fault', 'Second serve', 'warn');
-      blip(160, 0.2, 'sawtooth', 0.05, 90);
+      if (zenOn()) realSfx('fault', d); else blip(160, 0.2, 'sawtooth', 0.05, 90);
     } else if (type === 'point') {
       if (tut) { onDrill({ ok: d.winner === me, text: d.winner === me ? 'Point' : d.text }); updateHud(); return; }
       const youWon = d.winner === me;
@@ -313,7 +404,7 @@
       showMsg(d.text, sub, youWon ? 'good' : 'bad');
       const word = BOARD_WORDS[d.text];
       if (word && !lineCallShown) CT.showBillboard(renderer, word[0], word[1], 2.6);
-      blip(youWon ? 520 : 200, 0.25, 'triangle', 0.08, youWon ? 780 : 120);
+      if (zenOn()) realSfx(youWon ? 'won' : 'lost', d); else blip(youWon ? 520 : 200, 0.25, 'triangle', 0.08, youWon ? 780 : 120);
       updateHud();
     } else if (type === 'serveReady') {
       lineCallShown = false;
@@ -326,6 +417,45 @@
     } else if (type === 'drill') {
       if (tut) onDrill(d);
     }
+  }
+
+  function saveMatch() {
+    if (game.match.over) { clearSaved(); return; }
+    const s = { p0: game.players[0].ch.id, p1: game.players[1].ch.id, level: savedLevel,
+      game: CT.saveGameState(game), tracker: tracker && tracker.state() };
+    try { localStorage.setItem(SAVE_KEY, JSON.stringify(s)); } catch (e) { /* storage is optional */ }
+  }
+  function clearSaved() {
+    try { localStorage.removeItem(SAVE_KEY); } catch (e) { /* storage is optional */ }
+  }
+  function loadSaved() {
+    try {
+      const s = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null');
+      const m = s && s.game && s.game.match;
+      if (m && !m.over && CT.CHARACTERS[s.p0] && CT.CHARACTERS[s.p1] && CT.CPU_LEVELS[s.level]
+        && Array.isArray(m.games) && Array.isArray(m.points) && Array.isArray(s.game.stamina)) return s;
+    } catch (e) { /* storage is optional */ }
+    return null;
+  }
+  // the Resume button on the menu, with the score of the saved match
+  function showSaved() {
+    const s = loadSaved(), btn = $('resumeMatch');
+    btn.hidden = !s;
+    $('play').classList.toggle('primary', !s);
+    if (!s) return;
+    const m = s.game.match, name = (id) => CT.CHARACTERS[id].name;
+    const pts = m.tiebreak ? m.points.join('–') : m.points[0] + m.points[1] ? CT.pointLabel(m, 0) + '–' + CT.pointLabel(m, 1) : '';
+    $('resumeScore').textContent = [`${name(s.p0)} ${m.games[0]}–${m.games[1]} ${name(s.p1)}`, pts, s.level[0].toUpperCase() + s.level.slice(1)].filter(Boolean).join(' · ');
+  }
+  function resumeMatch() {
+    const s = loadSaved();
+    if (!s) { showSaved(); return; }
+    me = 0;
+    tut = null;
+    savedLevel = s.level;
+    canSave = true;
+    beginMatch({ p0: s.p0, p1: s.p1, control: ['human', 'cpu'], autoMove: [autoMove, false], ...CT.levelOpts(s.level),
+      resume: s.game, trackerState: s.tracker, mode: s.level });
   }
 
   function endMatch(winner) {
@@ -740,6 +870,8 @@
     exitVR();
     leaveOnline(true);
     tut = null;
+    canSave = false;
+    showSaved();
     tracker = null;
     achQueue = [];
     $('lobby').hidden = true;
@@ -760,6 +892,9 @@
     }
     me = 0;
     tut = null;
+    clearSaved();
+    savedLevel = level;
+    canSave = true;
     const cpuChar = humanChar === 'octopus' ? 'philosopher' : 'octopus';
     beginMatch({ p0: humanChar, p1: cpuChar, control: ['human', 'cpu'], autoMove: [autoMove, false], ...CT.levelOpts(level) });
   }
@@ -772,7 +907,7 @@
     // events fired while the game is being built are ignored; the HUD is
     // refreshed below once it exists. The host also forwards every event.
     let g = null;
-    tracker = tut || cfg.drill ? null : CT.createAchievementTracker(me, net ? 'online' : level);
+    tracker = tut || cfg.drill ? null : CT.createAchievementTracker(me, net ? 'online' : cfg.mode || level, cfg.trackerState);
     achQueue = []; achNew = [];
     g = CT.createGame({ ...cfg, firstServer: 0, onEvent: (t, d) => {
       if (!g || game !== g) return;
@@ -788,7 +923,10 @@
     applyZen();
     updateHud();
     hintForState();
-    if (!cfg.drill) showMsg('First to 6', 'Tiebreak at 6–6', 'neutral');
+    if (cfg.resume) {
+      const m = g.match;
+      showMsg('Match resumed', `${m.games[me]}–${m.games[1 - me]}` + (m.tiebreak ? ' · Tiebreak' : ''), 'neutral');
+    } else if (!cfg.drill) showMsg('First to 6', 'Tiebreak at 6–6', 'neutral');
   }
 
   function frame(now) {
@@ -969,6 +1107,7 @@
     document.querySelectorAll('[data-zen]').forEach((b) => b.addEventListener('click', () => setZen(b.dataset.zen === 'on')));
     $('zenPause').addEventListener('click', () => setZen(!zen));
     $('play').addEventListener('click', () => { ensureAudio(); startMatch(); });
+    $('resumeMatch').addEventListener('click', () => { ensureAudio(); resumeMatch(); });
     $('rematch').addEventListener('click', startMatch);
     $('toMenu').addEventListener('click', showMenu);
     $('pauseBtn').addEventListener('click', () => setPaused(true));
@@ -989,6 +1128,7 @@
     // ask on any tap while VR is picked (Play, or Create or Join online)
     document.addEventListener('click', () => { if (view === 'vr') CT.VR.askMotion(); }, true);
     $('resume').addEventListener('click', () => setPaused(false));
+    // the match stays saved, so the menu offers to resume it
     $('quit').addEventListener('click', () => { leaveFullscreen(); showMenu(); });
     $('howBtn').addEventListener('click', () => { $('help').hidden = false; });
     $('tutBtn').addEventListener('click', () => { ensureAudio(); startTutorial(); });
