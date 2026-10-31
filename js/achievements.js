@@ -4,8 +4,8 @@
 (function () {
   const CT = (window.CT = window.CT || {});
 
-  // `pro`: only counts against the Pro CPU. `common` ones only go up on the
-  // billboard the first time.
+  // `pro`: only counts against the Pro CPU. `char`: only counts playing that
+  // character. `common` ones only go up on the billboard the first time.
   const ACHIEVEMENTS = [
     { id: 'ace', name: 'Ace', desc: 'Serve an ace', common: true },
     { id: 'game', name: 'Game On', desc: 'Win a game', common: true },
@@ -22,6 +22,8 @@
     { id: 'breadstick', name: 'Breadstick', desc: 'Win a match 6–1', pro: true },
     { id: 'bagel', name: 'Bagel', desc: 'Win a match 6–0', pro: true },
     { id: 'proChampion', name: 'Pro Champion', desc: 'Win a match on Pro', pro: true },
+    { id: 'tentacle', name: 'The Tentacle', desc: 'Hit a backhand passing winner at full stretch', char: 'octopus' },
+    { id: 'thought', name: 'The Thought', desc: 'Hit a forehand, a backhand, a volley and a smash in one rally, and win it with a winner', char: 'philosopher' },
     { id: 'goldenSet', name: 'Golden Set', desc: 'Win a match without losing a single point', pro: true },
   ];
   const BY_ID = Object.fromEntries(ACHIEVEMENTS.map((a) => [a.id, a]));
@@ -33,8 +35,9 @@
   // tiebreak, games) and hit(d) each 'hit'; both return what they changed:
   // { earned: [ids, in list order], stats: { name: amount }, best: { name: value },
   // over: { won } once the match is over }.
-  // `saved`: what state() returned, to carry on a resumed match.
-  function createTracker(side, mode, saved) {
+  // `saved`: what state() returned, to carry on a resumed match. char: the
+  // character `side` plays.
+  function createTracker(side, mode, saved, char) {
     const opp = 1 - side, pro = mode === 'pro';
     let aces = 0;                  // aces this game
     let won = [0, 0];              // points each side has in the current game
@@ -44,10 +47,16 @@
     // our last serve's speed: it only counts (fastest serve, rocket) once
     // it has landed in, i.e. they returned it or the point was played out
     let serveKmh = 0;
+    // this rally: the kinds of shot we've hit (fh, bh, volley, smash), and
+    // our last shot, if it was a stretched backhand pass
+    let kinds = new Set(), pass = false;
+    // our last rally shot was hit under pressure (stretched, jammed or on
+    // the run), so missing it is a forced error, not an unforced one
+    let pressed = false, lastRally = false;
     if (saved) ({ aces, won, everyGame, lostPoint, maxBehind } = saved);
     const state = () => ({ aces, won: won.slice(), everyGame, lostPoint, maxBehind });
     function out(got, stats, best, over) {
-      return { earned: ACHIEVEMENTS.filter((x) => got.has(x.id) && (pro || !x.pro)).map((x) => x.id), stats, best, over };
+      return { earned: ACHIEVEMENTS.filter((x) => got.has(x.id) && (pro || !x.pro) && (!x.char || x.char === char)).map((x) => x.id), stats, best, over };
     }
     function serveIn(got, best) {
       if (!serveKmh) return;
@@ -67,7 +76,15 @@
         if (aces === 4) got.add('tetraAce');
         if (aces === 5) got.add('pentaAce');
       }
+      if (mine && d.text === 'Winner') stats.winners = 1;
+      // (a missed serve is a fault; the second one counts as a double fault)
+      if (!mine && (d.text === 'Out' || d.text === 'Net') && lastRally && !pressed) stats.unforcedErrors = 1;
       if (mine && d.shots >= RALLY) got.add('marathon');
+      if (mine && d.text === 'Winner') {
+        if (pass) got.add('tentacle');
+        if (kinds.size === 4) got.add('thought');
+      }
+      kinds = new Set(); pass = false; pressed = false; lastRally = false;
       if (d.shots) best.longestRally = d.shots;
       if (!mine) lostPoint = true;
       won[d.winner]++;
@@ -104,6 +121,17 @@
       // (a fault is followed by the second serve, which replaces it)
       if (d.side === side && d.kind === 'serve') serveKmh = d.kmh || 0;
       else if (d.side === opp) serveIn(got, best);
+      if (d.kind === 'serve') { kinds = new Set(); pass = false; }
+      if (d.side === side) {
+        const ground = d.kind === 'ground' || d.kind === 'power';
+        if (ground) kinds.add(d.wing);
+        else if (d.kind === 'volley' || d.kind === 'powerVolley') kinds.add('volley');
+        else if (d.kind === 'overhead') kinds.add('smash');
+        pass = ground && d.wing === 'bh' && !!d.stretched && !!d.vsNet;
+        pressed = !!d.stretched || !!d.note;
+      }
+      // whose shot is in the air: an error is only ours when it was our rally shot
+      lastRally = d.side === side && d.kind !== 'serve';
       return out(got, {}, best, null);
     }
     return { side, mode, point, hit, state };
@@ -113,7 +141,7 @@
   // { earned: { id: { n: times earned, at: first earned (ms since 1970) } },
   //   stats: { all | chill | club | pro | online: STAT_KEYS } }
   const KEY = 'ct.achievements';
-  const STAT_KEYS = ['played', 'won', 'streak', 'bestStreak', 'games', 'points', 'aces', 'doubleFaults', 'longestRally', 'fastestServe'];
+  const STAT_KEYS = ['played', 'won', 'streak', 'bestStreak', 'games', 'points', 'aces', 'doubleFaults', 'winners', 'unforcedErrors', 'longestRally', 'fastestServe'];
   const blankStats = () => Object.fromEntries(STAT_KEYS.map((k) => [k, 0]));
 
   function load() {
