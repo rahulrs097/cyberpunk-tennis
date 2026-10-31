@@ -1082,6 +1082,111 @@
   // First person: your racket in the corner of the screen. It sits ready on
   // the forehand side, drops back as the ball comes in, and sweeps across
   // the bottom of the view on a groundstroke or down from above on a serve.
+  // Your racket in the headset, in the world rather than stuck to the
+  // screen, so each eye sees it from its own side and it meets the ball
+  // where the ball really is. It waits in front of you, takes a backswing
+  // as the ball comes, sweeps through the spot the ball was struck at and
+  // follows through across your body (a serve or smash: up and over). A
+  // faint trail shows the sweep. Pure decoration: it's worked out from the
+  // swing the game already plays, never fed back to it.
+  // (both eyes draw the same frame, so it moves on once per game step)
+  function racketHead(r, g, p) {
+    const k = r.racket || (r.racket = { was: -1, contact: null, wing: 'fh', trail: [], t: -1, at: null, head: null });
+    if (k.at === g.time && k.head) return k.head;
+    k.at = g.time;
+    if (g.phase === 'toss' && g.server === p.side) { if (k.t < 0) k.t = g.time; } else k.t = -1;
+    k.head = racketPose(r, g, p, k);
+    k.trail.push(k.head);
+    if (k.trail.length > 7) k.trail.shift();
+    return k.head;
+  }
+  function racketPose(r, g, p, k) {
+    const b = g.ball, fwd = p.fwd;
+    const f = { x: 0, y: fwd }, rt = { x: fwd, y: 0 };   // forward, and to your right
+    const at = (sd, ang, z) => {
+      // round the shoulder on side `sd`: 0 = straight out to that side, + = forward
+      const S = { x: p.x + rt.x * sd * 0.2, y: p.y + rt.y * sd * 0.2 };
+      const cx = Math.cos(ang), sy = Math.sin(ang);
+      return { x: S.x + 0.85 * (rt.x * sd * cx + f.x * sy), y: S.y + 0.85 * (rt.y * sd * cx + f.y * sy), z };
+    };
+    // the moment of contact: remember where the ball was
+    if (p.swing >= 0 && k.was < 0) {
+      k.wing = p.swingWing;
+      const back = Math.min(0.1, p.swing * 0.28);
+      k.contact = b.active ? { x: b.pos.x - b.vel.x * back, y: b.pos.y - b.vel.y * back, z: b.pos.z - b.vel.z * back } : null;
+    }
+    k.was = p.swing;
+    const ease = (x) => 1 - Math.pow(1 - Math.min(1, Math.max(0, x)), 3);
+    const lerp = (a, c, t) => ({ x: a.x + (c.x - a.x) * t, y: a.y + (c.y - a.y) * t, z: a.z + (c.z - a.z) * t });
+    const ready = at(1, 1.0, 1.0);
+    if (p.swing >= 0) {
+      const up = k.wing === 'serve' || k.wing === 'oh';
+      const sd = k.wing === 'bh' ? -1 : 1;
+      const hit = k.contact || (up ? at(1, 0.6, 2.5) : at(sd, 0.35, 1.0));
+      const e = ease(p.swing / 0.55);
+      // through the ball and round to the other side (overhead: down across)
+      const finish = up ? at(-1, 1.2, 0.8) : at(-sd, 1.0, 1.6);
+      let head = lerp(hit, finish, e);
+      if (p.swing > 0.7) head = lerp(head, ready, ease((p.swing - 0.7) / 0.5));
+      return head;
+    }
+    // a backswing as the ball comes; on your serve, behind your head under the toss
+    if (g.phase === 'toss' && g.server === p.side) return lerp(ready, at(1, -0.9, 1.9), ease((g.time - k.t) * 3));
+    let prep = 0, sd = 1;
+    if (g.phase === 'rally' && b.active && b.inFlight && b.lastHitter !== p.side) {
+      const closing = -fwd * b.vel.y, dist = fwd * (b.pos.y - p.y);
+      if (closing > 1 && dist > -0.5) prep = Math.max(0, Math.min(1, 1 - (dist / closing - 0.08) / 0.5));
+      sd = (b.pos.x - p.x) * fwd >= -0.05 ? 1 : -1;
+    }
+    return lerp(ready, at(sd, -1.2, 1.15), ease(prep));
+  }
+
+  function drawRacketWorld(ctx, r, g, p, head) {
+    const k = r.racket, col = p.ch.colors.glow;
+    // the sweep's trail
+    const moved = k.trail.length > 1 && Math.hypot(head.x - k.trail[0].x, head.y - k.trail[0].y, head.z - k.trail[0].z) > 0.6;
+    ctx.save();
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    if (moved) {
+      ctx.strokeStyle = hexA(col, 0.2); ctx.lineWidth = Math.max(2, sizeAt(r, head.x, head.y, head.z) * 0.07);
+      ctx.beginPath();
+      let started = false;
+      for (const q of k.trail) { const s = proj(r, q.x, q.y, q.z); if (s.behind) continue; if (started) ctx.lineTo(s.x, s.y); else { ctx.moveTo(s.x, s.y); started = true; } }
+      ctx.stroke();
+    }
+    // shaft from the hand (between shoulder and head) to the head
+    const S = { x: p.x, y: p.y, z: 1.35 };
+    const d = { x: head.x - S.x, y: head.y - S.y, z: head.z - S.z }, L = Math.hypot(d.x, d.y, d.z) || 1;
+    const u = { x: d.x / L, y: d.y / L, z: d.z / L };
+    const hand = { x: head.x - u.x * 0.5, y: head.y - u.y * 0.5, z: head.z - u.z * 0.5 };
+    const neck = { x: head.x - u.x * 0.17, y: head.y - u.y * 0.17, z: head.z - u.z * 0.17 };
+    // the face stands upright, facing down the court (on a shaft that's
+    // upright itself, across it)
+    let w = { x: -u.z * u.x, y: -u.z * u.y, z: 1 - u.z * u.z };
+    let wl = Math.hypot(w.x, w.y, w.z);
+    if (wl < 0.3) { w = { x: -u.y, y: u.x, z: 0 }; wl = Math.hypot(w.x, w.y) || 1; }
+    w = { x: w.x / wl, y: w.y / wl, z: w.z / wl };
+    const pts = [];
+    for (let i = 0; i <= 20; i++) {
+      const t = (i / 20) * Math.PI * 2;
+      const q = proj(r, head.x + u.x * 0.16 * Math.cos(t) + w.x * 0.13 * Math.sin(t), head.y + u.y * 0.16 * Math.cos(t) + w.y * 0.13 * Math.sin(t), head.z + u.z * 0.16 * Math.cos(t) + w.z * 0.13 * Math.sin(t));
+      if (q.behind) { ctx.restore(); return; }
+      pts.push(q);
+    }
+    const A = proj(r, hand.x, hand.y, hand.z), N = proj(r, neck.x, neck.y, neck.z);
+    if (A.behind || N.behind) { ctx.restore(); return; }
+    const px = sizeAt(r, head.x, head.y, head.z);
+    ctx.strokeStyle = '#1c1b2a'; ctx.lineWidth = Math.max(2, px * 0.03);
+    ctx.beginPath(); ctx.moveTo(A.x, A.y); ctx.lineTo(N.x, N.y); ctx.stroke();
+    ctx.beginPath();
+    pts.forEach((q, i) => (i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y)));
+    ctx.fillStyle = hexA(PAL.line, 0.12); ctx.fill();
+    ctx.shadowColor = col; ctx.shadowBlur = r.quality ? Math.min(20, px * 0.05) : 0;
+    ctx.strokeStyle = col; ctx.lineWidth = Math.max(1.5, px * 0.018);
+    ctx.stroke();
+    ctx.restore();
+  }
+
   function drawRacketView(ctx, r, g, p) {
     const a = playerAnim(r, g, p, { x: r.W / 2, s: 1 });
     const u = Math.min(r.W, r.H - r.top);
@@ -1303,6 +1408,10 @@
     const items = [];
     for (const car of CARS) items.push({ d: depth(car.x, car.y), draw: () => drawCar(ctx, r, car) });
     for (const lamp of LAMPS) items.push({ d: depth(lamp[0], lamp[1]), draw: () => drawLamp(ctx, r, lamp) });
+    if (r.vr) {
+      const me = g.players[human], head = racketHead(r, g, me);
+      items.push({ d: depth(head.x, head.y), draw: () => drawRacketWorld(ctx, r, g, me, head) });
+    }
     for (const p of g.players) {
       if (r.view === 'first' && p.side === human) continue;   // you are the camera
       items.push({ d: depth(p.x, p.y), draw: () => drawPlayer(ctx, r, g, p) });
