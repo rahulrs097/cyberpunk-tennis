@@ -1,8 +1,10 @@
 // Cardboard VR: head tracking from the phone's motion sensor, and the
 // headset-button controls. With the phone in a headset there is nothing to
-// swipe, so you look where you want the ball to go, hold the button down as
-// the ball comes in (the backswing) and let go to hit. The longer the hold,
-// the harder the shot. Automove does the running.
+// swipe, so you watch the ball and press one button: a tap as it arrives
+// plays a shot, and pressing early, holding and letting go as it arrives
+// plays a power shot. Where the ball goes is picked for you (autoShot).
+// Automove does the running. (With a second phone as a swipe pad, its
+// swipes play exactly as on the normal screen instead: main.js.)
 //
 // The headset's button presses a pad onto the screen, so it arrives as an
 // ordinary touch that stays down while the button is held. A screen tap,
@@ -100,73 +102,43 @@
   // the lock goes when the page is hidden; take it again on the way back
   if (typeof document !== 'undefined') document.addEventListener('visibilitychange', () => { if (wakeWanted && document.visibilityState === 'visible') keepAwake(true); });
 
-  // ---------------- aiming ----------------
-  // You aim by looking at the far court. The target stays where you last
-  // looked, so you can then watch the ball onto your racket. Looking up into
-  // the sky over the far court is a lob; looking just over the net, a drop.
-  const AIM = {
-    lobPitch: 0.14,   // radians above the horizon that count as the sky (a lob)
-    near: 1.2,        // gaze closer than this past the net is still your side (watching the ball)
-    short: 3.2,       // the shortest a shot can land past the net
-    dropBelow: 0.3,   // depth under this plays a drop shot
-    lobDepth: 1.5,    // a lob lands this far inside the baseline
-  };
-  const edge = () => COURT.SW - 0.45;
+  // ---------------- auto shots ----------------
+  // A hold this long (seconds) before letting go makes it a power shot.
+  const POWER_HOLD = 0.3;
+  const NET_ZONE = 4.5;   // within this of the net, a player is at the net
+  const rand = (rnd, a, b) => a + (b - a) * rnd();
 
-  // eye: { x, y, z, yaw, pitch } in world terms, yaw 0 = towards +y.
-  // Returns the new target { x, y, kind: 'drive'|'drop'|'lob', depth }, or `aim` unchanged.
-  function updateAim(g, side, eye, aim) {
-    const fwd = g.players[side].fwd;
-    const dx = Math.sin(eye.yaw), dy = Math.cos(eye.yaw);
-    if (fwd * dy < 0.25) return aim;   // looking sideways or behind you
-    const far = COURT.HL - AIM.lobDepth;
-    if (eye.pitch > AIM.lobPitch) {
-      const t = (fwd * far - eye.y) / dy;
-      return { x: clamp(eye.x + dx * t, -edge(), edge()), y: fwd * far, kind: 'lob', depth: 1 };
-    }
-    let along;
-    let x;
-    if (eye.pitch < -0.005) {
-      const t = eye.z / -Math.tan(eye.pitch);   // horizontal distance to where the gaze meets the ground
-      x = eye.x + dx * t;
-      along = fwd * (eye.y + dy * t);
-    } else along = Infinity;
-    if (along < AIM.near) return aim;   // watching the ball on your own side
-    along = Math.min(along, far + AIM.lobDepth - 0.3);
-    if (!Number.isFinite(x)) x = eye.x + dx * ((fwd * along - eye.y) / dy);
-    const depth = clamp((along - AIM.short) / (COURT.HL - 0.5 - AIM.short), 0, 1);
-    return { x: clamp(x, -edge(), edge()), y: fwd * Math.max(AIM.short, along), kind: depth < AIM.dropBelow ? 'drop' : 'drive', depth };
-  }
-
-  // Before you've looked anywhere: deep down the middle.
-  function defaultAim(g, side) {
-    return { x: 0, y: g.players[side].fwd * (COURT.HL - 2), kind: 'drive', depth: 0.85 };
-  }
-
-  // How hard: a quick press is soft, a hold of HOLD.full seconds or more is full pace.
-  const HOLD = { min: 0.12, full: 0.6, soft: 0.2 };
-  function holdPace(secs) {
-    return HOLD.soft + (1 - HOLD.soft) * clamp((secs - HOLD.min) / (HOLD.full - HOLD.min), 0, 1);
-  }
-
-  // The shot (as CT.requestSwipe takes it) for a button released after
-  // `hold` seconds, aimed at `aim`.
-  function shotInput(g, side, aim, hold) {
-    const a = aim || defaultAim(g, side);
-    const p = g.players[side], fwd = p.fwd, b = g.ball;
-    const pace = holdPace(hold);
+  // The shot (as CT.requestSwipe takes it) for a button let go now: chosen
+  // like a player would, a little differently each time. Away from the
+  // opponent; over them when they're at the net (or past them); now and
+  // then a drop shot when they're camped deep. A power shot goes flat and
+  // hard into the open court. A serve goes wide, at the body or down the T.
+  function autoShot(g, side, power, rnd = Math.random) {
+    const p = g.players[side], opp = g.players[1 - side], b = g.ball, fwd = p.fwd;
+    const edge = COURT.SW - 0.45, away = opp.x > 0 ? -1 : 1;
     if (g.phase === 'toss' && g.server === side) {
-      // the serve aims at the middle of the box; turn that towards where you looked
-      const box = g.serveBox, pos = b.pos;
-      const T = { x: box.sign * COURT.SW * 0.5, y: fwd * (COURT.SL - 1.6) };
+      const box = g.serveBox, first = g.match.firstServe;
+      const r = rnd();
+      const target = box.sign * (r < 0.4 ? COURT.SW - (first ? 0.8 : 1.3) : r < 0.7 ? 2 : 0.5);
+      // the serve aims at the middle of the box; turn it towards the target
+      const T = { x: box.sign * COURT.SW * 0.5, y: fwd * (COURT.SL - 1.6) }, pos = b.pos;
       const a0 = Math.atan2(fwd * (T.x - pos.x), fwd * (T.y - pos.y));
-      const ty = fwd * Math.min(Math.abs(a.y), COURT.SL - 0.5);
-      const a1 = Math.atan2(fwd * (a.x - pos.x), fwd * (ty - pos.y));
-      return { aim: clamp((a1 - a0) / 0.45, -0.8, 0.8), pace, spinDir: 1, curve: 0, depth: 1 };
+      const a1 = Math.atan2(fwd * (target - pos.x), fwd * (T.y - pos.y));
+      const pace = power ? (first ? 0.95 : 0.7) : (first ? rand(rnd, 0.55, 0.7) : rand(rnd, 0.35, 0.5));
+      return { aim: clamp((a1 - a0) / 0.45, -0.8, 0.8), pace, spinDir: 1, curve: 0 };
     }
-    if (a.kind === 'lob') return { aim: 0, landX: a.x, pace: Math.min(pace, 0.5), spinDir: 1, curve: 0, depth: 1, lob: true };
-    if (a.kind === 'drop') return { aim: 0, landX: a.x, pace: Math.min(pace, 0.35), spinDir: -1, curve: 0, depth: a.depth };
-    return { aim: 0, landX: a.x, pace, spinDir: 1, curve: 0, depth: a.depth };
+    if (power) return { aim: 0, landX: away * edge * rand(rnd, 0.6, 0.85), pace: 1, spinDir: 1, curve: 0, depth: 1 };
+    const oppAtNet = -opp.fwd * opp.y < NET_ZONE;
+    const oppDeep = -opp.fwd * opp.y > COURT.HL + 0.6;
+    if (oppAtNet) {
+      if (rnd() < 0.45) return { aim: 0, landX: rand(rnd, -1.5, 1.5), pace: 0.3, spinDir: 1, curve: 0, depth: 1, lob: true };
+      return { aim: 0, landX: away * edge * rand(rnd, 0.75, 1), pace: 0.75, spinDir: 1, curve: 0, depth: 1 };
+    }
+    if (oppDeep && -fwd * p.y < COURT.HL - 0.4 && b.pos.z > 0.6 && rnd() < 0.15) {
+      return { aim: 0, landX: away * rand(rnd, 0.5, 2), pace: 0.15, spinDir: -1, curve: 0, depth: 0.12 };
+    }
+    const landX = rnd() < 0.6 ? away * edge * rand(rnd, 0.45, 0.85) : rand(rnd, -0.4, 0.4) * edge;
+    return { aim: 0, landX, pace: rand(rnd, 0.45, 0.7), spinDir: rnd() < 0.15 ? -1 : 1, curve: 0, depth: rand(rnd, 0.8, 1) };
   }
 
   // How long until the moment to let go (seconds of game time, below zero
@@ -187,6 +159,6 @@
 
   CT.VR = {
     screenPose, createHead, startHead, stopHead, recentre, headPose, askMotion, keepAwake,
-    updateAim, defaultAim, shotInput, holdPace, timeToHit, HOLD, PAUSE_PITCH,
+    autoShot, timeToHit, POWER_HOLD, PAUSE_PITCH,
   };
 })();

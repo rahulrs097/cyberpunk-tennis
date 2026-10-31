@@ -26,9 +26,14 @@
   try { const v = localStorage.getItem('ct.view'); if (v === 'first' || v === 'vr') view = v; } catch (e) { /* storage is optional */ }
   // Cardboard VR. vrFit fits the picture to the headset: how wide each eye
   // sees (degrees) and how far apart its lenses are (mm).
+  // vrFit.gfx is the graphics level: Auto starts sharp and steps down if the phone can't keep up.
   const VR_FOV = { wide: 95, normal: 80, close: 65 }, VR_LENS = { narrow: 60, normal: 64, wide: 68 };
-  let vrFit = { fov: 'normal', lens: 'normal' };
-  try { const v = JSON.parse(localStorage.getItem('ct.vrFit')); if (v && VR_FOV[v.fov] && VR_LENS[v.lens]) vrFit = v; } catch (e) { /* storage is optional */ }
+  const VR_GFX = { auto: 'auto', smooth: 0, balanced: 1, sharp: 2 };
+  let vrFit = { fov: 'normal', lens: 'normal', gfx: 'auto' };
+  try {
+    const v = JSON.parse(localStorage.getItem('ct.vrFit'));
+    if (v && VR_FOV[v.fov] && VR_LENS[v.lens]) vrFit = { ...vrFit, fov: v.fov, lens: v.lens, gfx: v.gfx in VR_GFX ? v.gfx : 'auto' };
+  } catch (e) { /* storage is optional */ }
   // during a VR match: { head, wait (until a press starts play), press (when the button went down), ignoreUp, aim }
   let vr = null;
   // achievements and stats saved on this phone, and the tracker for the
@@ -505,7 +510,7 @@
     // A quick touch that barely moved is a tap. One held still for longer is
     // a swipe the player thought better of, so it does nothing.
     if (chord < 30) { if (dur < 400) handleTap(b.x, b.y); return; }
-    handleSwipe(pts, dx, dy, chord, dur);
+    handleSwipe(pts, dx, dy, chord, dur, Math.min(window.innerWidth, window.innerHeight));
   }
 
   const isGuest = () => !!(net && net.role === 'guest' && game && game.remote);
@@ -544,24 +549,25 @@
   // LOB_SPEED screens a second.
   const LOB_LEN = 0.22, LOB_SPEED = 1.4;
 
-  function handleSwipe(pts, dx, dy, chord, dur) {
+  // `dim` is the screen's short side in the same units as `pts`. `late`
+  // (seconds) is how long the swipe took to get here from a swipe pad.
+  function handleSwipe(pts, dx, dy, chord, dur, dim, late) {
     const end = pts[pts.length - 1];
     let k = pts.length - 1;
     while (k > 0 && end.t - pts[k].t < 110) k--;
     const tail = Math.hypot(end.x - pts[k].x, end.y - pts[k].y) / Math.max(16, end.t - pts[k].t);
     const v = Math.max(tail, chord / dur) * 1000;                // px per second
-    const u = v / Math.min(window.innerWidth, window.innerHeight);  // screens per second
+    const u = v / dim;  // screens per second
     // A normal phone flick (about half the screen in ~150 ms) is close to full pace.
     const pace = CT.clamp((u - 0.7) / (3.8 - 0.7), 0, 1);
     // Swipe length sets depth: a short swipe drops the ball short, a swipe
     // of about 40% of the screen or more goes to the baseline.
-    const depth = CT.clamp((chord / Math.min(window.innerWidth, window.innerHeight) - 0.1) / 0.3, 0, 1);
+    const depth = CT.clamp((chord / dim - 0.1) / 0.3, 0, 1);
     const over = CT.clamp((u - 7) / 4, 0, 1);
     const spinDir = dy < 0 ? 1 : -1;
     // A slow, long upward swipe lofts a topspin lob. Judged on the whole
     // swipe, not its tail: fingers speed up as they let go, so a deliberate
     // slow swipe still ends with a flick.
-    const dim = Math.min(window.innerWidth, window.innerHeight);
     const lob = spinDir > 0 && (chord / dur) * 1000 / dim < LOB_SPEED && chord / dim >= LOB_LEN;
     let aim = Math.atan2(dx, Math.abs(dy));
     // bow of the path, measured towards screen-right
@@ -577,40 +583,47 @@
     aim += CT.clamp(bulge * 0.45, -0.12, 0.12);
     // A slice is swiped the other way: top-left to bottom-right goes left.
     if (spinDir < 0) aim = -aim;
-    const input = { aim, pace, over, spinDir, curve, depth, landX: pointAt(aim), lob };
+    // (a swipe pad's swipe has nothing to do with the view in the headset)
+    const input = { aim, pace, over, spinDir, curve, depth, landX: vr ? undefined : pointAt(aim), lob };
     // A slow swipe is still going when the ball arrives: its timing counts
     // from partway through, not from when the finger lifts.
     // And it always goes deep, however long the swipe: a short lob is just a
     // smash for them.
     if (lob) { input.lead = dur / 2000; input.depth = 1; }
-    playShot(input);
+    playShot(input, late);
   }
 
-  // Hit `input` (as CT.requestSwipe takes it) now.
-  function playShot(input) {
+  // Hit `input` (as CT.requestSwipe takes it) now, or as if `late` seconds
+  // ago (a swipe from the swipe pad, timed from when the finger let go).
+  function playShot(input, late) {
+    const back = (late || 0) * game.timeScale;
     if (isGuest()) {
       // judge timing here, against the ball this player saw, play the shot
       // on this screen straight away, then send it to the host
       const tm = CT.swipeTiming(game, me);
       if (!tm) return;
       if (tm.whiff) { showShot(tm.whiff); return; }
-      CT.predictSwipe(game, me, input, tm.err);
-      send({ t: 'in', k: 'swipe', input, err: tm.err });
-    } else CT.requestSwipe(game, me, input);
+      CT.predictSwipe(game, me, input, tm.err - back);
+      send({ t: 'in', k: 'swipe', input, err: tm.err - back });
+      return;
+    }
+    const tm = back > 0 ? CT.swipeTiming(game, me) : null;
+    if (tm && !tm.whiff) CT.requestSwipe(game, me, input, tm.err - back);
+    else CT.requestSwipe(game, me, input);
   }
 
   // ---------------- VR ----------------
   // The headset's button arrives as a touch (or the space bar, or a
   // gamepad's A). Press before play starts: that way is straight down the
   // court. Press looking at your feet: pause. On your serve a press tosses.
-  // Otherwise the press is the backswing and letting go hits.
+  // Otherwise letting go hits, and a long enough hold makes it a power shot;
+  // where it goes is picked for you.
   function vrPress() {
     if (!game || paused || vr.press !== null) return;
     vr.ignoreUp = true;
     if (vr.wait) {
       CT.VR.recentre(vr.head);
       vr.wait = false;
-      vr.aim = null;
       goFullscreen('landscape');
       return;
     }
@@ -630,7 +643,7 @@
     const hold = (performance.now() - vr.press) / 1000;
     vr.press = null;
     if (!game || paused || (net && net.held)) return;
-    playShot(CT.VR.shotInput(game, me, vr.aim, hold));
+    playShot(CT.VR.autoShot(game, me, hold >= CT.VR.POWER_HOLD));
   }
 
   // the countdown's beeps: [seconds before the moment to let go, pitch]
@@ -639,13 +652,13 @@
   // VR is for matches; the tutorial's lessons need their hints on screen.
   function enterVR() {
     if (!vr) {
-      vr = { head: CT.VR.createHead(), wait: true, press: null, ignoreUp: false, aim: null, pad: false, lastT: null };
+      vr = { head: CT.VR.createHead(), wait: true, press: null, ignoreUp: false, pad: false, lastT: null };
       CT.VR.startHead(vr.head);
       CT.VR.keepAwake(true);
       document.body.classList.add('vr');
     }
-    vr.wait = true; vr.press = null; vr.aim = null;
-    CT.setVR(renderer, { fov: VR_FOV[vrFit.fov], lens: VR_LENS[vrFit.lens] });
+    vr.wait = true; vr.press = null;
+    CT.setVR(renderer, { fov: VR_FOV[vrFit.fov], lens: VR_LENS[vrFit.lens], gfx: VR_GFX[vrFit.gfx] });
     // in a headset you can only look and press, so automove always runs
     if (game.control[me] === 'human') CT.setAutoMove(game, me, true);
     if (isGuest()) send({ t: 'auto', on: true });
@@ -671,7 +684,7 @@
     let down = false;
     try { for (const gp of navigator.getGamepads ? navigator.getGamepads() : []) if (gp && gp.buttons[0] && gp.buttons[0].pressed) down = true; } catch (e) { /* no gamepads here */ }
     if (down !== vr.pad) { vr.pad = down; if (down) vrPress(); else vrRelease(); }
-    v.charge = vr.press === null ? 0 : CT.VR.holdPace((performance.now() - vr.press) / 1000);
+    v.charge = vr.press === null ? 0 : Math.min(1, (performance.now() - vr.press) / 1000 / CT.VR.POWER_HOLD);
     // a countdown you can hear wherever you're looking: two ticks, then a
     // higher one on the moment to let go
     const hit = !paused && !vr.wait ? CT.VR.timeToHit(game, me, CT.incomingInfo(game, me)) : null;
@@ -681,16 +694,181 @@
     vr.lastT = hit && hit.reach ? hit.t : null;
     v.prompt = ''; v.sub = '';
     if (window.innerHeight > window.innerWidth) { v.prompt = 'TURN SIDEWAYS'; v.sub = 'Hold the phone in landscape'; }
-    else if (vr.wait) { v.prompt = 'LOOK DOWN THE COURT'; v.sub = 'Press the button to play'; }
+    else if (vr.wait) { v.prompt = 'LOOK DOWN THE COURT'; v.sub = pad && pad.linked ? 'Tap the pad to play' : 'Press the button to play'; }
     else if (pose.pitch < CT.VR.PAUSE_PITCH) { v.prompt = 'PAUSE?'; v.sub = 'Press to pause'; }
   }
 
-  // After the frame is drawn the camera is where your head is: aim from there.
-  function vrAim() {
-    const c = renderer.cam;
-    if (!vr.wait) vr.aim = CT.VR.updateAim(game, me, { x: c.x, y: c.y, z: c.z, yaw: c.yaw, pitch: c.pitch }, vr.aim);
-    renderer.vr.aim = vr.aim || CT.VR.defaultAim(game, me);
+  // ---------------- swipe pad ----------------
+  // A second phone, held in your hand, as a swipe pad for the phone in the
+  // headset: its swipes play exactly like swipes on the normal screen, and
+  // a tap is the headset's button. The two phones pair through the online
+  // relay with a room code of their own, so this works next to an online
+  // match too. The headset phone measures the lag to the pad and takes it
+  // off the swipe's timing, so a swipe counts from when the finger let go.
+  let pad = null;      // on the headset phone: { code, link, linked, lag, timer, lastHeard }
+  let padSide = null;  // on the pad phone: { code, link, linked, timer, lastHeard }
+  let lobbyMode = null;  // 'pad' while the lobby screen is pairing a swipe pad
+  const PAD_LOST = 4000;   // ms of silence before the link counts as lost
+
+  function padStatus() {
+    const on = !!(pad && pad.linked);
+    $('padHost').textContent = on ? 'Unlink pad' : 'Link a phone';
+    $('padState').textContent = on ? `Swipe pad linked (room ${pad.code}). Swipe on it to hit, tap it for the button.` : pad ? 'Waiting for the pad phone…' : 'Optional: a second phone in your hand as a swipe pad.';
   }
+
+  function unlinkPad() {
+    if (!pad) return;
+    pad.link.send({ t: 'bye' });
+    clearInterval(pad.timer);
+    pad.link.close();
+    pad = null;
+    padStatus();
+  }
+
+  function hostPad() {
+    if (pad) { unlinkPad(); return; }
+    ensureAudio();
+    const code = CT.Net.makeCode();
+    const p = { code, linked: false, lag: CT.Net.createLagMeter(), lastHeard: performance.now() };
+    pad = p;
+    p.link = CT.Net.connect(code, 'host', (m) => onPadMsg(p, m), (st) => {
+      if (pad !== p || p.linked || st === 'open') return;
+      if (st === 'full') { unlinkPad(); hostPad(); return; }
+      lobby("Couldn't reach the online server. Check your connection and try again.", '', false);
+    });
+    p.timer = setInterval(() => {
+      if (pad !== p || !p.linked) return;
+      const now = performance.now();
+      p.lag.sent(now);
+      p.link.send({ t: 'ping', at: now });
+      if (now - p.lastHeard > PAD_LOST) { p.linked = false; padStatus(); showMsg('Swipe pad lost', 'Use the headset button', 'warn'); }
+    }, CT.Net.PING_EVERY);
+    lobbyMode = 'pad';
+    lobby('On the phone for your hand, open the game, pick VR under Camera, tap "Be the pad" and enter this code.', code, false);
+    padStatus();
+  }
+
+  function onPadMsg(p, m) {
+    if (pad !== p || !m) return;
+    p.lastHeard = performance.now();
+    if (m.t === 'hello') {
+      p.link.send({ t: 'padok' });
+      if (!p.linked) {
+        p.linked = true;
+        padStatus();
+        if (lobbyMode === 'pad') { lobbyMode = null; $('lobby').hidden = true; $('menu').hidden = false; }
+        showMsg('Swipe pad linked', 'Swipe on it to hit', 'neutral');
+      }
+      return;
+    }
+    if (m.t === 'ping') { p.link.send({ t: 'pong', at: m.at }); return; }
+    if (m.t === 'pong') { if (Number.isFinite(m.at)) p.lag.answered(m.at, performance.now()); return; }
+    if (m.t === 'bye') { p.linked = false; padStatus(); return; }
+    if (!p.linked || !vr || !game) return;
+    if (m.t === 'tap') {
+      if (paused) { setPaused(false); return; }
+      vrPress(); vrRelease();
+      return;
+    }
+    if (m.t === 'swipe' && Array.isArray(m.pts) && m.pts.length >= 2 && m.pts.length <= 64) {
+      if (paused || vr.wait || (net && net.held)) return;
+      const pts = m.pts.map((q) => ({ x: +q[0], y: +q[1], t: +q[2] }));
+      if (!pts.every((q) => Number.isFinite(q.x) && Number.isFinite(q.y) && Number.isFinite(q.t))) return;
+      const a = pts[0], b = pts[pts.length - 1];
+      const dx = b.x - a.x, dy = b.y - a.y, chord = Math.hypot(dx, dy);
+      if (chord <= 0) return;
+      // half the round trip is the trip here (capped, in case of a spike)
+      const late = Math.min(0.2, p.lag.state(performance.now()).ms / 2000);
+      handleSwipe(pts, dx, dy, chord, Math.max(1, b.t - a.t), 1, late);
+    }
+  }
+
+  // The pad phone: a dark screen to swipe on. Points go across as fractions
+  // of the screen's short side, so phones of any size swipe the same.
+  function joinPad(code) {
+    ensureAudio();
+    leavePad();
+    const s = { code, linked: false, lastHeard: performance.now() };
+    padSide = s;
+    s.link = CT.Net.connect(code, 'guest', (m) => {
+      if (padSide !== s || !m) return;
+      s.lastHeard = performance.now();
+      if (m.t === 'padok' && !s.linked) { s.linked = true; showPad(); }
+      else if (m.t === 'ping') s.link.send({ t: 'pong', at: m.at });
+      else if (m.t === 'bye') { leavePad(); showMenu(); showMsg('Headset phone unlinked', '', 'warn'); }
+    }, (st) => {
+      if (padSide !== s || s.linked || st === 'open') return;
+      lobby(st === 'full' ? 'Room ' + code + ' already has a pad.' : "Couldn't reach the online server. Check your connection and try again.", '', true);
+    });
+    lobbyMode = 'pad';
+    lobby('Linking to room ' + code + '…', '', false);
+    const t0 = performance.now();
+    s.timer = setInterval(() => {
+      if (padSide !== s) return;
+      const now = performance.now();
+      if (!s.linked) {
+        s.link.send({ t: 'hello' });
+        if (now - t0 > 8000) lobby('No answer from room ' + code + '. Check the code on the headset phone.', '', true);
+      } else $('padLost').hidden = now - s.lastHeard < PAD_LOST;
+    }, 500);
+    s.link.send({ t: 'hello' });
+  }
+
+  function showPad() {
+    lobbyMode = null;
+    $('lobby').hidden = true;
+    $('menu').hidden = true;
+    $('pad').hidden = false;
+    $('padLost').hidden = true;
+    CT.VR.keepAwake(true);
+    goFullscreen('portrait');
+  }
+
+  function leavePad() {
+    if (!padSide) return;
+    clearInterval(padSide.timer);
+    padSide.link.send({ t: 'bye' });
+    padSide.link.close();
+    padSide = null;
+    $('pad').hidden = true;
+    CT.VR.keepAwake(false);
+  }
+
+  let padTouch = null;
+  function padDown(e) {
+    e.preventDefault();
+    if (padTouch) return;
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) { /* optional */ }
+    padTouch = { id: e.pointerId, pts: [{ x: e.clientX, y: e.clientY, t: performance.now() }] };
+  }
+  function padMove(e) {
+    if (!padTouch || e.pointerId !== padTouch.id) return;
+    e.preventDefault();
+    padTouch.pts.push({ x: e.clientX, y: e.clientY, t: performance.now() });
+  }
+  function padUp(e) {
+    if (!padTouch || e.pointerId !== padTouch.id) return;
+    e.preventDefault();
+    padTouch.pts.push({ x: e.clientX, y: e.clientY, t: performance.now() });
+    const pts = padTouch.pts;
+    padTouch = null;
+    if (!padSide || !padSide.linked) return;
+    const a = pts[0], b = pts[pts.length - 1];
+    const dim = Math.min(window.innerWidth, window.innerHeight);
+    const chord = Math.hypot(b.x - a.x, b.y - a.y);
+    // the same tap-or-swipe rule as the game screen
+    if (chord < 30) {
+      if (b.t - a.t < 400) { padSide.link.send({ t: 'tap' }); buzz(15); }
+      return;
+    }
+    // at most 64 points: keep every nth, and always the last
+    const step = Math.ceil(pts.length / 60);
+    const keep = pts.filter((q, i) => i % step === 0 || i === pts.length - 1);
+    const r = (v) => Math.round(v * 1000) / 1000;
+    padSide.link.send({ t: 'swipe', pts: keep.map((q) => [r((q.x - a.x) / dim), r((q.y - a.y) / dim), Math.round(q.t - a.t)]) });
+    buzz(25);
+  }
+  function buzz(ms) { try { if (navigator.vibrate) navigator.vibrate(ms); } catch (e) { /* optional */ } }
 
   // ---------------- online ----------------
   // The host's phone runs the match. The guest sends taps and swipes, and
@@ -810,6 +988,7 @@
   function hostRoom() {
     ensureAudio();
     leaveOnline(true);
+    lobbyMode = null;
     const code = CT.Net.makeCode();
     net = { role: 'host', code, started: false, lastHeard: performance.now(), sendT: 0 };
     const n = net;
@@ -820,6 +999,7 @@
   function joinRoom(code) {
     ensureAudio();
     leaveOnline(true);
+    lobbyMode = null;
     net = { role: 'guest', code, started: false, lastHeard: performance.now() };
     const n = net;
     net.link = CT.Net.connect(code, 'guest', onNet, (st) => onLink(n, st));
@@ -968,7 +1148,6 @@
       const land = paused || zenOn() ? null : CT.landingFor(game, me, info);
       game.ball = CT.viewBall(game);
       try { CT.renderGame(renderer, game, me, info, land); } finally { game.ball = ball; }
-      if (vr) vrAim();
     }
     requestAnimationFrame(frame);
   }
@@ -1096,7 +1275,7 @@
     window.addEventListener('resize', () => { if (game) layout(); });
     document.addEventListener('visibilitychange', () => {
       // (the CPU rally behind the menu isn't a match, so there's nothing to pause)
-      if (document.hidden) { if ($('menu').hidden && $('lobby').hidden) setPaused(true); if (audio) audio.suspend(); }
+      if (document.hidden) { if ($('menu').hidden && $('lobby').hidden && $('pad').hidden) setPaused(true); if (audio) audio.suspend(); }
       else if (audio) audio.resume();
     });
     document.querySelectorAll('.pick').forEach((b) => b.addEventListener('click', () => pickChar(b.dataset.char)));
@@ -1130,7 +1309,7 @@
     });
     document.addEventListener('keyup', (e) => { if (vr && e.key === ' ') { e.preventDefault(); vrRelease(); } });
     setView(view);
-    for (const key of ['fov', 'lens']) {
+    for (const key of ['fov', 'lens', 'gfx']) {
       document.querySelectorAll(`[data-vr-${key}]`).forEach((b) => b.addEventListener('click', () => setVRFit(key, b.getAttribute(`data-vr-${key}`))));
       setVRFit(key, vrFit[key]);
     }
@@ -1148,14 +1327,26 @@
     $('achClose').addEventListener('click', () => { $('trophies').hidden = true; });
     document.querySelectorAll('[data-stats]').forEach((b) => b.addEventListener('click', () => showStats(b.dataset.stats)));
     $('hostBtn').addEventListener('click', hostRoom);
-    $('joinBtn').addEventListener('click', () => { leaveOnline(true); lobby('Enter the 4-letter code your friend sees.', '', true); $('codeInput').value = ''; $('codeInput').focus(); });
+    $('joinBtn').addEventListener('click', () => { leaveOnline(true); lobbyMode = null; lobby('Enter the 4-letter code your friend sees.', '', true); $('codeInput').value = ''; $('codeInput').focus(); });
     $('lobbyGo').addEventListener('click', () => {
       const code = $('codeInput').value.toUpperCase().replace(/[^A-Z]/g, '');
-      if (code.length === 4) joinRoom(code);
+      if (code.length === 4) { if (lobbyMode === 'pad') joinPad(code); else joinRoom(code); }
     });
     $('codeInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('lobbyGo').click(); });
-    $('lobbyCancel').addEventListener('click', showMenu);
-    window.addEventListener('pagehide', () => leaveOnline(true));
+    $('lobbyCancel').addEventListener('click', () => {
+      if (lobbyMode === 'pad') { if (pad && !pad.linked) unlinkPad(); leavePad(); lobbyMode = null; }
+      showMenu();
+    });
+    $('padHost').addEventListener('click', hostPad);
+    $('padJoin').addEventListener('click', () => { unlinkPad(); leavePad(); lobbyMode = 'pad'; lobby('Enter the 4-letter code on the headset phone.', '', true); $('codeInput').value = ''; $('codeInput').focus(); });
+    $('padLeave').addEventListener('click', () => { leavePad(); showMenu(); });
+    const padEl = $('pad');
+    padEl.addEventListener('pointerdown', padDown, { passive: false });
+    padEl.addEventListener('pointermove', padMove, { passive: false });
+    padEl.addEventListener('pointerup', padUp, { passive: false });
+    padEl.addEventListener('pointercancel', () => { padTouch = null; });
+    padStatus();
+    window.addEventListener('pagehide', () => { leaveOnline(true); unlinkPad(); leavePad(); });
     $('mute').addEventListener('click', () => {
       muted = !muted;
       $('mute').setAttribute('aria-pressed', String(muted));
