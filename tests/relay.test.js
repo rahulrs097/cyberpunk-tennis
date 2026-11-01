@@ -20,7 +20,7 @@ function loadRelay() {
   const sandbox = {
     exports: {}, URL,
     WebSocketPair: function () { const a = new FakeSocket(), b = new FakeSocket(); a.peer = b; return { 0: a, 1: b }; },
-    Response: class { constructor(body, init) { Object.assign(this, init); } },
+    Response: class { constructor(body, init) { this.body = body; Object.assign(this, init); } },
   };
   vm.createContext(sandbox);
   vm.runInContext(src, sandbox, { filename: 'relay.js' });
@@ -68,4 +68,11 @@ test('relay: the same phone can take its place again after a dropped connection'
   // once the guest has gone, someone else can join
   again.close(1000);
   assert.notEqual(await join('guest', 'otherphone'), 'full');
+});
+
+test('relay: /version answers with the live deployment id, never cached', async () => {
+  const worker = loadRelay().default;
+  const res = await worker.fetch({ url: 'https://relay/version', headers: { get: () => null } }, { CF_VERSION_METADATA: { id: 'abc-123' } });
+  assert.equal(JSON.parse(res.body).v, 'abc-123');
+  assert.equal(res.headers['cache-control'], 'no-store');
 });

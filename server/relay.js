@@ -3,6 +3,8 @@
 // message from one to the other unchanged. The game itself runs on the
 // host's phone; this only forwards.
 //
+// GET /version answers { v: <this deployment's id> }.
+//
 // Clients connect to wss://<worker>/room/<CODE>?role=host|guest&id=<phone>,
 // where id is a random id each phone keeps. Every other path is the game
 // itself, served from the static files.
@@ -10,6 +12,11 @@
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    // which build is live, so an open (installed) game knows to reload
+    if (url.pathname === '/version') {
+      const v = env.CF_VERSION_METADATA ? env.CF_VERSION_METADATA.id : '';
+      return new Response(JSON.stringify({ v }), { headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
+    }
     const m = url.pathname.match(/^\/room\/([A-Z]{4})$/);
     if (!m) return env.ASSETS ? env.ASSETS.fetch(request) : new Response('cyberpunk tennis relay');
     if (request.headers.get('Upgrade') !== 'websocket') return new Response('Expected a WebSocket', { status: 426 });
