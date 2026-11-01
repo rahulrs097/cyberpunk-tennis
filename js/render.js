@@ -288,6 +288,69 @@
     r.cam.ready = false;
   }
 
+  // WebXR (xr.js): each eye is drawn into a canvas of its own, k = { w, h, f }
+  // (the eye's picture in the renderer's pixels, and pixels per unit of
+  // tangent), never rolled; xr.js fits it to the headset's lenses. gfx as
+  // for setVR. null goes back to the normal screen (call resizeRenderer
+  // after).
+  const XR_DPR = [1.1, 1.5, 2];   // canvas pixels per renderer pixel, by quality level
+  function setXR(r, k, gfx) {
+    if (!k) { r.xr = null; if (r.vr) setVR(r, null); return; }
+    if (!r.vr) setVR(r, { fov: 90, lens: 64, gfx });
+    r.vr.gfx = gfx; r.quality = gfx === 'auto' ? (r.xr ? r.quality : 2) : gfx;
+    r.xr = { ...k, base: null };
+    fitXR(r);
+  }
+  function fitXR(r) {
+    const k = r.xr, c = r.cam;
+    r.dpr = XR_DPR[r.quality];
+    r.W = k.w; r.H = k.h; r.top = 0; r.bottom = 0; r.hudBottom = 0;
+    r.glow = {};
+    c.f = k.f; c.cx = k.w / 2; c.cy = k.h / 2;
+    buildSky(r);
+  }
+
+  // Draw both eyes for WebXR. eyes: [{ yaw, pitch (the way it looks, yaw
+  // from straight down the court), right, fwd, up (metres it has moved
+  // from the recentred spot) }]. Returns the eyes' canvases, or null on a
+  // frame that keeps the last pictures (redrawing every other frame when
+  // drawing is too slow, as in drawStereo; xr.js turns them with the head).
+  function renderXR(r, g, human, info, land, eyes) {
+    const now = performance.now();
+    const dt = r.lastT ? Math.min(0.1, (now - r.lastT) / 1000) : 0;
+    r.lastT = now;
+    r.human = human;
+    const c = r.cam, v = r.vr, k = r.xr, p = g.players[human];
+    // the spot the head is measured from rides with the player, as in updateHead
+    const tx = p.x, ty = p.y - p.fwd * EYE.back;
+    if (!k.base) k.base = { x: tx, y: ty };
+    const kp = 1 - Math.exp(-dt * EYE.follow);
+    k.base.x += (tx - k.base.x) * kp; k.base.y += (ty - k.base.y) * kp;
+    r.vrOdd = !r.vrOdd;
+    if (k.drawn && r.vrHalf && !r.vrOdd) return null;
+    const B = p.fwd > 0 ? 0 : Math.PI, cb = Math.cos(B), sb = Math.sin(B);
+    const pics = eyes.map((e, i) => {
+      c.x = k.base.x + e.right * cb + e.fwd * sb;
+      c.y = k.base.y - e.right * sb + e.fwd * cb;
+      c.z = EYE.height + e.up;
+      const yaw = B + e.yaw;
+      c.lx = c.x + Math.sin(yaw) * Math.cos(e.pitch) * 10;
+      c.ly = c.y + Math.cos(yaw) * Math.cos(e.pitch) * 10;
+      c.lz = c.z + Math.sin(e.pitch) * 10;
+      c.ready = true;
+      setBasis(c);
+      v.yaw = e.yaw; v.pitch = e.pitch; v.roll = 0;
+      const b = eyeBuffer(r, i, r.W, r.H);
+      b.ctx.setTransform(r.dpr, 0, 0, r.dpr, 0, 0);
+      drawScene(b.ctx, r, g, human, info, land);
+      drawHeadUp(b.ctx, r, g, human, info);
+      return b.cv;
+    });
+    k.drawn = true;
+    paceVR(r, (performance.now() - now) / 1000, () => fitXR(r));
+    return pics;
+  }
+
   function resize(r, W, H, top, bottom, hudBottom) {
     r.hudBottom = hudBottom || 0;
     r.args = [W, H, top, bottom, hudBottom];
@@ -1317,6 +1380,21 @@
   const WARP = 0.1;
   const VR_SLOW = 0.009, VR_FAST = 0.005;   // seconds to draw both eyes: go to half rate above, back to full below
 
+  // How long drawing both eyes took (seconds): over 30 frames, Auto
+  // graphics steps the quality down while it's over VR_SLOW (then
+  // `refit`), and at the lowest (or a fixed) level the scene is redrawn
+  // only every other frame until it's under VR_FAST again.
+  function paceVR(r, work, refit) {
+    const v = r.vr;
+    r.vrWork.push(work);
+    if (r.vrWork.length < 30) return;
+    const avg = r.vrWork.reduce((a, w) => a + w, 0) / r.vrWork.length;
+    r.vrWork.length = 0;
+    if (avg > VR_SLOW && v.gfx === 'auto' && r.quality > 0 && !r.vrHalf) { r.quality--; refit(); }
+    else if (avg > VR_SLOW) r.vrHalf = true;
+    else if (avg < VR_FAST) r.vrHalf = false;
+  }
+
   function eyeBuffer(r, i, w, h) {
     const bufs = r.eyeBufs || (r.eyeBufs = [0, 1].map(() => { const cv = document.createElement('canvas'); return { cv, ctx: cv.getContext('2d', { alpha: false }) }; }));
     const b = bufs[i], pw = Math.round(w * r.dpr), ph = Math.round(h * r.dpr);
@@ -1343,14 +1421,7 @@
       }
       r.W = eyeW; r.H = eyeH; c.cy = cy0; c.x = x0; c.y = y0;
       r.eyePose = { yaw: v.yaw, pitch: v.pitch };
-      r.vrWork.push((performance.now() - t0) / 1000);
-      if (r.vrWork.length >= 30) {
-        const work = r.vrWork.reduce((a, w) => a + w, 0) / r.vrWork.length;
-        r.vrWork.length = 0;
-        if (work > VR_SLOW && v.gfx === 'auto' && r.quality > 0 && !r.vrHalf) { r.quality--; resize(r, ...r.args); }
-        else if (work > VR_SLOW) r.vrHalf = true;
-        else if (work < VR_FAST) r.vrHalf = false;
-      }
+      paceVR(r, (performance.now() - t0) / 1000, () => resize(r, ...r.args));
     }
     // turning right moves the picture left; looking up moves it down
     const dYaw = angleDiff(v.yaw, r.eyePose.yaw), dPitch = v.pitch - r.eyePose.pitch;
@@ -1427,7 +1498,8 @@
       // shrunk to fit the eye, and kept inside it (a phone held upright has narrow eyes)
       const line = (text, weight, size, y) => {
         ctx.font = `${weight} ${Math.round(size)}px ${weight > 500 ? 'Tektur' : '"Chakra Petch"'}, sans-serif`;
-        const w = ctx.measureText(text).width, k = Math.min(1, (r.W * 0.9) / w);
+        // (a headset's picture reaches past what the eye sees, and its edges are blurry: keep text to the middle)
+        const w = ctx.measureText(text).width, k = Math.min(1, (r.W * (r.xr ? 0.6 : 0.9)) / w);
         if (k < 1) ctx.font = `${weight} ${Math.floor(size * k)}px ${weight > 500 ? 'Tektur' : '"Chakra Petch"'}, sans-serif`;
         const half = (w * k) / 2 + 4;
         ctx.fillText(text, CT.clamp(c.cx, half, r.W - half), y);
@@ -1483,6 +1555,8 @@
   CT.resizeRenderer = resize;
   CT.setView = setView;
   CT.setVR = setVR;
+  CT.setXR = setXR;
+  CT.renderXR = renderXR;
   CT.renderGame = render;
   CT.showBillboard = showBillboard;
   CT.showLineCall = showLineCall;

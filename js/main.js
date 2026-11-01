@@ -38,12 +38,17 @@
   // vrFit.gfx is the graphics level: Auto starts sharp and steps down if the phone can't keep up.
   const VR_FOV = { wide: 95, normal: 80, close: 65 }, VR_LENS = { narrow: 60, normal: 64, wide: 68 };
   const VR_GFX = { auto: 'auto', smooth: 0, balanced: 1, sharp: 2 };
-  let vrFit = { fov: 'normal', lens: 'normal', gfx: 'auto' };
+  // vrFit.mode: 'xr' uses a WebXR headset where the browser has one
+  // (xr.js), 'cardboard' always draws the phone's own side-by-side view.
+  let vrFit = { fov: 'normal', lens: 'normal', gfx: 'auto', mode: 'xr' };
   try {
     const v = JSON.parse(localStorage.getItem('ct.vrFit'));
-    if (v && VR_FOV[v.fov] && VR_LENS[v.lens]) vrFit = { ...vrFit, fov: v.fov, lens: v.lens, gfx: v.gfx in VR_GFX ? v.gfx : 'auto' };
+    if (v && VR_FOV[v.fov] && VR_LENS[v.lens]) vrFit = { ...vrFit, fov: v.fov, lens: v.lens, gfx: v.gfx in VR_GFX ? v.gfx : 'auto', mode: v.mode === 'cardboard' ? 'cardboard' : 'xr' };
   } catch (e) { /* storage is optional */ }
-  // during a VR match: { head, wait (until a press starts play), press (when the button went down), ignoreUp, aim }
+  const useXR = () => CT.XR.supported && vrFit.mode === 'xr';
+  // during a VR match: { head, xr (in a WebXR headset; 'live' once its
+  // session runs), wait (until a press starts play), press (when the button
+  // went down), ignoreUp, aim }
   let vr = null;
   // achievements and stats saved on this phone, and the tracker for the
   // match in progress (none in the tutorial)
@@ -385,6 +390,7 @@
       if (!tut && (rallyShots === LONG_RALLY || (d.perfect && d.side === me && /power|overhead/i.test(d.kind)))) CT.showBillboard(renderer, 'WOW', '#ff3fb4', 1.8);
       if (zenOn()) realSfx('hit', d); else blip(d.kind === 'overhead' || d.kind === 'serve' ? 220 : 330, 0.07, 'square', 0.09, 140);
       if (d.side === me) {
+        if (vr && vr.xr === 'live') CT.XR.buzz(d.perfect ? 0.9 : 0.6, d.kind === 'serve' ? 50 : 35);
         const kind = { fh: 'Forehand', bh: 'Backhand' }[d.wing];
         const label = d.kind === 'serve' ? 'Serve' : d.kind === 'overhead' ? 'Overhead' : d.kind === 'volley' ? kind + ' volley' : d.kind === 'power' ? 'Power ' + kind.toLowerCase() : d.kind === 'powerVolley' ? 'Power ' + kind.toLowerCase() + ' volley' : kind;
         const timing = d.perfect ? 'Perfect timing'
@@ -636,7 +642,7 @@
     if (vr.wait) {
       CT.VR.recentre(vr.head);
       vr.wait = false;
-      goFullscreen('landscape');
+      if (!vr.xr) goFullscreen('landscape');
       return;
     }
     if (net && net.held) return;   // paused for lag
@@ -710,13 +716,17 @@
   // VR is for matches; the tutorial's lessons need their hints on screen.
   function enterVR() {
     if (!vr) {
-      vr = { head: CT.VR.createHead(), wait: true, press: null, ignoreUp: false, pad: false, lastT: null };
-      CT.VR.startHead(vr.head);
-      CT.VR.keepAwake(true);
+      vr = { head: CT.VR.createHead(), xr: useXR(), wait: true, press: null, ignoreUp: false, pad: false, lastT: null };
+      if (vr.xr) startXR();
+      else {
+        CT.VR.startHead(vr.head);
+        CT.VR.keepAwake(true);
+      }
       document.body.classList.add('vr');
     }
     vr.wait = true; vr.press = null; vr.end = null;
-    CT.setVR(renderer, { fov: VR_FOV[vrFit.fov], lens: VR_LENS[vrFit.lens], gfx: VR_GFX[vrFit.gfx] });
+    // (a headset sets its own picture up once its session is running)
+    if (!vr.xr) CT.setVR(renderer, { fov: VR_FOV[vrFit.fov], lens: VR_LENS[vrFit.lens], gfx: VR_GFX[vrFit.gfx] });
     // in a headset you can only look and press, so automove always runs
     if (game.control[me] === 'human') CT.setAutoMove(game, me, true);
     if (isGuest()) send({ t: 'auto', on: true });
@@ -724,23 +734,60 @@
 
   function exitVR() {
     if (!vr) return;
-    CT.VR.stopHead(vr.head);
-    CT.VR.keepAwake(false);
+    const wasXR = vr.xr;
+    if (wasXR) { CT.XR.stop(); $('xrGo').hidden = true; CT.setXR(renderer, null); }
+    else { CT.VR.stopHead(vr.head); CT.VR.keepAwake(false); }
     vr = null;
     document.body.classList.remove('vr');
     CT.setVR(renderer, null);
+    if (wasXR) { layout(); kickFrames(); }
     if (game && game.control[me] === 'human') CT.setAutoMove(game, me, autoMove);
     if (isGuest()) send({ t: 'auto', on: autoMove });
     applyZen();
+  }
+
+  // A WebXR headset. The browser only opens one from a tap, so a match
+  // started any other way (online, when the other phone starts it) shows an
+  // Enter VR button first; Not now plays on the screen, paused.
+  function startXR() {
+    const v = vr;
+    const act = navigator.userActivation;
+    if (act && !act.isActive) { $('xrGo').hidden = false; return; }
+    $('xrGo').hidden = true;
+    CT.XR.start({
+      head: v.head,
+      fit: (k) => { CT.setXR(renderer, k, VR_GFX[vrFit.gfx]); },
+      frame: (t, eyes) => frame(t, eyes),
+      end: () => { if (vr === v) leaveXR(); },
+      blur: (on) => { if (on && vr === v && game && !net && !paused && !v.end) setPaused(true); },
+    }).then(() => { if (vr === v) v.xr = 'live'; else CT.XR.stop(); })
+      .catch((err) => { console.warn('WebXR did not start:', err); if (vr === v) $('xrGo').hidden = false; });
+  }
+
+  // The headset session ended (its own menu, or taken off): back to the
+  // normal screen, as Exit VR does.
+  function leaveXR() {
+    const over = vr && vr.end;
+    exitVR();
+    setView('chase');
+    layout();
+    if (!over) setPaused(true);
   }
 
   // Each frame: the head turns the view, a gamepad's A is the button too,
   // and the eyes show what to do.
   function vrFrame() {
     const v = renderer.vr, pose = CT.VR.headPose(vr.head);
+    if (!v) return;   // a headset still starting up
     v.yaw = pose.yaw; v.pitch = pose.pitch; v.roll = pose.roll;
     let down = false;
     try { for (const gp of navigator.getGamepads ? navigator.getGamepads() : []) if (gp && gp.buttons[0] && gp.buttons[0].pressed) down = true; } catch (e) { /* no gamepads here */ }
+    if (vr.xr === 'live') {
+      const b = CT.XR.buttons();
+      if (b.down) down = true;
+      if (b.recentre) vrRecentre(true);
+      if (b.pause && game && !vr.end) setPaused(!paused);
+    }
     if (down !== vr.pad) { vr.pad = down; if (down) vrPress(); else vrRelease(); }
     v.charge = vr.press === null ? 0 : Math.min(1, (performance.now() - vr.press) / 1000 / CT.VR.POWER_HOLD);
     // a countdown you can hear wherever you're looking: two ticks, then a
@@ -754,8 +801,8 @@
     v.menu = vr.end ? { items: VR_END_MENU, sel: vrMenuChoice().id } : paused ? { items: VR_MENU, sel: vrMenuChoice().id } : null;
     if (vr.end) { v.prompt = vr.end.title + ' ' + vr.end.score; v.sub = (vr.end.note ? vr.end.note + ' · ' : '') + 'Turn to choose, press to pick'; }
     else if (paused) { v.prompt = 'PAUSED'; v.sub = 'Turn to choose, press to pick'; }
-    else if (window.innerHeight > window.innerWidth) { v.prompt = 'TURN SIDEWAYS'; v.sub = 'Hold the phone in landscape'; }
-    else if (vr.wait) { v.prompt = 'LOOK DOWN THE COURT'; v.sub = pad && pad.linked ? 'Tap the pad to play' : 'Press the button to play'; }
+    else if (!vr.xr && window.innerHeight > window.innerWidth) { v.prompt = 'TURN SIDEWAYS'; v.sub = 'Hold the phone in landscape'; }
+    else if (vr.wait) { v.prompt = 'LOOK DOWN THE COURT'; v.sub = pad && pad.linked ? 'Tap the pad to play' : vr.xr ? 'Pull the trigger to play' : 'Press the button to play'; }
     else if (pose.pitch < CT.VR.PAUSE_PITCH) { v.prompt = 'PAUSE?'; v.sub = 'Press to pause'; }
     else if (pose.pitch > CT.VR.RECENTRE_PITCH) { v.prompt = 'RECENTRE?'; v.sub = 'Press, then look down the court'; }
   }
@@ -1104,7 +1151,8 @@
   // ---------------- flow ----------------
   function layout() {
     const W = window.innerWidth, H = window.innerHeight;
-    if (vr) { CT.resizeRenderer(renderer, W, H, 0, 0, 0); return; }
+    if (vr && vr.xr === 'live') return;   // the headset's eyes are sized by xr.js
+    if (vr && !vr.xr) { CT.resizeRenderer(renderer, W, H, 0, 0, 0); return; }
     const hud = $('hud').getBoundingClientRect();
     // leave a band of open sky between the scoreboard and the roof edge
     CT.resizeRenderer(renderer, W, H, hud.bottom + Math.min(80, H * 0.08), 56, hud.bottom);
@@ -1201,7 +1249,7 @@
     // a room code box left focused would keep the on-screen keyboard live
     if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
     const inVR = view === 'vr' && !cfg.drill;
-    goFullscreen(inVR ? 'landscape' : 'portrait');
+    if (!(inVR && useXR())) goFullscreen(inVR ? 'landscape' : 'portrait');
     showFull(isFullscreen());   // turns on when the browser says it went full screen
     CT.Music.setPlaying(true);
     touch = null;
@@ -1230,11 +1278,20 @@
     } else if (!cfg.drill) showMsg('First to 6', 'Tiebreak at 6–6', 'neutral');
   }
 
-  function frame(now) {
-    // 60 frames a second at most: a 90 or 120 Hz phone would otherwise draw
-    // the whole scene up to twice as often for little gain
-    if (now < frameDue - 2) { requestAnimationFrame(frame); return; }
-    frameDue = now - frameDue > 50 ? now + FRAME_MS : frameDue + FRAME_MS;
+  // The frame loop. In a WebXR headset the headset's own frames run it
+  // instead (xr.js calls frame with the eyes, at the headset's rate) and
+  // it returns the eyes' pictures; the page's frames just wait meanwhile.
+  let rafPending = false;
+  function kickFrames() { if (!rafPending) { rafPending = true; requestAnimationFrame(frame); } }
+  function frame(now, eyes) {
+    if (!eyes) {
+      rafPending = false;
+      if (CT.XR.live) { kickFrames(); return; }
+      // 60 frames a second at most: a 90 or 120 Hz phone would otherwise draw
+      // the whole scene up to twice as often for little gain
+      if (now < frameDue - 2) { kickFrames(); return; }
+      frameDue = now - frameDue > 50 ? now + FRAME_MS : frameDue + FRAME_MS;
+    }
     const dt = Math.min(0.05, (now - lastFrame) / 1000);
     lastFrame = now;
     // an online match can't be paused: the pause menu just sits over it.
@@ -1258,9 +1315,13 @@
       const info = paused ? null : CT.incomingInfo(game, me), ball = game.ball;
       const land = paused || zenOn() ? null : CT.landingFor(game, me, info);
       game.ball = CT.viewBall(game);
-      try { CT.renderGame(renderer, game, me, info, land); } finally { game.ball = ball; }
+      try {
+        if (eyes) return renderer.xr ? CT.renderXR(renderer, game, me, info, land, eyes) : null;
+        CT.renderGame(renderer, game, me, info, land);
+      } finally { game.ball = ball; }
     }
-    requestAnimationFrame(frame);
+    if (!eyes) kickFrames();
+    return null;
   }
 
   function pickChar(id) {
@@ -1372,6 +1433,13 @@
     vrFit = { ...vrFit, [key]: value };
     try { localStorage.setItem('ct.vrFit', JSON.stringify(vrFit)); } catch (e) { /* storage is optional */ }
     document.querySelectorAll(`[data-vr-${key}]`).forEach((b) => b.setAttribute('aria-pressed', String(b.getAttribute(`data-vr-${key}`) === value)));
+    showVRMode();
+  }
+  // With a headset on hand, the menu asks which VR to use; the phone
+  // headset's own settings only show for Cardboard.
+  function showVRMode() {
+    $('vrMode').hidden = !CT.XR.supported;
+    document.querySelectorAll('.cb-only').forEach((el) => { el.hidden = useXR(); });
   }
 
   // preview portraits on the menu cards
@@ -1486,13 +1554,16 @@
     });
     document.addEventListener('keyup', (e) => { if (vr && e.key === ' ') { e.preventDefault(); vrRelease(); } });
     setView(view);
-    for (const key of ['fov', 'lens', 'gfx']) {
+    for (const key of ['fov', 'lens', 'gfx', 'mode']) {
       document.querySelectorAll(`[data-vr-${key}]`).forEach((b) => b.addEventListener('click', () => setVRFit(key, b.getAttribute(`data-vr-${key}`))));
       setVRFit(key, vrFit[key]);
     }
     // iPhones only share the motion sensor once it's allowed, from a tap:
     // ask on any tap while VR is picked (Play, or Create or Join online)
-    document.addEventListener('click', () => { if (view === 'vr') CT.VR.askMotion(); }, true);
+    document.addEventListener('click', () => { if (view === 'vr' && !useXR()) CT.VR.askMotion(); }, true);
+    CT.XR.check(showVRMode);
+    $('xrEnter').addEventListener('click', () => { if (vr && vr.xr) startXR(); });
+    $('xrSkip').addEventListener('click', () => { if (vr && vr.xr) { $('xrGo').hidden = true; leaveXR(); } });
     $('resume').addEventListener('click', () => setPaused(false));
     // the match stays saved, so the menu offers to resume it
     $('quit').addEventListener('click', () => { leaveFullscreen(); showMenu(); });
@@ -1540,7 +1611,7 @@
     const fontsReady = document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve();
     fontsReady.then(() => { drawPortraits(); if (game) layout(); });
     drawPortraits();
-    requestAnimationFrame(frame);
+    kickFrames();
     window.__CT_GAME = () => game;   // handy for debugging in the console
     window.__cam = renderer.cam;
   }

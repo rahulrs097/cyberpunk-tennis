@@ -71,7 +71,9 @@
     window.removeEventListener('pointermove', h.onMouse);
   }
   // Wherever you're facing now becomes straight down the court.
-  function recentre(h) { if (h.raw) h.yaw0 = h.raw.yaw; }
+  // (In a WebXR headset, xr.js keeps raw and rawPos, where the head is: the
+  // spot you're standing on becomes the middle of where you can lean too.)
+  function recentre(h) { if (h.raw) h.yaw0 = h.raw.yaw; if (h.rawPos) h.pos0 = h.rawPos; }
   function headPose(h) {
     if (h.raw) {
       const d = h.raw.yaw - h.yaw0;

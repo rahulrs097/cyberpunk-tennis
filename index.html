@@ -265,9 +265,16 @@
         <button data-view="vr" aria-pressed="false">VR</button>
       </div>
       <div id="vrOpts" class="opts-sub" hidden>
-        <p class="lede">For a Cardboard headset. Watch the ball and press the headset's button as it arrives: the shot is picked for you. Press early, hold and let go on time for a power shot. Or link a second phone and swipe on it.</p>
-        <div class="label">VR view</div>
-        <div class="seg">
+        <p class="lede">For a VR headset, or a phone in a Cardboard headset. Watch the ball and press the button (the trigger on a controller) as it arrives: the shot is picked for you. Press early, hold and let go on time for a power shot. Or link a second phone and swipe on it.</p>
+        <div class="opts-sub" id="vrMode" hidden>
+          <div class="label">VR headset</div>
+          <div class="seg">
+            <button data-vr-mode="xr" aria-pressed="true">WebXR</button>
+            <button data-vr-mode="cardboard" aria-pressed="false">Cardboard</button>
+          </div>
+        </div>
+        <div class="label cb-only">VR view</div>
+        <div class="seg cb-only">
           <button data-vr-fov="wide" aria-pressed="false">Wide</button>
           <button data-vr-fov="normal" aria-pressed="true">Normal</button>
           <button data-vr-fov="close" aria-pressed="false">Close</button>
@@ -279,8 +286,8 @@
           <button data-vr-gfx="balanced" aria-pressed="false">Balanced</button>
           <button data-vr-gfx="sharp" aria-pressed="false">Sharp</button>
         </div>
-        <div class="label">VR lenses</div>
-        <div class="seg">
+        <div class="label cb-only">VR lenses</div>
+        <div class="seg cb-only">
           <button data-vr-lens="narrow" aria-pressed="false">Narrow</button>
           <button data-vr-lens="normal" aria-pressed="true">Normal</button>
           <button data-vr-lens="wide" aria-pressed="false">Wide</button>
@@ -341,7 +348,7 @@
       <li><b>Timing</b><span>Swipe as the ring closes. Late forehands drift right, late backhands drift left. The yellow X shows where the ball will bounce, and on a serve it shows before the ring does.</span></li>
       <li><b>Stamina</b><span>Running, every swing and repeated power shots tire you, and you only get part of it back between points. Tired players run slower and have less time to swing. The striped part of the bar is gone for the set.</span></li>
       <li><b>Zen</b><span>Zen mode clears the screen: no scoreboard, hints, timing ring or landing X, just the pause button. The score goes up on the billboard in the sky. It has its own calm music, and the ball sounds closer to a real court.</span></li>
-      <li><b>VR</b><span>Pick VR under Camera and put the phone in a Cardboard headset. Look down the court and press the button to start. Watch the ball and press the button as it arrives: where the shot goes is picked for you. For a power shot, press early, hold, and let go as the ball arrives; the ring in the middle of your view fills when the hold is long enough. You see your racket swing through the ball. A small ring on the ball closes as it comes, and if you look away an arrow points to the ball and two ticks then a high beep count you down. On your serve, press to toss, then press again at the top. Look down at your feet and press to pause. The pause menu appears in the headset: turn to Exit VR on the left, Resume ahead or Quit on the right, and press. At the end of a match the score shows the same way, with Rematch ahead and Menu on the right. Look straight up at the sky and press to recentre (then look down the court and press again), or tap the pad with two fingers. The white line down the middle lines the phone up with the headset's divider. Automove runs for you. For full swipe control, tap Link a phone under Swipe pad, then on a second phone pick VR, tap Be the pad and enter the code: swipe on that phone exactly as on the game screen. On a laptop the mouse is your head and the space bar is the button.</span></li>
+      <li><b>VR</b><span>Pick VR under Camera and put the phone in a Cardboard headset. Look down the court and press the button to start. Watch the ball and press the button as it arrives: where the shot goes is picked for you. For a power shot, press early, hold, and let go as the ball arrives; the ring in the middle of your view fills when the hold is long enough. You see your racket swing through the ball. A small ring on the ball closes as it comes, and if you look away an arrow points to the ball and two ticks then a high beep count you down. On your serve, press to toss, then press again at the top. Look down at your feet and press to pause. The pause menu appears in the headset: turn to Exit VR on the left, Resume ahead or Quit on the right, and press. At the end of a match the score shows the same way, with Rematch ahead and Menu on the right. Look straight up at the sky and press to recentre (then look down the court and press again), or tap the pad with two fingers. The white line down the middle lines the phone up with the headset's divider. Automove runs for you. For full swipe control, tap Link a phone under Swipe pad, then on a second phone pick VR, tap Be the pad and enter the code: swipe on that phone exactly as on the game screen. On a laptop the mouse is your head and the space bar is the button. In a VR headset (Quest, Pico and other WebXR browsers) the match opens in the headset: pull the trigger (or press A or X) as the button, squeeze the grip to pause, and press B or Y to recentre. Lean and step to reach. Pick Cardboard under VR headset to use the phone view instead.</span></li>
       <li><b>Full screen</b><span>The game fills the screen when a match starts. If Safari on iPad stops the match with a "typing while in full screen" warning, switch it off. On iPhone and iPad, Add to Home Screen plays full screen anyway.</span></li>
       <li><b>Level</b><span>Chill is slower and the CPU covers less court. Pro is full speed against a CPU that rarely misses.</span></li>
     </ul>
@@ -388,6 +395,18 @@
   </div>
 </div>
 
+<!-- WebXR: the browser only opens the headset from a tap -->
+<div class="overlay" id="xrGo" hidden>
+  <div class="sheet">
+    <div class="title"><b>VR headset</b></div>
+    <p class="lede">Tap to put the match in your headset.</p>
+    <div class="btns">
+      <button class="btn primary" id="xrEnter">Enter VR</button>
+      <button class="btn" id="xrSkip">Not now</button>
+    </div>
+  </div>
+</div>
+
 <div class="overlay" id="end" hidden>
   <div class="sheet">
     <div class="title"><b id="endTitle">Set</b></div>
@@ -407,6 +426,7 @@
 <script src="js/achievements.js"></script>
 <script src="js/render.js"></script>
 <script src="js/vr.js"></script>
+<script src="js/xr.js"></script>
 <script src="js/music.js"></script>
 <script src="js/net.js"></script>
 <script src="js/main.js"></script>

@@ -101,3 +101,69 @@ test('the moment to let go counts down to the top of the toss, and to the ball r
   g.phase = 'rally';
   assert.deepEqual({ ...CT.VR.timeToHit(g, 0, info) }, { t: 0.4, reach: false });
 });
+
+// ---------------- WebXR (js/xr.js) ----------------
+// A quaternion turning by `a` radians about an axis.
+const quat = (ax, a) => ({ x: ax[0] * Math.sin(a / 2), y: ax[1] * Math.sin(a / 2), z: ax[2] * Math.sin(a / 2), w: Math.cos(a / 2) });
+const qmul = (a, b) => ({
+  x: a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
+  y: a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
+  z: a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w,
+  w: a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z,
+});
+
+test('a headset pose reads as the same yaw, pitch and roll as the phone', () => {
+  const { XR } = loadEngine(1, {}, ['vr.js', 'xr.js']);
+  const id = XR.angles({ x: 0, y: 0, z: 0, w: 1 });
+  near(id.yaw, 0, 1e-9, 'straight ahead yaw'); near(id.pitch, 0, 1e-9, 'pitch'); near(id.roll, 0, 1e-9, 'roll');
+  // turning right is a negative turn about +y in WebXR, and reads as + yaw
+  near(deg(XR.angles(quat([0, 1, 0], -0.5)).yaw), deg(0.5), 1e-6, 'turned right');
+  near(deg(XR.angles(quat([1, 0, 0], 0.3)).pitch), deg(0.3), 1e-6, 'looking up');
+  // tilting the head left turns it anticlockwise about the view (+z)
+  near(deg(XR.angles(quat([0, 0, 1], 0.2)).roll), deg(0.2), 1e-6, 'tilted left');
+  // all three at once come back apart
+  const q = qmul(qmul(quat([0, 1, 0], -0.7), quat([1, 0, 0], 0.25)), quat([0, 0, 1], -0.15));
+  const a = XR.angles(q);
+  near(a.yaw, 0.7, 1e-6, 'yaw'); near(a.pitch, 0.25, 1e-6, 'pitch'); near(a.roll, -0.15, 1e-6, 'roll');
+});
+
+test('moving in the room moves you on the court, from where you recentred', () => {
+  const { XR } = loadEngine(1, {}, ['vr.js', 'xr.js']);
+  // recentred facing -z: a step to -z is forward, +x is right, +y up
+  const o = XR.courtOffset({ x: 0.3, y: 0.1, z: -0.4 }, [0, 0, 0], 0);
+  near(o.right, 0.3, 1e-9, 'right'); near(o.fwd, 0.4, 1e-9, 'forward'); near(o.up, 0.1, 1e-9, 'up');
+  // recentred facing +x (turned right a quarter): a step to +x is forward
+  const t = XR.courtOffset({ x: 1.5, y: 1, z: 2 }, [1, 1, 2], Math.PI / 2);
+  near(t.fwd, 0.5, 1e-9, 'forward after a turn'); near(t.right, 0, 1e-9, 'no sideways');
+  // and you can't walk off the court
+  assert.ok(XR.courtOffset({ x: 9, y: 0, z: 0 }, [0, 0, 0], 0).right <= 1.2);
+});
+
+test('the shader maps each eye pixel back onto the picture it was drawn in', () => {
+  const { XR } = loadEngine(1, {}, ['vr.js', 'xr.js']);
+  // a symmetric 90 degree eye, slightly off-centre like a real lens
+  const P = new Array(16).fill(0); P[0] = 1; P[5] = 1; P[8] = 0.1; P[9] = -0.05; P[11] = -1;
+  const fit = XR.canvasFit([{ projectionMatrix: P }]);
+  assert.ok(fit.f > 0 && fit.w === 600 && fit.h >= 500, 'canvas fit');
+  // the picture covers a bit more than the eye sees, on every side
+  const k = (fit.w / 2) / fit.f;
+  assert.ok(k > 1.1 * 1.0, `picture reaches tan ${k}`);
+  const lookup = (q, drawn, nx, ny) => {
+    const m = XR.warpMatrix(q, drawn);
+    const v = [nx / P[0] + P[8] / P[0], ny / P[5] + P[9] / P[5], -1];
+    const d = [0, 1, 2].map((i) => m[i] * v[0] + m[3 + i] * v[1] + m[6 + i] * v[2]);
+    return { u: 0.5 + (fit.f / fit.w) * d[0] / d[2], v: 0.5 - (fit.f / fit.h) * d[1] / d[2] };
+  };
+  // drawn this frame from the same pose: the eye's own middle ray lands
+  // where the lens centre is in the picture
+  const q = qmul(quat([0, 1, 0], -0.4), quat([1, 0, 0], 0.2));
+  const now = lookup(q, { yaw: 0.4, pitch: 0.2 }, -P[8], -P[9]);
+  near(now.u, 0.5, 1e-6, 'middle u'); near(now.v, 0.5, 1e-6, 'middle v');
+  // drawn a frame ago, 0.05 rad further left: what's ahead now sits right of the old middle
+  const late = lookup(q, { yaw: 0.35, pitch: 0.2 }, -P[8], -P[9]);
+  assert.ok(late.u > 0.5, `turned since: ${late.u}`);
+  // a rolled head: the ray to the right of the eye lands up or down the picture, not sideways only
+  const rolled = qmul(q, quat([0, 0, 1], 0.3));
+  const side = lookup(rolled, { yaw: 0.4, pitch: 0.2 }, 0.5 - P[8], -P[9]);
+  assert.ok(side.v < 0.5, `rolled left, the right of the view is higher in the picture: ${side.v}`);
+});
