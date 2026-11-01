@@ -8,7 +8,11 @@ compatibility_date = "2026-09-01"
 [assets]
 directory = "."
 binding = "ASSETS"
-run_worker_first = ["/room/*"]
+run_worker_first = ["/room/*", "/version"]
+
+# The deployment's id, served at /version so open games spot a new build
+[version_metadata]
+binding = "CF_VERSION_METADATA"
 
 [[durable_objects.bindings]]
 name = "ROOMS"
@@ -19,6 +23,9 @@ class_name = "Room"
 [[previews.durable_objects.bindings]]
 name = "ROOMS"
 class_name = "Room"
+
+[previews.version_metadata]
+binding = "CF_VERSION_METADATA"
 
 # SQLite-backed Durable Objects are the ones the free plan allows
 [[migrations]]

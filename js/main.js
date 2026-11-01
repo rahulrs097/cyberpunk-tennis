@@ -1153,6 +1153,33 @@
     $('menu').hidden = false;
     game = CT.createGame({ p0: 'octopus', p1: 'philosopher', timeScale: 0.6, control: ['cpu', 'cpu'], onEvent: () => {} });
     applyZen();
+    reloadIfNewBuild();
+  }
+
+  // New builds. An installed app is rarely started afresh: the phone brings
+  // the open page back from the background. So whenever it comes back (and
+  // every few minutes it sits open) the page asks the server which build is
+  // live (/version, the Worker's deployment id). When that changes, it
+  // reloads, but only on the main menu with nothing else open, never in a
+  // match, a room or the pad; a match in progress gets the new build when it
+  // ends. Offline, or where there is no /version (a local server), nothing
+  // happens.
+  let build = null, newBuild = false;
+  async function checkBuild() {
+    if (newBuild || !/^https?:$/.test(location.protocol)) return;
+    try {
+      const res = await fetch('version', { cache: 'no-store' });
+      if (!res.ok) return;
+      const v = (await res.json()).v;
+      if (!v) return;
+      if (build === null) build = v;
+      else if (v !== build) { newBuild = true; reloadIfNewBuild(); }
+    } catch (e) { /* offline: try again next time */ }
+  }
+  function reloadIfNewBuild() {
+    if (!newBuild || document.hidden) return;
+    const quiet = ['lobby', 'pad', 'trophies', 'help', 'end', 'pauseMenu'].every((id) => $(id).hidden);
+    if (!$('menu').hidden && quiet) location.reload();
   }
 
   // Play vs CPU, or Rematch (online, the host restarts for both).
@@ -1413,8 +1440,12 @@
     document.addEventListener('visibilitychange', () => {
       // (the CPU rally behind the menu isn't a match, so there's nothing to pause)
       if (document.hidden) { if ($('menu').hidden && $('lobby').hidden && $('pad').hidden) setPaused(true); if (audio) audio.suspend(); }
-      else if (audio) audio.resume();
+      else { if (audio) audio.resume(); checkBuild(); reloadIfNewBuild(); }
     });
+    checkBuild();
+    setInterval(() => { if (!document.hidden) checkBuild(); }, 5 * 60 * 1000);
+    // closing the trophies or help sheet lands back on the menu
+    for (const id of ['trophies', 'help']) new MutationObserver(reloadIfNewBuild).observe($(id), { attributes: true, attributeFilter: ['hidden'] });
     document.querySelectorAll('.pick').forEach((b) => b.addEventListener('click', () => pickChar(b.dataset.char)));
     const pickLevel = (id) => {
       level = id;
