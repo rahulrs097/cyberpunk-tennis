@@ -7,7 +7,7 @@
 // offline. A new build is therefore what loads as soon as there's a
 // connection, with nothing to bump. VERSION only needs a change if the
 // list of files below does, to start a clean cache.
-const VERSION = 'ct-1';
+const VERSION = 'ct-2';
 const SHELL = [
   './',
   'manifest.webmanifest',
@@ -18,6 +18,7 @@ const SHELL = [
   'js/achievements.js',
   'js/render.js',
   'js/vr.js',
+  'js/xr.js',
   'js/music.js',
   'js/net.js',
   'js/main.js',
