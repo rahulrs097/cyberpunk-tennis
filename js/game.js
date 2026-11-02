@@ -8,6 +8,7 @@
   const { COURT, PHYS, clamp, lerp } = CT;
 
   const POWER_Z = 1.3;          // balls above this can be hit as power shots
+  const WIDE = 0.6;             // a ball met this close to the sideline (m), or past it, is out wide
   const CONTACT_AHEAD = 0.35;   // ideal contact point in front of the body
   const OUTER = 2.5;            // a swipe more than this many windows off whiffs
   const REACT = 0.24;           // split-step: seconds before an auto-moving player can react to a shot
@@ -505,9 +506,11 @@
       // swiped so fast it lost its margin (a full-pace drive or serve this
       // overhit lands long), so the player can tell why a good one went out
       overhit: shot.over >= OVERHIT && shot.kind !== 'overhead' && !shot.lob,
-      // (for the achievements) met beyond 60% of the player's reach, and the
-      // opponent inside their service line, i.e. at the net
+      // (for the achievements) met beyond 60% of the player's reach, met out
+      // wide (within WIDE of the sideline or past it), and the opponent
+      // inside their service line, i.e. at the net
       stretched: shot.note === 'Stretched',
+      wide: Math.abs(shot.pos.x) >= COURT.SW - WIDE,
       vsNet: Math.abs(g.players[1 - p.side].y) < COURT.SL,
     };
     g.lastShot = info;
