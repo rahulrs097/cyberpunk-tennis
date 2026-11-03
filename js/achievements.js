@@ -22,7 +22,7 @@
     { id: 'breadstick', name: 'Breadstick', desc: 'Win a match 6–1', pro: true },
     { id: 'bagel', name: 'Bagel', desc: 'Win a match 6–0', pro: true },
     { id: 'proChampion', name: 'Pro Champion', desc: 'Win a match on Pro', pro: true },
-    { id: 'tentacle', name: 'The Tentacle', desc: 'Hit a backhand passing winner at full stretch', char: 'octopus' },
+    { id: 'tentacle', name: 'The Tentacle', desc: 'Hit a backhand passing winner at full stretch or from past the sideline', char: 'octopus' },
     { id: 'thought', name: 'The Thought', desc: 'Hit a forehand, a backhand, a volley and a smash in one rally, and win it with a winner', char: 'philosopher' },
     { id: 'goldenSet', name: 'Golden Set', desc: 'Win a match without losing a single point', pro: true },
   ];
@@ -48,7 +48,7 @@
     // it has landed in, i.e. they returned it or the point was played out
     let serveKmh = 0;
     // this rally: the kinds of shot we've hit (fh, bh, volley, smash), and
-    // our last shot, if it was a stretched backhand pass
+    // our last shot, if it was a backhand pass at full stretch or out wide
     let kinds = new Set(), pass = false;
     // our last rally shot was hit under pressure (stretched, jammed or on
     // the run), so missing it is a forced error, not an unforced one
@@ -127,7 +127,9 @@
         if (ground) kinds.add(d.wing);
         else if (d.kind === 'volley' || d.kind === 'powerVolley') kinds.add('volley');
         else if (d.kind === 'overhead') kinds.add('smash');
-        pass = ground && d.wing === 'bh' && !!d.stretched && !!d.vsNet;
+        // (automove meets almost every ball at a comfortable 40% of reach, so
+        // full stretch alone hardly ever happens: hitting from past the sideline counts too)
+        pass = ground && d.wing === 'bh' && (!!d.stretched || !!d.wide) && !!d.vsNet;
         pressed = !!d.stretched || !!d.note;
       }
       // whose shot is in the air: an error is only ours when it was our rally shot

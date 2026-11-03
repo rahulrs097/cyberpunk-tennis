@@ -852,6 +852,7 @@ test('the tentacle: a stretched backhand pass for a winner, playing Octopus', ()
   const oct = () => CT.createAchievementTracker(0, 'club', null, 'octopus');
   assert.ok(!rally(oct(), { wing: 'fh' }).includes('tentacle'), 'a forehand');
   assert.ok(!rally(oct(), { stretched: false }).includes('tentacle'), 'not stretched');
+  assert.ok(rally(oct(), { stretched: false, wide: true }).includes('tentacle'), 'hit from past the sideline counts too');
   assert.ok(!rally(oct(), { vsNet: false }).includes('tentacle'), 'not a pass');
   assert.ok(!rally(oct(), { kind: 'volley' }).includes('tentacle'), 'a volley');
   // the pass has to be the winner, not an earlier shot in the rally
@@ -890,7 +891,8 @@ test('hit events say whether the shot was stretched and whether the opponent was
   const hits = [];
   const g = CT.createGame({ p0: 'octopus', p1: 'philosopher', control: ['cpu', 'cpu'], ...levelOpts(CT, 'pro'), onEvent: (t, d) => { if (t === 'hit') hits.push(d); } });
   for (let i = 0; i < 60 * 1800 && g.phase !== 'matchOver'; i++) CT.updateGame(g, 1 / 60);
-  assert.ok(hits.every((h) => typeof h.stretched === 'boolean' && typeof h.vsNet === 'boolean'));
+  assert.ok(hits.every((h) => typeof h.stretched === 'boolean' && typeof h.wide === 'boolean' && typeof h.vsNet === 'boolean'));
+  assert.ok(hits.some((h) => h.wide) && hits.some((h) => !h.wide));
   assert.ok(hits.some((h) => h.stretched), 'some shots are met at full stretch');
   assert.ok(hits.some((h) => h.vsNet && h.kind !== 'serve'), 'some are hit at a player at the net');
   assert.ok(hits.some((h) => !h.vsNet));
