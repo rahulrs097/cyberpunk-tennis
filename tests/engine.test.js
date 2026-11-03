@@ -780,7 +780,10 @@ test('in a real set the tracker counts the points, games and aces the engine sco
   assert.equal(tot.points, won);
   assert.equal(tot.games, g.match.games[0]);
   assert.equal(tot.aces, aces);
-  assert.deepEqual(plain(over), { won: g.match.winner === 0 });
+  assert.equal(over.won, g.match.winner === 0);
+  assert.deepEqual(plain(over.games), plain(g.match.games));
+  assert.deepEqual([over.totals.points, over.totals.aces], [won, aces]);
+  assert.equal(over.totals.points, tot.points, 'the match totals match the running stats');
 });
 
 test('rocket serve: a perfect full-pace serve reaches 200 km/h, a tired or soft one does not', () => {
@@ -916,4 +919,34 @@ test('winners and unforced errors: a miss under pressure is forced, a serve is n
   const rec = CT.loadAchievements();
   CT.recordAchievements(rec, { earned: [], stats: { winners: 2, unforcedErrors: 1 }, best: {} }, 'club');
   assert.deepEqual([CT.achievementStats(rec, 'all').winners, CT.achievementStats(rec, 'club').unforcedErrors], [2, 1]);
+});
+
+test('a finished match goes into the match history with its own stats, and survives a resume', () => {
+  const store = {};
+  const localStorage = { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); } };
+  const CT = loadEngine(1, { localStorage });
+  const m = CT.createMatch(0);
+  // side 1 is us: lose the first game, then win six in a row
+  let t = CT.createAchievementTracker(1, 'club'), over = null, n = 0;
+  const play = (w, text) => {
+    const server = CT.currentServer(m), tiebreak = m.tiebreak, result = CT.awardPoint(m, w);
+    const r = t.point({ winner: w, text, result, server, shots: 3, tiebreak, games: m.games.slice(), points: m.points.slice() });
+    if (r.over) over = r.over;
+    if (++n === 10) t = CT.createAchievementTracker(1, 'club', JSON.parse(JSON.stringify(t.state())));
+  };
+  for (let i = 0; i < 4; i++) play(0, 'Out');
+  t.hit({ side: 1, kind: 'ground', wing: 'fh' });
+  play(0, 'Out');                       // our rally miss: unforced
+  for (let g = 0; g < 6; g++) for (let i = 0; i < 4; i++) play(1, 'Winner');
+  assert.ok(over, 'the set ended');
+  assert.deepEqual(plain(over.games), [6, 1]);
+  assert.equal(over.tiebreak, null);
+  assert.equal(over.won, true);
+  assert.deepEqual([over.totals.points, over.totals.played, over.totals.winners, over.totals.unforcedErrors], [24, 29, 24, 1]);
+  CT.addHistory({ at: 1, mode: 'club', me: 'octopus', opp: 'philosopher', ...over });
+  CT.addHistory({ at: 2, mode: 'online', me: 'philosopher', opp: 'octopus', won: false, games: [6, 7], tiebreak: [5, 7], totals: {} });
+  const h = CT.loadHistory();
+  assert.deepEqual(plain(h.map((x) => x.at)), [2, 1], 'newest first');
+  for (let i = 0; i < CT.HISTORY_MAX + 5; i++) CT.addHistory({ at: 10 + i, mode: 'pro', games: [0, 6], totals: {} });
+  assert.equal(CT.loadHistory().length, CT.HISTORY_MAX, 'only the latest are kept');
 });
