@@ -362,6 +362,10 @@
     const res = tracker[type](d);
     const fresh = CT.recordAchievements(ach, res, tracker.mode);
     achNew.push(...fresh);
+    if (res.over && game) {
+      CT.addHistory({ at: Date.now(), mode: tracker.mode, me: game.players[me].ch.id, opp: game.players[1 - me].ch.id,
+        won: res.over.won, games: res.over.games, tiebreak: res.over.tiebreak, totals: res.over.totals });
+    }
     const show = res.earned.filter((id) => fresh.includes(id) || !CT.achievement(id).common);
     if (!show.length) return;
     const now = performance.now() / 1000;
@@ -1429,6 +1433,33 @@
       const dd = document.createElement('dd'); dd.textContent = f(s);
       dl.append(dt, dd);
     }
+    showHistory(mode);
+  }
+  // Finished matches, newest first, for the same tab as the stats.
+  const MODE_NAMES = { chill: 'Chill', club: 'Club', pro: 'Pro', online: 'Online' };
+  function showHistory(mode) {
+    const list = $('histList');
+    list.textContent = '';
+    const rows = CT.loadHistory().filter((h) => mode === 'all' || h.mode === mode);
+    for (const h of rows) {
+      const t = h.totals || {}, name = (id) => (CT.CHARACTERS[id] ? CT.CHARACTERS[id].name : '?');
+      const li = document.createElement('li');
+      li.className = h.won ? 'won' : 'lost';
+      const res = document.createElement('b');
+      res.textContent = (h.won ? 'Won ' : 'Lost ') + h.games[0] + '–' + h.games[1] + (h.tiebreak ? ' (' + h.tiebreak[0] + '–' + h.tiebreak[1] + ')' : '');
+      const when = document.createElement('em');
+      const d = new Date(h.at);
+      when.textContent = isNaN(d) ? '' : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) + ' ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+      const who = document.createElement('span');
+      who.textContent = name(h.me) + ' vs ' + name(h.opp) + (MODE_NAMES[h.mode] ? ' · ' + MODE_NAMES[h.mode] : '');
+      const st = document.createElement('small');
+      st.textContent = [t.played ? 'Points ' + t.points + '/' + t.played : '', 'Winners ' + (t.winners || 0), 'Unforced ' + (t.unforcedErrors || 0),
+        'Aces ' + (t.aces || 0), 'Double faults ' + (t.doubleFaults || 0), t.longestRally ? 'Longest rally ' + t.longestRally : '',
+        t.fastestServe ? 'Fastest serve ' + t.fastestServe + ' km/h' : ''].filter(Boolean).map((x) => x.replace(/ /g, '\u00a0')).join(' · ');
+      li.append(res, when, who, st);
+      list.append(li);
+    }
+    $('histEmpty').hidden = rows.length > 0;
   }
 
   function init() {

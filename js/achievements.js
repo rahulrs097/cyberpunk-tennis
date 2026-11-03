@@ -34,7 +34,9 @@
   // point(d) takes each 'point' event (winner, text, result, server, shots,
   // tiebreak, games) and hit(d) each 'hit'; both return what they changed:
   // { earned: [ids, in list order], stats: { name: amount }, best: { name: value },
-  // over: { won } once the match is over }.
+  // over: { won, games, tiebreak, totals } once the match is over: games is
+  // the set score and tiebreak the tiebreak's points (or null), both ours
+  // first; totals is this match's stats, for the match history }.
   // `saved`: what state() returned, to carry on a resumed match. char: the
   // character `side` plays.
   function createTracker(side, mode, saved, char) {
@@ -53,9 +55,17 @@
     // our last rally shot was hit under pressure (stretched, jammed or on
     // the run), so missing it is a forced error, not an unforced one
     let pressed = false, lastRally = false;
-    if (saved) ({ aces, won, everyGame, lostPoint, maxBehind } = saved);
-    const state = () => ({ aces, won: won.slice(), everyGame, lostPoint, maxBehind });
+    // this match's own stats (the saved record only keeps running totals)
+    let totals = blankTotals();
+    if (saved) {
+      ({ aces, won, everyGame, lostPoint, maxBehind } = saved);
+      if (saved.totals) for (const k in totals) if (typeof saved.totals[k] === 'number') totals[k] = saved.totals[k];
+    }
+    const state = () => ({ aces, won: won.slice(), everyGame, lostPoint, maxBehind, totals: { ...totals } });
     function out(got, stats, best, over) {
+      for (const k in stats) if (k in totals) totals[k] += stats[k];
+      for (const k in best) if (k in totals) totals[k] = Math.max(totals[k], best[k]);
+      if (over) over.totals = { ...totals };
       return { earned: ACHIEVEMENTS.filter((x) => got.has(x.id) && (pro || !x.pro) && (!x.char || x.char === char)).map((x) => x.id), stats, best, over };
     }
     function serveIn(got, best) {
@@ -88,6 +98,7 @@
       if (d.shots) best.longestRally = d.shots;
       if (!mine) lostPoint = true;
       won[d.winner]++;
+      totals.played++;
       if (d.result === 'game' || d.result === 'set') {
         if (won[side] === 0) everyGame = false;
         if (mine) { stats.games = 1; got.add('game'); }
@@ -102,7 +113,8 @@
       if (d.games) maxBehind = Math.max(maxBehind, d.games[opp] - d.games[side]);
       let over = null;
       if (d.result === 'set') {
-        over = { won: mine };
+        const g = d.games || [0, 0], p = d.points || [0, 0];
+        over = { won: mine, games: [g[side], g[opp]], tiebreak: d.tiebreak ? [p[side], p[opp]] : null };
         if (mine) {
           const [a, b] = [d.games[side], d.games[opp]];
           ['match', 'proChampion'].forEach((id) => got.add(id));
@@ -138,6 +150,10 @@
     }
     return { side, mode, point, hit, state };
   }
+
+  // one match's stats: points won (and played), aces and so on
+  const TOTAL_KEYS = ['points', 'played', 'aces', 'doubleFaults', 'winners', 'unforcedErrors', 'longestRally', 'fastestServe'];
+  function blankTotals() { return Object.fromEntries(TOTAL_KEYS.map((k) => [k, 0])); }
 
   // ---------------- saved record ----------------
   // { earned: { id: { n: times earned, at: first earned (ms since 1970) } },
@@ -189,7 +205,28 @@
     return fresh;
   }
 
+  // ---------------- match history ----------------
+  // Finished matches, newest first, saved under 'ct.history' (the last
+  // HISTORY_MAX of them). Each is { at (ms since 1970), mode (CPU level id
+  // or 'online'), me, opp (character ids), won, games: [ours, theirs],
+  // tiebreak: [ours, theirs] or null, totals: this match's stats }.
+  // A match that was quit before the end isn't in it.
+  const HISTORY_KEY = 'ct.history', HISTORY_MAX = 50;
+  function loadHistory() {
+    let v = null;
+    try { v = JSON.parse(localStorage.getItem(HISTORY_KEY) || 'null'); } catch (e) { /* storage is optional */ }
+    return Array.isArray(v) ? v.filter((h) => h && typeof h === 'object' && Array.isArray(h.games)) : [];
+  }
+  function addHistory(entry) {
+    const list = [entry, ...loadHistory()].slice(0, HISTORY_MAX);
+    try { localStorage.setItem(HISTORY_KEY, JSON.stringify(list)); } catch (e) { /* storage is optional */ }
+    return list;
+  }
+
   CT.ACHIEVEMENTS = ACHIEVEMENTS;
+  CT.loadHistory = loadHistory;
+  CT.addHistory = addHistory;
+  CT.HISTORY_MAX = HISTORY_MAX;
   CT.achievement = (id) => BY_ID[id];
   CT.createAchievementTracker = createTracker;
   CT.loadAchievements = load;
