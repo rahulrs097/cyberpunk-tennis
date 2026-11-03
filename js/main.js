@@ -1420,6 +1420,7 @@
       list.append(li);
     }
     $('achEmpty').hidden = got.length > 0;
+    histMode = null;
     showStats(statMode);
     $('trophies').hidden = false;
   }
@@ -1436,27 +1437,49 @@
     showHistory(mode);
   }
   // Finished matches, newest first, for the same tab as the stats.
+  // HIST_PAGE matches a page; switching tab goes back to the first page.
   const MODE_NAMES = { chill: 'Chill', club: 'Club', pro: 'Pro', online: 'Online' };
-  function showHistory(mode) {
+  const HIST_PAGE = 10;
+  let histPage = 0, histMode = null;
+  function showHistory(mode, page) {
     const list = $('histList');
     list.textContent = '';
     const rows = CT.loadHistory().filter((h) => mode === 'all' || h.mode === mode);
-    for (const h of rows) {
+    const pages = Math.max(1, Math.ceil(rows.length / HIST_PAGE));
+    histPage = Math.min(pages - 1, Math.max(0, page !== undefined ? page : mode === histMode ? histPage : 0));
+    histMode = mode;
+    $('histPager').hidden = pages < 2;
+    $('histPageNo').textContent = 'Page ' + (histPage + 1) + ' of ' + pages;
+    $('histNewer').disabled = histPage === 0;
+    $('histOlder').disabled = histPage === pages - 1;
+    for (const h of rows.slice(histPage * HIST_PAGE, (histPage + 1) * HIST_PAGE)) {
       const t = h.totals || {}, name = (id) => (CT.CHARACTERS[id] ? CT.CHARACTERS[id].name : '?');
       const li = document.createElement('li');
       li.className = h.won ? 'won' : 'lost';
+      // the row is just the result and level; tapping it opens the match's stats
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.setAttribute('aria-expanded', 'false');
       const res = document.createElement('b');
       res.textContent = (h.won ? 'Won ' : 'Lost ') + h.games[0] + '–' + h.games[1] + (h.tiebreak ? ' (' + h.tiebreak[0] + '–' + h.tiebreak[1] + ')' : '');
-      const when = document.createElement('em');
+      const lvl = document.createElement('em');
+      lvl.textContent = MODE_NAMES[h.mode] || '';
+      row.append(res, lvl);
       const d = new Date(h.at);
-      when.textContent = isNaN(d) ? '' : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) + ' ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-      const who = document.createElement('span');
-      who.textContent = name(h.me) + ' vs ' + name(h.opp) + (MODE_NAMES[h.mode] ? ' · ' + MODE_NAMES[h.mode] : '');
-      const st = document.createElement('small');
-      st.textContent = [t.played ? 'Points ' + t.points + '/' + t.played : '', 'Winners ' + (t.winners || 0), 'Unforced ' + (t.unforcedErrors || 0),
-        'Aces ' + (t.aces || 0), 'Double faults ' + (t.doubleFaults || 0), t.longestRally ? 'Longest rally ' + t.longestRally : '',
-        t.fastestServe ? 'Fastest serve ' + t.fastestServe + ' km/h' : ''].filter(Boolean).map((x) => x.replace(/ /g, '\u00a0')).join(' · ');
-      li.append(res, when, who, st);
+      const info = [['Date', isNaN(d) ? '–' : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) + ', ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })],
+        ['Players', name(h.me) + ' vs ' + name(h.opp)], ['Points won', t.played ? t.points + ' of ' + t.played : '–'],
+        ['Winners', t.winners || 0], ['Unforced errors', t.unforcedErrors || 0], ['Aces', t.aces || 0], ['Double faults', t.doubleFaults || 0],
+        ['Longest rally', t.longestRally ? t.longestRally + ' shots' : '–'], ['Fastest serve', t.fastestServe ? t.fastestServe + ' km/h' : '–']];
+      const dl = document.createElement('dl');
+      dl.className = 'stats';
+      dl.hidden = true;
+      for (const [k, v] of info) {
+        const dt = document.createElement('dt'); dt.textContent = k;
+        const dd = document.createElement('dd'); dd.textContent = v;
+        dl.append(dt, dd);
+      }
+      row.addEventListener('click', () => { dl.hidden = !dl.hidden; row.setAttribute('aria-expanded', String(!dl.hidden)); });
+      li.append(row, dl);
       list.append(li);
     }
     $('histEmpty').hidden = rows.length > 0;
@@ -1534,6 +1557,8 @@
     $('achBtn').addEventListener('click', showTrophies);
     $('achClose').addEventListener('click', () => { $('trophies').hidden = true; });
     document.querySelectorAll('[data-stats]').forEach((b) => b.addEventListener('click', () => showStats(b.dataset.stats)));
+    $('histNewer').addEventListener('click', () => showHistory(statMode, histPage - 1));
+    $('histOlder').addEventListener('click', () => showHistory(statMode, histPage + 1));
     $('hostBtn').addEventListener('click', hostRoom);
     $('joinBtn').addEventListener('click', () => { leaveOnline(true); lobbyMode = null; lobby('Enter the 4-letter code your friend sees.', '', true); $('codeInput').value = ''; $('codeInput').focus(); });
     $('lobbyGo').addEventListener('click', () => {
