@@ -852,7 +852,7 @@ test('the tentacle: a stretched backhand pass for a winner, playing Octopus', ()
   const oct = () => CT.createAchievementTracker(0, 'club', null, 'octopus');
   assert.ok(!rally(oct(), { wing: 'fh' }).includes('tentacle'), 'a forehand');
   assert.ok(!rally(oct(), { stretched: false }).includes('tentacle'), 'not stretched');
-  assert.ok(rally(oct(), { stretched: false, wide: true }).includes('tentacle'), 'pulled out wide counts too');
+  assert.ok(rally(oct(), { stretched: false, wide: true }).includes('tentacle'), 'hit from past the sideline counts too');
   assert.ok(!rally(oct(), { vsNet: false }).includes('tentacle'), 'not a pass');
   assert.ok(!rally(oct(), { kind: 'volley' }).includes('tentacle'), 'a volley');
   // the pass has to be the winner, not an earlier shot in the rally

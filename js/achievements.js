@@ -22,7 +22,7 @@
     { id: 'breadstick', name: 'Breadstick', desc: 'Win a match 6–1', pro: true },
     { id: 'bagel', name: 'Bagel', desc: 'Win a match 6–0', pro: true },
     { id: 'proChampion', name: 'Pro Champion', desc: 'Win a match on Pro', pro: true },
-    { id: 'tentacle', name: 'The Tentacle', desc: 'Hit a backhand passing winner at full stretch or pulled out wide', char: 'octopus' },
+    { id: 'tentacle', name: 'The Tentacle', desc: 'Hit a backhand passing winner at full stretch or from past the sideline', char: 'octopus' },
     { id: 'thought', name: 'The Thought', desc: 'Hit a forehand, a backhand, a volley and a smash in one rally, and win it with a winner', char: 'philosopher' },
     { id: 'goldenSet', name: 'Golden Set', desc: 'Win a match without losing a single point', pro: true },
   ];
@@ -128,7 +128,7 @@
         else if (d.kind === 'volley' || d.kind === 'powerVolley') kinds.add('volley');
         else if (d.kind === 'overhead') kinds.add('smash');
         // (automove meets almost every ball at a comfortable 40% of reach, so
-        // full stretch alone hardly ever happens: being pulled wide counts too)
+        // full stretch alone hardly ever happens: hitting from past the sideline counts too)
         pass = ground && d.wing === 'bh' && (!!d.stretched || !!d.wide) && !!d.vsNet;
         pressed = !!d.stretched || !!d.note;
       }
