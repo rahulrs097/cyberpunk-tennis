@@ -206,6 +206,9 @@
   .hist button em { margin-left: auto; font-size: 13px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
   .hist li.won b { color: var(--ball); }
   .hist li.lost b { color: var(--pink); }
+  .hist li.retired b { color: var(--muted); }
+  .part { display: grid; gap: inherit; }
+  .part[hidden] { display: none; }
   .hist .stats { padding: 0 10px 10px; font-size: 13px; }
   .seg.toggles button { min-height: 40px; font-size: 12px; letter-spacing: 0.04em; padding: 0 2px; min-width: 0; }
   .seg.toggles button[aria-pressed="false"] { color: var(--muted); }
@@ -316,17 +319,22 @@
       <button id="tutBtn">Tutorial</button>
       <button id="howBtn">How to play</button>
     </div>
-    <button class="btn" id="achBtn">Achievements &amp; stats</button>
+    <div class="seg">
+      <button id="achBtn">Achievements</button>
+      <button id="statsBtn">Stats</button>
+    </div>
     <button class="btn" id="installBtn" hidden>Install app</button>
     <p class="lede" id="installHint" hidden>In Safari, tap Share, then Add to Home Screen. It opens full screen and plays the CPU offline.</p>
   </div>
 </div>
 <div class="overlay" id="trophies" hidden>
   <div class="sheet">
-    <div class="title"><b>Achievements</b></div>
+    <div class="title"><b id="trophyTitle">Achievements</b></div>
+    <div class="part" id="achPart">
     <p class="lede" id="achEmpty">None unlocked yet. Play a match to start earning them.</p>
     <ul class="ach" id="achList"></ul>
-    <div class="label">Stats</div>
+    </div>
+    <div class="part" id="statsPart">
     <div class="seg tabs">
       <button data-stats="all" aria-pressed="true">All</button>
       <button data-stats="chill" aria-pressed="false">Chill</button>
@@ -336,12 +344,13 @@
     </div>
     <dl class="stats" id="statList"></dl>
     <div class="label">Match history</div>
-    <p class="lede" id="histEmpty">No finished matches here yet.</p>
+    <p class="lede" id="histEmpty">No matches here yet.</p>
     <ul class="ach hist" id="histList"></ul>
     <div class="pager" id="histPager" hidden>
       <button class="btn" id="histNewer">‹ Newer</button>
       <span id="histPageNo"></span>
       <button class="btn" id="histOlder">Older ›</button>
+    </div>
     </div>
     <div class="btns">
       <button class="btn primary" id="achClose">Back</button>

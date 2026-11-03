@@ -437,6 +437,26 @@
     }
   }
 
+  // A match left before the end goes in the history as retired, with the
+  // score and stats so far (why: me, opp, lost or replaced). A CPU match
+  // quit from the pause menu stays saved to resume, so it only retires
+  // when a new match replaces it; an online one retires when it's left.
+  function retiredEntry(why, mode, myId, oppId, m, side, totals) {
+    if (!m || m.over || !totals || !totals.played) return;
+    const o = 1 - side, inGame = m.tiebreak || m.points[0] + m.points[1];
+    CT.addHistory({ at: Date.now(), mode, me: myId, opp: oppId, won: false, retired: why,
+      games: [m.games[side], m.games[o]], tiebreak: null,
+      score: inGame ? (m.tiebreak ? [m.points[side], m.points[o]] : [CT.pointLabel(m, side), CT.pointLabel(m, o)]) : null, totals });
+  }
+  function retireMatch(why) {
+    if (tracker && game && !tut) retiredEntry(why, tracker.mode, game.players[me].ch.id, game.players[1 - me].ch.id, game.match, me, tracker.state().totals);
+    tracker = null;
+  }
+  function retireSaved() {
+    const s = loadSaved();
+    if (s) retiredEntry('replaced', s.level, s.p0, s.p1, s.game.match, 0, s.tracker && s.tracker.totals);
+  }
+
   function saveMatch() {
     if (game.match.over) { clearSaved(); return; }
     const s = { p0: game.players[0].ch.id, p1: game.players[1].ch.id, level: savedLevel,
@@ -979,7 +999,7 @@
   function onNet(m) {
     if (!net) return;
     net.lastHeard = performance.now();
-    if (m.t === 'bye') { leaveOnline(false); showMenu(); showMsg('Opponent left', 'Back to the menu', 'warn'); return; }
+    if (m.t === 'bye') { retireMatch('opp'); leaveOnline(false); showMenu(); showMsg('Opponent left', 'Back to the menu', 'warn'); return; }
     if (m.t === 'ping') { send({ t: 'pong', at: m.at }); return; }
     if (m.t === 'pong') { if (net.lag && Number.isFinite(m.at)) net.lag.answered(m.at, performance.now()); return; }
     if (net.role === 'host') {
@@ -1143,6 +1163,7 @@
   function showMenu() {
     exitVR();
     showFull(fullOn);
+    if (net) retireMatch('me');
     leaveOnline(true);
     tut = null;
     canSave = false;
@@ -1194,6 +1215,7 @@
     }
     me = 0;
     tut = null;
+    retireSaved();
     clearSaved();
     savedLevel = level;
     canSave = true;
@@ -1250,7 +1272,7 @@
       if (!held) CT.updateGame(game, dt);
       if (net && net.started) {
         if (net.role === 'host' && now - net.sendT > 50) { net.sendT = now; send({ t: 'st', s: CT.snapshot(game), held }); }
-        if (now - net.lastHeard > 6000) { leaveOnline(false); showMenu(); showMsg('Connection lost', 'Back to the menu', 'warn'); }
+        if (now - net.lastHeard > 6000) { retireMatch('lost'); leaveOnline(false); showMenu(); showMsg('Connection lost', 'Back to the menu', 'warn'); }
       }
       updateHud();
       if (msgTimer > 0) { msgTimer -= dt; if (msgTimer <= 0) $('msg').hidden = true; }
@@ -1402,7 +1424,12 @@
     ['Aces', (s) => s.aces], ['Double faults', (s) => s.doubleFaults], ['Winners', (s) => s.winners], ['Unforced errors', (s) => s.unforcedErrors], ['Longest rally', (s) => s.longestRally ? s.longestRally + ' shots' : '–'],
     ['Fastest serve', (s) => s.fastestServe ? s.fastestServe + ' km/h' : '–']];
   let statMode = 'all';
-  function showTrophies() {
+  // The menu has separate Achievements and Stats buttons; both open this
+  // sheet, showing one part or the other.
+  function showTrophies(part) {
+    $('achPart').hidden = part !== 'ach';
+    $('statsPart').hidden = part !== 'stats';
+    $('trophyTitle').textContent = part === 'ach' ? 'Achievements' : 'Stats';
     const got = CT.ACHIEVEMENTS.filter((a) => ach.earned[a.id]);
     const locked = CT.ACHIEVEMENTS.filter((a) => !ach.earned[a.id]);
     const list = $('achList');
@@ -1438,6 +1465,7 @@
   }
   // Finished matches, newest first, for the same tab as the stats.
   // HIST_PAGE matches a page; switching tab goes back to the first page.
+  const RETIRED = { me: 'You left', opp: 'Opponent left', lost: 'Connection lost', replaced: 'New match started' };
   const MODE_NAMES = { chill: 'Chill', club: 'Club', pro: 'Pro', online: 'Online' };
   const HIST_PAGE = 10;
   let histPage = 0, histMode = null;
@@ -1455,19 +1483,20 @@
     for (const h of rows.slice(histPage * HIST_PAGE, (histPage + 1) * HIST_PAGE)) {
       const t = h.totals || {}, name = (id) => (CT.CHARACTERS[id] ? CT.CHARACTERS[id].name : '?');
       const li = document.createElement('li');
-      li.className = h.won ? 'won' : 'lost';
+      li.className = h.retired ? 'retired' : h.won ? 'won' : 'lost';
       // the row is just the result and level; tapping it opens the match's stats
       const row = document.createElement('button');
       row.type = 'button';
       row.setAttribute('aria-expanded', 'false');
       const res = document.createElement('b');
-      res.textContent = (h.won ? 'Won ' : 'Lost ') + h.games[0] + '–' + h.games[1] + (h.tiebreak ? ' (' + h.tiebreak[0] + '–' + h.tiebreak[1] + ')' : '');
+      res.textContent = (h.retired ? 'Retired ' : h.won ? 'Won ' : 'Lost ') + h.games[0] + '–' + h.games[1] + (h.tiebreak ? ' (' + h.tiebreak[0] + '–' + h.tiebreak[1] + ')' : '');
       const lvl = document.createElement('em');
       lvl.textContent = MODE_NAMES[h.mode] || '';
       row.append(res, lvl);
       const d = new Date(h.at);
       const info = [['Date', isNaN(d) ? '–' : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) + ', ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })],
-        ['Players', name(h.me) + ' vs ' + name(h.opp)], ['Points won', t.played ? t.points + ' of ' + t.played : '–'],
+        ['Players', name(h.me) + ' vs ' + name(h.opp)],
+        ...(h.retired ? [['Retired', RETIRED[h.retired] || '–'], ...(h.score ? [['Game score', h.score.join('–')]] : [])] : []), ['Points won', t.played ? t.points + ' of ' + t.played : '–'],
         ['Winners', t.winners || 0], ['Unforced errors', t.unforcedErrors || 0], ['Aces', t.aces || 0], ['Double faults', t.doubleFaults || 0],
         ['Longest rally', t.longestRally ? t.longestRally + ' shots' : '–'], ['Fastest serve', t.fastestServe ? t.fastestServe + ' km/h' : '–']];
       const dl = document.createElement('dl');
@@ -1554,7 +1583,8 @@
     $('tutBtn').addEventListener('click', () => { ensureAudio(); startTutorial(); });
     $('helpTut').addEventListener('click', () => { $('help').hidden = true; ensureAudio(); startTutorial(); });
     $('helpClose').addEventListener('click', () => { $('help').hidden = true; });
-    $('achBtn').addEventListener('click', showTrophies);
+    $('achBtn').addEventListener('click', () => showTrophies('ach'));
+    $('statsBtn').addEventListener('click', () => showTrophies('stats'));
     $('achClose').addEventListener('click', () => { $('trophies').hidden = true; });
     document.querySelectorAll('[data-stats]').forEach((b) => b.addEventListener('click', () => showStats(b.dataset.stats)));
     $('histNewer').addEventListener('click', () => showHistory(statMode, histPage - 1));
@@ -1583,7 +1613,7 @@
     padEl.addEventListener('pointerup', padUp, { passive: false });
     padEl.addEventListener('pointercancel', () => { padTouch = null; padFingers = 0; padTwo = false; });
     padStatus();
-    window.addEventListener('pagehide', () => { leaveOnline(true); unlinkPad(); leavePad(); });
+    window.addEventListener('pagehide', () => { if (net) retireMatch('me'); leaveOnline(true); unlinkPad(); leavePad(); });
     $('mute').addEventListener('click', () => {
       muted = !muted;
       $('mute').setAttribute('aria-pressed', String(muted));
