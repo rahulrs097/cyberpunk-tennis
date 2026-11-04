@@ -158,10 +158,12 @@
     CT.Music.setOn(musicOn);
     CT.Music.start(audio, master);
   }
-  function blip(freq, dur, type, gain, slide) {
-    if (!audio || muted) return;
+  // `delay` (s) plays it later on the audio clock; returns the oscillator,
+  // so a sound scheduled ahead can still be called off
+  function blip(freq, dur, type, gain, slide, delay) {
+    if (!audio || muted) return null;
     try {
-      const t = audio.currentTime;
+      const t = audio.currentTime + (delay || 0);
       const o = audio.createOscillator(), gn = audio.createGain();
       o.type = type || 'square';
       o.frequency.setValueAtTime(freq, t);
@@ -170,7 +172,8 @@
       gn.gain.exponentialRampToValueAtTime(0.0001, t + dur);
       o.connect(gn).connect(master);
       o.start(t); o.stop(t + dur + 0.02);
-    } catch (e) { /* audio is optional */ }
+      return o;
+    } catch (e) { return null; /* audio is optional */ }
   }
 
   // Zen mode swaps the chiptune blips for sounds closer to a real court: a
@@ -383,6 +386,9 @@
     const names = game ? game.players.map((p) => p.ch.name) : ['', ''];
     track(type, d);
     if (type === 'point' && canSave) saveMatch();
+    // struck before the countdown's last beep, or the point's over: drop it
+    if (type === 'hit') cancelGoBeep(0.05);
+    else if (type === 'point' || type === 'fault') cancelGoBeep();
     if (type === 'hit') {
       lineCallShown = false;
       rallyShots = d.kind === 'serve' ? 1 : rallyShots + 1;
@@ -728,8 +734,21 @@
     playShot(CT.VR.autoShot(game, me, hold >= CT.VR.POWER_HOLD));
   }
 
-  // the countdown's beeps: [seconds before the moment to let go, pitch]
-  const VR_TICKS = [[0.5, 660], [0.25, 660], [0, 1320]];
+  // The countdown's beeps: two ticks, [seconds before the moment to let go,
+  // pitch], then a higher beep on the moment itself. They're pitched well
+  // above the ball so a tick soon after the bounce doesn't sound like the
+  // ball bouncing again, and the last one is put on the audio clock at the
+  // second tick, so it still sounds when the ball is struck before a frame
+  // lands on the moment (it used to go missing, leaving just two ticks).
+  const VR_TICKS = [[0.5, 1320], [0.25, 1320]];
+  const VR_GO = 1980;
+  // (`grace` s: a beep due sooner than that is left to play, so a shot on
+  // the moment still gets it)
+  function cancelGoBeep(grace = 0) {
+    if (!vr || !vr.go) return;
+    try { if (vr.go.at > audio.currentTime + grace) vr.go.osc.stop(); } catch (e) { /* audio is optional */ }
+    vr.go = null;
+  }
 
   // VR is for matches; the tutorial's lessons need their hints on screen.
   function enterVR() {
@@ -771,7 +790,13 @@
     // higher one on the moment to let go
     const hit = !paused && !vr.wait ? CT.VR.timeToHit(game, me, CT.incomingInfo(game, me)) : null;
     if (hit && hit.reach && vr.lastT !== null) {
-      for (const [at, freq] of VR_TICKS) if (vr.lastT > at && hit.t <= at) blip(freq, 0.06, 'sine', 0.06);
+      for (const [at, freq] of VR_TICKS) if (vr.lastT > at && hit.t <= at) blip(freq, 0.05, 'sine', 0.05);
+      if (vr.lastT > VR_TICKS[1][0] && hit.t <= VR_TICKS[1][0] && audio) {
+        cancelGoBeep();
+        const delay = Math.max(0, hit.t) / game.timeScale;
+        const osc = blip(VR_GO, 0.07, 'sine', 0.06, 0, delay);
+        if (osc) vr.go = { osc, at: audio.currentTime + delay };
+      }
     }
     vr.lastT = hit && hit.reach ? hit.t : null;
     v.prompt = ''; v.sub = '';
@@ -1389,6 +1414,7 @@
   function setPaused(v) {
     if (!game || game.phase === 'matchOver') return;
     paused = v;
+    if (v) cancelGoBeep();
     $('pauseMenu').hidden = !v;
     // back in the headset: look down the court and press to carry on
     if (vr) { vr.press = null; if (!v) vr.wait = true; }
