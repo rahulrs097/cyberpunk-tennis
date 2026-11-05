@@ -1087,13 +1087,13 @@
   // where the ball really is. It waits in front of you, eases into a
   // backswing as the ball comes, and on the shot sweeps through the spot
   // the ball was struck at and follows through across your body (a serve
-  // or smash: up and over), leaving a faint trail. Pure decoration: it's
+  // or smash: up and over). Pure decoration: it's
   // worked out from the swing the game already plays, never fed back to it.
   const SWING = { into: 0.07, through: 0.42, back: 0.5 };   // seconds: into the ball, follow-through, back to ready
 
   // (both eyes draw the same frame, so it moves on once per game step)
   function racketHead(r, g, p) {
-    const k = r.racket || (r.racket = { was: -1, contact: null, wing: 'fh', trail: [], tossT: -1, at: null, head: null, t0: -1, from: null, sd: 1 });
+    const k = r.racket || (r.racket = { was: -1, contact: null, wing: 'fh', tossT: -1, at: null, head: null, t0: -1, from: null, sd: 1 });
     if (k.at === g.time && k.head) return k.head;
     const dt = k.at === null ? 0 : Math.max(0, Math.min(0.1, (g.time - k.at) / (g.timeScale || 1)));
     k.at = g.time;
@@ -1107,8 +1107,6 @@
       const e = 1 - Math.exp(-dt * 9);
       k.head = { x: k.head.x + (target.x - k.head.x) * e, y: k.head.y + (target.y - k.head.y) * e, z: k.head.z + (target.z - k.head.z) * e };
     }
-    k.trail.push(k.head);
-    if (k.trail.length > 8) k.trail.shift();
     return k.head;
   }
 
@@ -1166,7 +1164,7 @@
   }
 
   function drawRacketWorld(ctx, r, g, p, head) {
-    const k = r.racket, col = p.ch.colors.glow;
+    const col = p.ch.colors.glow;
     const P = (q) => proj(r, q.x, q.y, q.z);
     const add = (a, v, m) => ({ x: a.x + v.x * m, y: a.y + v.y * m, z: a.z + v.z * m });
     // the frame's axes: u along the shaft, w across the face (upright when it can be)
@@ -1183,17 +1181,6 @@
     if (P(head).behind) return;
     ctx.save();
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-    // the sweep's trail
-    const tr = k.trail;
-    if (tr.length > 2 && Math.hypot(head.x - tr[0].x, head.y - tr[0].y, head.z - tr[0].z) > 0.5) {
-      for (let i = 1; i < tr.length; i++) {
-        const a = P(tr[i - 1]), c = P(tr[i]);
-        if (a.behind || c.behind) continue;
-        ctx.strokeStyle = hexA(col, 0.22 * (i / tr.length));
-        ctx.lineWidth = Math.max(2, px * 0.2 * (i / tr.length));
-        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(c.x, c.y); ctx.stroke();
-      }
-    }
     // handle: butt, grip, and the throat's two arms opening into the head
     const throat = add(head, u, -RU - 0.11), butt = add(head, u, -RU - 0.47), gripTop = add(head, u, -RU - 0.25);
     const arms = [onHead(Math.PI - 0.55), onHead(Math.PI + 0.55)];
