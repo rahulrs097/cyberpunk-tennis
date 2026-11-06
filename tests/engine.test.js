@@ -840,28 +840,27 @@ test('rocket serve and fastest serve only count once the serve lands in', () => 
   assert.equal(r.best.fastestServe, 208);
 });
 
-test('the tentacle: a stretched backhand pass for a winner, playing Octopus', () => {
+test('the tentacle: a winner hit from past the sideline, playing Octopus', () => {
   const CT = loadEngine();
   const win = { winner: 0, text: 'Winner', result: 'point', server: 1, shots: 4, tiebreak: false, games: [0, 0] };
-  const rally = (t, last) => {
+  const rally = (t, last, p = win) => {
     t.hit({ side: 1, kind: 'serve', kmh: 150 });
     t.hit({ side: 0, kind: 'ground', wing: 'fh' });
-    t.hit({ side: 1, kind: 'volley', wing: 'fh' });
-    t.hit({ side: 0, kind: 'ground', wing: 'bh', vsNet: true, stretched: true, ...last });
-    return t.point(win).earned;
+    t.hit({ side: 1, kind: 'ground', wing: 'fh' });
+    t.hit({ side: 0, kind: 'ground', wing: 'bh', wide: true, ...last });
+    return t.point(p).earned;
   };
-  assert.ok(rally(CT.createAchievementTracker(0, 'club', null, 'octopus')).includes('tentacle'));
-  assert.ok(!rally(CT.createAchievementTracker(0, 'club', null, 'philosopher')).includes('tentacle'), 'Octopus only');
   const oct = () => CT.createAchievementTracker(0, 'club', null, 'octopus');
-  assert.ok(!rally(oct(), { wing: 'fh' }).includes('tentacle'), 'a forehand');
-  assert.ok(!rally(oct(), { stretched: false }).includes('tentacle'), 'not stretched');
-  assert.ok(rally(oct(), { stretched: false, wide: true }).includes('tentacle'), 'hit from past the sideline counts too');
-  assert.ok(!rally(oct(), { vsNet: false }).includes('tentacle'), 'not a pass');
-  assert.ok(!rally(oct(), { kind: 'volley' }).includes('tentacle'), 'a volley');
-  // the pass has to be the winner, not an earlier shot in the rally
+  assert.ok(rally(oct()).includes('tentacle'));
+  assert.ok(rally(oct(), { wing: 'fh' }).includes('tentacle'), 'either wing');
+  assert.ok(rally(oct(), { kind: 'volley' }).includes('tentacle'), 'any rally shot');
+  assert.ok(!rally(CT.createAchievementTracker(0, 'club', null, 'philosopher')).includes('tentacle'), 'Octopus only');
+  assert.ok(!rally(oct(), { wide: false, stretched: true }).includes('tentacle'), 'inside the court, even at full stretch');
+  assert.ok(!rally(oct(), {}, { ...win, winner: 1, text: 'Out' }).includes('tentacle'), 'not a winner');
+  // the wide shot has to be the winner, not an earlier shot in the rally
   const t = oct();
-  t.hit({ side: 0, kind: 'ground', wing: 'bh', vsNet: true, stretched: true });
-  t.hit({ side: 1, kind: 'volley', wing: 'bh' });
+  t.hit({ side: 0, kind: 'ground', wing: 'bh', wide: true });
+  t.hit({ side: 1, kind: 'ground', wing: 'bh' });
   t.hit({ side: 0, kind: 'ground', wing: 'fh' });
   assert.ok(!t.point(win).earned.includes('tentacle'));
 });
@@ -949,4 +948,43 @@ test('a finished match goes into the match history with its own stats, and survi
   assert.deepEqual(plain(h.map((x) => x.at)), [2, 1], 'newest first');
   for (let i = 0; i < CT.HISTORY_MAX + 5; i++) CT.addHistory({ at: 10 + i, mode: 'pro', games: [0, 6], totals: {} });
   assert.equal(CT.loadHistory().length, CT.HISTORY_MAX, 'only the latest are kept');
+});
+
+test('a match point: only when winning the next point wins the match', () => {
+  const CT = loadEngine();
+  const m = CT.createMatch(0);
+  for (let i = 0; i < 20; i++) CT.awardPoint(m, 0);   // 5-0
+  win(CT, m, 0, 2);                                   // 30-0
+  assert.deepEqual([CT.wouldWinMatch(m, 0), CT.wouldWinMatch(m, 1)], [false, false]);
+  CT.awardPoint(m, 0);                                // 40-0
+  assert.deepEqual([CT.wouldWinMatch(m, 0), CT.wouldWinMatch(m, 1)], [true, false]);
+  assert.deepEqual(plain(m.points), [3, 0], 'asking changes nothing');
+});
+
+test('escape artist and painting the lines', () => {
+  const CT = loadEngine();
+  const t = CT.createAchievementTracker(0, 'club', null, 'octopus');
+  const pt = (o) => ({ winner: 0, text: 'Winner', result: 'point', server: 1, shots: 3, tiebreak: false, games: [3, 5], matchPoint: [false, true], lineM: -0.2, ...o });
+  assert.deepEqual(plain(t.point(pt()).earned), ['saveMP']);
+  assert.deepEqual(plain(t.point(pt({ matchPoint: [false, false] })).earned), []);
+  assert.deepEqual(plain(t.point(pt({ winner: 1 })).earned), [], 'losing it is not saving it');
+  assert.deepEqual(plain(t.point(pt({ matchPoint: [true, false] })).earned), [], 'our own match point');
+  const clean = { matchPoint: [false, false] };
+  assert.ok(t.point(pt({ ...clean, lineM: -0.03 })).earned.includes('paint'));
+  assert.ok(t.point(pt({ ...clean, lineM: -0.03, text: 'Ace', server: 0 })).earned.includes('paint'));
+  assert.ok(!t.point(pt({ ...clean, lineM: -0.3 })).earned.includes('paint'), 'well inside the line');
+  assert.ok(!t.point(pt({ ...clean, lineM: -0.03, winner: 1, text: 'Winner' })).earned.includes('paint'), 'their winner');
+});
+
+test('point events carry who had match point and the last bounce\'s line margin', () => {
+  const CT = loadEngine(9);
+  const pts = [];
+  const g = CT.createGame({ p0: 'octopus', p1: 'philosopher', control: ['cpu', 'cpu'], ...levelOpts(CT, 'club'), onEvent: (t, d) => { if (t === 'point') pts.push(d); } });
+  for (let i = 0; i < 60 * 3600 && g.phase !== 'matchOver'; i++) CT.updateGame(g, 1 / 60);
+  const last = pts[pts.length - 1];
+  assert.equal(last.result, 'set');
+  assert.equal(last.matchPoint[last.winner], true, 'the last point was a match point for the winner');
+  assert.ok(pts.every((d) => d.matchPoint.length === 2));
+  assert.ok(pts.filter((d) => d.text === 'Winner').every((d) => d.lineM <= 0), 'a winner landed in');
+  assert.ok(pts.filter((d) => d.text === 'Out').every((d) => d.lineM > 0));
 });

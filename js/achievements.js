@@ -22,16 +22,22 @@
     { id: 'breadstick', name: 'Breadstick', desc: 'Win a match 6–1', pro: true },
     { id: 'bagel', name: 'Bagel', desc: 'Win a match 6–0', pro: true },
     { id: 'proChampion', name: 'Pro Champion', desc: 'Win a match on Pro', pro: true },
-    { id: 'tentacle', name: 'The Tentacle', desc: 'Hit a backhand passing winner at full stretch or from past the sideline', char: 'octopus' },
+    { id: 'paint', name: 'Painting the Lines', desc: 'Hit a winner or an ace that lands on the line' },
+    { id: 'saveMP', name: 'Escape Artist', desc: 'Save a match point' },
+    { id: 'tentacle', name: 'The Tentacle', desc: 'Hit a winner from outside the court, past the sideline', char: 'octopus' },
     { id: 'thought', name: 'The Thought', desc: 'Hit a forehand, a backhand, a volley and a smash in one rally, and win it with a winner', char: 'philosopher' },
     { id: 'goldenSet', name: 'Golden Set', desc: 'Win a match without losing a single point', pro: true },
   ];
   const BY_ID = Object.fromEntries(ACHIEVEMENTS.map((a) => [a.id, a]));
   const RALLY = 20;
+  // a bounce that keeps no more than this much of the ball (m) inside the
+  // line's outer edge is on the line (the same as the billboard's close call)
+  const ON_LINE = 0.05;
   const ROCKET = 200;   // km/h: only a perfect full-pace serve on fresh legs gets there
 
   // Follows `side` through one match. mode: the CPU level id, or 'online'.
   // point(d) takes each 'point' event (winner, text, result, server, shots,
+  // matchPoint: [side 0 had one, side 1 had one], lineM: the last bounce's line margin,
   // tiebreak, games) and hit(d) each 'hit'; both return what they changed:
   // { earned: [ids, in list order], stats: { name: amount }, best: { name: value },
   // over: { won, games, tiebreak, totals } once the match is over: games is
@@ -50,8 +56,8 @@
     // it has landed in, i.e. they returned it or the point was played out
     let serveKmh = 0;
     // this rally: the kinds of shot we've hit (fh, bh, volley, smash), and
-    // our last shot, if it was a backhand pass at full stretch or out wide
-    let kinds = new Set(), pass = false;
+    // our last shot, if it was hit from past the sideline
+    let kinds = new Set(), wideShot = false;
     // our last rally shot was hit under pressure (stretched, jammed or on
     // the run), so missing it is a forced error, not an unforced one
     let pressed = false, lastRally = false;
@@ -87,14 +93,16 @@
         if (aces === 5) got.add('pentaAce');
       }
       if (mine && d.text === 'Winner') stats.winners = 1;
+      if (mine && (d.text === 'Winner' || d.text === 'Ace') && d.lineM != null && d.lineM <= 0 && d.lineM >= -ON_LINE) got.add('paint');
+      if (mine && d.matchPoint && d.matchPoint[opp]) got.add('saveMP');
       // (a missed serve is a fault; the second one counts as a double fault)
       if (!mine && (d.text === 'Out' || d.text === 'Net') && lastRally && !pressed) stats.unforcedErrors = 1;
       if (mine && d.shots >= RALLY) got.add('marathon');
       if (mine && d.text === 'Winner') {
-        if (pass) got.add('tentacle');
+        if (wideShot) got.add('tentacle');
         if (kinds.size === 4) got.add('thought');
       }
-      kinds = new Set(); pass = false; pressed = false; lastRally = false;
+      kinds = new Set(); wideShot = false; pressed = false; lastRally = false;
       if (d.shots) best.longestRally = d.shots;
       if (!mine) lostPoint = true;
       won[d.winner]++;
@@ -133,15 +141,13 @@
       // (a fault is followed by the second serve, which replaces it)
       if (d.side === side && d.kind === 'serve') serveKmh = d.kmh || 0;
       else if (d.side === opp) serveIn(got, best);
-      if (d.kind === 'serve') { kinds = new Set(); pass = false; }
+      if (d.kind === 'serve') { kinds = new Set(); wideShot = false; }
       if (d.side === side) {
         const ground = d.kind === 'ground' || d.kind === 'power';
         if (ground) kinds.add(d.wing);
         else if (d.kind === 'volley' || d.kind === 'powerVolley') kinds.add('volley');
         else if (d.kind === 'overhead') kinds.add('smash');
-        // (automove meets almost every ball at a comfortable 40% of reach, so
-        // full stretch alone hardly ever happens: hitting from past the sideline counts too)
-        pass = ground && d.wing === 'bh' && (!!d.stretched || !!d.wide) && !!d.vsNet;
+        wideShot = d.kind !== 'serve' && !!d.wide;
         pressed = !!d.stretched || !!d.note;
       }
       // whose shot is in the air: an error is only ours when it was our rally shot
