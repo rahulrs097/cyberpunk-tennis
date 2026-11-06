@@ -524,6 +524,15 @@
   // bottom of the picture, and the tag (or the ping, under its label)
   // beside it (in BOARD_TEX coordinates). Zen mode's score has the whole
   // sign, with no photo.
+  // How far down the photo the square on the sign is, in whole pixels of
+  // the sign (so it only needs redrawing when that changes). It eases at
+  // each end.
+  const PHOTO_SIDE = BOARD_TEX.h - 24;
+  function photoStep(now) {
+    const img = BOARD_PHOTO, sh = Math.min(img.naturalHeight, img.naturalWidth);
+    return Math.round((0.5 - 0.5 * Math.cos(now * 0.5)) * (img.naturalHeight - sh) * PHOTO_SIDE / sh);
+  }
+
   function drawBoardPhoto(ctx, r, now, cur) {
     const W = BOARD_TEX.w, H = BOARD_TEX.h, m = 12, img = BOARD_PHOTO;
     ctx.clearRect(0, 0, W, H);
@@ -534,8 +543,7 @@
     ctx.strokeRect(8, 8, W - 16, H - 16);
     if (!cur.score) {
       const sw = img.naturalWidth, sh = Math.min(img.naturalHeight, sw);
-      const t = 0.5 - 0.5 * Math.cos(now * 0.5);   // eases at each end
-      ctx.drawImage(img, 0, t * (img.naturalHeight - sh), sw, sh, m, m, side, side);
+      ctx.drawImage(img, 0, photoStep(now) * sh / side, sw, sh, m, m, side, side);
       ctx.beginPath(); ctx.moveTo(m + side + 3, 8); ctx.lineTo(m + side + 3, H - 8); ctx.stroke();
     }
     const cx = (m + side + W) / 2, tw = W - side - 60, pl = cur.ping;
@@ -686,11 +694,14 @@
     if (cur.photo || cur.score || cur.call !== undefined) {
       src = r.boardPhotoTex || (r.boardPhotoTex = document.createElement('canvas'));
       if (src.width !== BOARD_TEX.w) { src.width = BOARD_TEX.w; src.height = BOARD_TEX.h; }
-      // The score (zen mode and VR) only changes between points, so it is
-      // drawn once and kept until the points, games, server or ping change;
-      // the photo slides and the close-up zooms, so those are drawn each frame.
-      const pl = cur.ping;
-      const key = cur.score ? [cur.text, cur.label, cur.server, pl ? [pl.ms, pl.red, pl.slow, pl.direct].join() : '', r.quality, fontReady()].join('|') : null;
+      // A sign redrawn every frame is slow to show (the browser has to send
+      // the new picture to the graphics chip each time), so the score and
+      // the photo are kept until something on them changes: the score
+      // between points, the photo each time its slide moves on a whole pixel
+      // of the sign (about ten times a second). The line-call close-up zooms,
+      // so it is drawn every frame.
+      const pl = cur.ping, slide = cur.score ? -1 : photoStep(now);
+      const key = cur.score || cur.photo ? [slide, cur.text, cur.label, cur.server, cur.color, pl ? [pl.ms, pl.red, pl.slow, pl.direct].join() : '', r.quality, fontReady()].join('|') : null;
       if (key === null || src.key !== key) {
         src.key = key;
         if (cur.photo || cur.score) drawBoardPhoto(src.getContext('2d'), r, now, cur);
@@ -891,14 +902,30 @@
   }
 
   // A parked car as a box, nose towards the court.
+  const CAR_PALETTE = ['#2a2f45', '#3b1f3f', '#1d3340', '#40342a', '#262626', '#18203a'];
+  for (const car of CARS) {
+    const body = CAR_PALETTE[Math.floor(hash(car.k * 3.7 + car.sx) * CAR_PALETTE.length)];
+    car.col = {
+      body, side: shade(body, -0.25), end: shade(body, -0.1), roof: shade(body, 0.12),
+      glow: hash(car.k * 5.1) > 0.5 ? 'rgba(255,63,180,0.16)' : 'rgba(37,217,255,0.14)',
+    };
+  }
+  // A car (with its glow on the ground) fits in a ball this big round its middle.
+  const CAR_R = 2.9;
+
   function drawCar(ctx, r, car) {
-    const palette = ['#2a2f45', '#3b1f3f', '#1d3340', '#40342a', '#262626', '#18203a'];
-    const body = palette[Math.floor(hash(car.k * 3.7 + car.sx) * palette.length)];
     const len = 4.3, wid = 1.8;
     const x0 = car.x - len / 2, x1 = car.x + len / 2, y0 = car.y - wid / 2, y1 = car.y + wid / 2;
-    const c = r.cam;
+    const c = r.cam, col = car.col;
+    // skip cars wholly behind you or off the sides of the screen
+    const v = toCam(c, car.x, car.y, 0.7);
+    if (v.z < -CAR_R) return;
+    if (v.z > CAR_R) {
+      const p = fromCamToScreen(c, v), rad = 1.3 * CAR_R * p.s;   // (with room for the stretch off to the sides)
+      if (p.x + rad < 0 || p.x - rad > r.W || p.y + rad < 0 || p.y - rad > r.H) return;
+    }
     if (groundEllipse(ctx, r, car.x, car.y, len / 2 + 0.5)) {
-      ctx.fillStyle = hash(car.k * 5.1) > 0.5 ? 'rgba(255,63,180,0.16)' : 'rgba(37,217,255,0.14)';
+      ctx.fillStyle = col.glow;
       ctx.fill();
     }
     const h1 = 0.75, h2 = 1.4;
@@ -906,13 +933,13 @@
     const outer = car.sx > 0 ? x1 : x0;
     // the two side faces and the end face that the camera can see
     const nearY = c.y < car.y ? y0 : y1;
-    fillPoly(ctx, r, [[x0, nearY, 0.15], [x1, nearY, 0.15], [x1, nearY, h1], [x0, nearY, h1]], shade(body, -0.25));
+    fillPoly(ctx, r, [[x0, nearY, 0.15], [x1, nearY, 0.15], [x1, nearY, h1], [x0, nearY, h1]], col.side);
     const endX = Math.abs(c.x - inner) < Math.abs(c.x - outer) ? inner : outer;
-    fillPoly(ctx, r, [[endX, y0, 0.15], [endX, y1, 0.15], [endX, y1, h1], [endX, y0, h1]], shade(body, -0.1));
-    fillPoly(ctx, r, [[x0, y0, h1], [x1, y0, h1], [x1, y1, h1], [x0, y1, h1]], body);
+    fillPoly(ctx, r, [[endX, y0, 0.15], [endX, y1, 0.15], [endX, y1, h1], [endX, y0, h1]], col.end);
+    fillPoly(ctx, r, [[x0, y0, h1], [x1, y0, h1], [x1, y1, h1], [x0, y1, h1]], col.body);
     const ci0 = car.sx > 0 ? x0 + 1.0 : x0 + 1.3, ci1 = car.sx > 0 ? x1 - 1.3 : x1 - 1.0;
     fillPoly(ctx, r, [[ci0, y0 + 0.15, h1], [ci1, y0 + 0.15, h1], [ci1 - 0.3, y0 + 0.3, h2], [ci0 + 0.3, y0 + 0.3, h2]], 'rgba(120,160,220,0.3)');
-    fillPoly(ctx, r, [[ci0 + 0.3, y0 + 0.3, h2], [ci1 - 0.3, y0 + 0.3, h2], [ci1 - 0.3, y1 - 0.3, h2], [ci0 + 0.3, y1 - 0.3, h2]], shade(body, 0.12));
+    fillPoly(ctx, r, [[ci0 + 0.3, y0 + 0.3, h2], [ci1 - 0.3, y0 + 0.3, h2], [ci1 - 0.3, y1 - 0.3, h2], [ci0 + 0.3, y1 - 0.3, h2]], col.roof);
     ctx.save();
     ctx.fillStyle = 'rgba(255,246,208,0.9)';
     for (const yy of [y0 + 0.3, y1 - 0.3]) {
