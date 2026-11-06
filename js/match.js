@@ -54,6 +54,12 @@
     return 'point';
   }
 
+  // Would winning the next point win `side` the match? (a match point)
+  function wouldWinMatch(m, side) {
+    if (m.over) return false;
+    return awardPoint(JSON.parse(JSON.stringify(m)), side) === 'set';
+  }
+
   function pointLabel(m, side) {
     if (m.tiebreak) return String(m.points[side]);
     const a = m.points[side], b = m.points[1 - side];
@@ -73,6 +79,7 @@
 
   CT.createMatch = createMatch;
   CT.awardPoint = awardPoint;
+  CT.wouldWinMatch = wouldWinMatch;
   CT.pointLabel = pointLabel;
   CT.deuceSide = deuceSide;
   CT.currentServer = currentServer;

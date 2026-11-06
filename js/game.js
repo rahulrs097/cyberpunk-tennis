@@ -192,6 +192,7 @@
     g.peakBall = null;
     g.held = null;
     g.shots = 0;
+    g.lineM = null;
     if (!keepClock) g.serveWait = 0;
     emit(g, 'serveReady', { server, first: m.firstServe });
   }
@@ -1014,11 +1015,14 @@
     // (server, shots in the rally and whether it was a tiebreak point are
     // for the achievements; games and points are the score after the point)
     const tiebreak = g.match.tiebreak;
+    // who was a point from winning the match before this one
+    const matchPoint = [0, 1].map((s) => CT.wouldWinMatch(g.match, s));
     const res = CT.awardPoint(g.match, w);
     g.phase = 'pointOver';
     g.phaseWall = 0;
     for (const p of g.players) p.pending = null;
-    emit(g, 'point', { winner: w, text, detail, result: res, server: g.server, shots: g.shots, tiebreak, games: g.match.games.slice(), points: g.match.points.slice() });
+    emit(g, 'point', { winner: w, text, detail, result: res, server: g.server, shots: g.shots, tiebreak, games: g.match.games.slice(), points: g.match.points.slice(),
+      matchPoint, lineM: g.lineM });
   }
 
   function fault(g, text) {
@@ -1044,7 +1048,8 @@
       const inOppHalf = fwdOf(h) * b.pos.y > 0;
       if (!b.netted && inOppHalf) {
         const box = b.isServe ? g.serveBox : null;
-        emit(g, 'lineCall', { m: CT.lineMargin(b.pos.x, b.pos.y, box), x: b.pos.x, y: b.pos.y, vx: b.vel.x, vy: b.vel.y, box });
+        g.lineM = CT.lineMargin(b.pos.x, b.pos.y, box);
+        emit(g, 'lineCall', { m: g.lineM, x: b.pos.x, y: b.pos.y, vx: b.vel.x, vy: b.vel.y, box });
       }
       if (b.isServe) {
         if (b.netted || !inOppHalf) fault(g, 'Net');
