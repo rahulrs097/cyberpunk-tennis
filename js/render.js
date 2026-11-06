@@ -485,10 +485,17 @@
     return { text: BOARD.tag, color: '#25d9ff', from: b ? b.until : 0, photo };
   }
 
+  // 1 once the display font has loaded (signs drawn before then are redrawn)
+  let fontLoaded = false;
+  function fontReady() {
+    if (!fontLoaded) fontLoaded = !!(document.fonts && document.fonts.check('900 20px Tektur'));
+    return fontLoaded ? 1 : 0;
+  }
+
   function boardTexture(r, text, color) {
     const t = r.boardTex || (r.boardTex = document.createElement('canvas'));
     // rebuilt once the display font has loaded
-    const key = text + color + (document.fonts && document.fonts.check('900 20px Tektur') ? 1 : 0);
+    const key = text + color + fontReady();
     if (t.key === key) return t;
     t.key = key;
     const W = BOARD_TEX.w, H = BOARD_TEX.h;
@@ -679,8 +686,16 @@
     if (cur.photo || cur.score || cur.call !== undefined) {
       src = r.boardPhotoTex || (r.boardPhotoTex = document.createElement('canvas'));
       if (src.width !== BOARD_TEX.w) { src.width = BOARD_TEX.w; src.height = BOARD_TEX.h; }
-      if (cur.photo || cur.score) drawBoardPhoto(src.getContext('2d'), r, now, cur);
-      else drawBoardCall(src.getContext('2d'), r, cur.call, age);
+      // The score (zen mode and VR) only changes between points, so it is
+      // drawn once and kept until the points, games, server or ping change;
+      // the photo slides and the close-up zooms, so those are drawn each frame.
+      const pl = cur.ping;
+      const key = cur.score ? [cur.text, cur.label, cur.server, pl ? [pl.ms, pl.red, pl.slow, pl.direct].join() : '', r.quality, fontReady()].join('|') : null;
+      if (key === null || src.key !== key) {
+        src.key = key;
+        if (cur.photo || cur.score) drawBoardPhoto(src.getContext('2d'), r, now, cur);
+        else drawBoardCall(src.getContext('2d'), r, cur.call, age);
+      }
     } else src = boardTexture(r, cur.text, cur.color);
     const W = BOARD_TEX.w, H = BOARD_TEX.h, N = 10, sw = W / N;
     const base = ctx.getTransform();   // (in VR: one eye's half of the screen, turned with your head)

@@ -288,7 +288,10 @@
   function updateHud() {
     const m = game.match;
     const srv = game.phase === 'preServe' || game.phase === 'toss' ? game.server : CT.currentServer(m);
-    for (const side of [0, 1]) {
+    // zen mode and VR hide the scoreboard, so its rows aren't kept up to
+    // date (put() writes whatever changed once it shows again)
+    const rows = !boardScore();
+    for (const side of rows ? [0, 1] : []) {
       const p = game.players[side];
       const row = $('row' + (side === me ? 0 : 1));
       const q = (sel) => row.querySelector(sel);
@@ -308,7 +311,7 @@
       if (left <= 10) call = 'Serve clock ' + Math.max(0, Math.ceil(left)) + (call ? ' · ' + call : '');
     }
     if (tut) { const L = LESSONS[tut.i]; call = `Lesson ${tut.i + 1}/${LESSONS.length} · ${L.title} · ${Math.min(tut.done, L.need)}/${L.need}`; }
-    put($('callout'), 'text', call, (v) => { $('callout').textContent = v; });
+    if (rows) put($('callout'), 'text', call, (v) => { $('callout').textContent = v; });
     if (boardScore()) {
       const opp = 1 - me;
       CT.showScore(renderer, {
