@@ -965,10 +965,20 @@ test('escape artist and painting the lines', () => {
   const CT = loadEngine();
   const t = CT.createAchievementTracker(0, 'club', null, 'octopus');
   const pt = (o) => ({ winner: 0, text: 'Winner', result: 'point', server: 1, shots: 3, tiebreak: false, games: [3, 5], matchPoint: [false, true], lineM: -0.2, ...o });
-  assert.deepEqual(plain(t.point(pt()).earned), ['saveMP']);
-  assert.deepEqual(plain(t.point(pt({ matchPoint: [false, false] })).earned), []);
-  assert.deepEqual(plain(t.point(pt({ winner: 1 })).earned), [], 'losing it is not saving it');
-  assert.deepEqual(plain(t.point(pt({ matchPoint: [true, false] })).earned), [], 'our own match point');
+  // escape artist: saved match points only count once the match is won, and once
+  const play = (pts) => { const tr = CT.createAchievementTracker(0, 'club', null, 'octopus'); return pts.flatMap((o) => tr.point(pt(o)).earned).filter((id) => id === 'saveMP'); };
+  const winSet = { matchPoint: [true, false], result: 'set', games: [7, 5] };
+  const loseSet = { winner: 1, matchPoint: [false, true], result: 'set', games: [5, 7] };
+  assert.deepEqual(plain(play([{}])), [], 'not until the match is won');
+  assert.deepEqual(plain(play([{}, {}, winSet])), ['saveMP'], 'two saved, awarded once');
+  assert.deepEqual(plain(play([{}, loseSet])), [], 'saved one but lost the match');
+  assert.deepEqual(plain(play([{ winner: 1, matchPoint: [false, false] }, { matchPoint: [false, false] }, winSet])), [], 'never faced one');
+  assert.deepEqual(plain(play([{ winner: 1 }, winSet])), [], 'losing it is not saving it');
+  // a resumed match remembers a saved match point
+  const t1 = CT.createAchievementTracker(0, 'club', null, 'octopus');
+  t1.point(pt());
+  const t2 = CT.createAchievementTracker(0, 'club', JSON.parse(JSON.stringify(t1.state())), 'octopus');
+  assert.ok(t2.point(pt(winSet)).earned.includes('saveMP'));
   const clean = { matchPoint: [false, false] };
   assert.ok(t.point(pt({ ...clean, lineM: -0.03 })).earned.includes('paint'));
   assert.ok(t.point(pt({ ...clean, lineM: -0.03, text: 'Ace', server: 0 })).earned.includes('paint'));

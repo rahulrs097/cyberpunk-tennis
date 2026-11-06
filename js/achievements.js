@@ -23,7 +23,7 @@
     { id: 'bagel', name: 'Bagel', desc: 'Win a match 6–0', pro: true },
     { id: 'proChampion', name: 'Pro Champion', desc: 'Win a match on Pro', pro: true },
     { id: 'paint', name: 'Painting the Lines', desc: 'Hit a winner or an ace that lands on the line' },
-    { id: 'saveMP', name: 'Escape Artist', desc: 'Save a match point' },
+    { id: 'saveMP', name: 'Escape Artist', desc: 'Save a match point and go on to win the match' },
     { id: 'tentacle', name: 'The Tentacle', desc: 'Hit a winner from outside the court, past the sideline', char: 'octopus' },
     { id: 'thought', name: 'The Thought', desc: 'Hit a forehand, a backhand, a volley and a smash in one rally, and win it with a winner', char: 'philosopher' },
     { id: 'goldenSet', name: 'Golden Set', desc: 'Win a match without losing a single point', pro: true },
@@ -52,6 +52,7 @@
     let everyGame = true;          // scored at least once in every game so far
     let lostPoint = false;
     let maxBehind = 0;
+    let savedMP = false;           // won a point that was their match point
     // our last serve's speed: it only counts (fastest serve, rocket) once
     // it has landed in, i.e. they returned it or the point was played out
     let serveKmh = 0;
@@ -65,9 +66,10 @@
     let totals = blankTotals();
     if (saved) {
       ({ aces, won, everyGame, lostPoint, maxBehind } = saved);
+      savedMP = !!saved.savedMP;
       if (saved.totals) for (const k in totals) if (typeof saved.totals[k] === 'number') totals[k] = saved.totals[k];
     }
-    const state = () => ({ aces, won: won.slice(), everyGame, lostPoint, maxBehind, totals: { ...totals } });
+    const state = () => ({ aces, won: won.slice(), everyGame, lostPoint, maxBehind, savedMP, totals: { ...totals } });
     function out(got, stats, best, over) {
       for (const k in stats) if (k in totals) totals[k] += stats[k];
       for (const k in best) if (k in totals) totals[k] = Math.max(totals[k], best[k]);
@@ -94,7 +96,7 @@
       }
       if (mine && d.text === 'Winner') stats.winners = 1;
       if (mine && (d.text === 'Winner' || d.text === 'Ace') && d.lineM != null && d.lineM <= 0 && d.lineM >= -ON_LINE) got.add('paint');
-      if (mine && d.matchPoint && d.matchPoint[opp]) got.add('saveMP');
+      if (mine && d.matchPoint && d.matchPoint[opp]) savedMP = true;
       // (a missed serve is a fault; the second one counts as a double fault)
       if (!mine && (d.text === 'Out' || d.text === 'Net') && lastRally && !pressed) stats.unforcedErrors = 1;
       if (mine && d.shots >= RALLY) got.add('marathon');
@@ -128,6 +130,8 @@
           ['match', 'proChampion'].forEach((id) => got.add(id));
           if (d.tiebreak) got.add('tiebreak');
           if (maxBehind >= 3) got.add('comeback');
+          // (once a match, however many match points were saved)
+          if (savedMP) got.add('saveMP');
           if (a === 6 && b === 1) got.add('breadstick');
           if (a === 6 && b === 0) got.add('bagel');
           if (everyGame) got.add('noLove');
