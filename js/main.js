@@ -1439,6 +1439,7 @@
     ['Aces', (s) => s.aces], ['Double faults', (s) => s.doubleFaults], ['Winners', (s) => s.winners], ['Unforced errors', (s) => s.unforcedErrors], ['Longest rally', (s) => s.longestRally ? s.longestRally + ' shots' : '–'],
     ['Fastest serve', (s) => s.fastestServe ? s.fastestServe + ' km/h' : '–']];
   let statMode = 'all';
+  const GOLDEN = 1000;
   // The menu has separate Achievements and Stats buttons; both open this
   // sheet, showing one part or the other.
   function showTrophies(part) {
@@ -1452,13 +1453,16 @@
     for (const a of [...got, ...locked]) {
       const e = ach.earned[a.id];
       const li = document.createElement('li');
+      // earned 1000 times, it turns gold and stops counting
+      const golden = e && e.n >= GOLDEN;
       if (!e) li.className = 'locked';
+      else if (golden) li.className = 'golden';
       const nm = document.createElement('b'); nm.textContent = a.name;
       const tag = a.pro ? 'Pro' : a.char ? CT.CHARACTERS[a.char].name : '';
       if (tag) { const t = document.createElement('i'); t.textContent = tag; nm.append(' ', t); }
       const ds = document.createElement('span'); ds.textContent = a.desc;
       const n = document.createElement('em'); n.textContent = e ? '×' + e.n : 'Locked';
-      li.append(nm, n, ds);
+      if (golden) li.append(nm, ds); else li.append(nm, n, ds);
       list.append(li);
     }
     $('achEmpty').hidden = got.length > 0;
