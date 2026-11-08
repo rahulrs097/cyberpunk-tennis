@@ -14,6 +14,7 @@
   const ACCEL = 8;              // m/s² from a standstill to top speed
   const AIM_FULL = 0.6;         // a swipe this many radians off straight aims at the sideline
   const NET_ZONE = 7.5;
+  const NO_NET = { noNet: true };
   // A lob is a slow swipe: its timing is judged up to LOB_LEAD seconds before
   // the finger lifts (input.lead), and it forgives LOB_EASE times as much mistiming.
   const LOB_LEAD = 0.18;
@@ -714,6 +715,18 @@
     c.ty = -c.fwd * c.ch.home;
   }
 
+  // A ball headed for the tape: the auto-moving players (CPU, and the human
+  // on automove) can't tell that from the racket, so they have set off for
+  // it as if it clears. Once it's in the net they pull up within a stride.
+  function easeOff(g) {
+    for (const p of g.players) {
+      if (!autoMoves(g, p.side)) continue;
+      const d = Math.min(Math.hypot(p.tx - p.x, p.ty - p.y), p.moving ? 0.5 : 0);
+      p.tx = p.x + p.dirX * d; p.ty = p.y + p.dirY * d;
+      p.plan = null;
+    }
+  }
+
   function cpuPlan(g, c) {
     const b = CT.cloneBall(g.ball);
     const ch = c.ch, fwd = c.fwd, R = fwd;   // R: +x is the CPU's right when fwd = 1
@@ -722,9 +735,9 @@
     const cands = [];
     let step = 0, letGo = false;
     while (t < 4.5) {
-      const ev = CT.stepBall(b, PHYS.DT);
+      // (read as if it clears the net: nobody knows a ball is netted until it is)
+      const ev = CT.stepBall(b, PHYS.DT, NO_NET);
       t += PHYS.DT; step++;
-      if (ev === 'net') { cpuRecover(g, c); return; }
       if (ev === 'bounce') {
         if (bounces === 0) {
           const onMySide = fwd * b.pos.y < 0;
@@ -1191,7 +1204,7 @@
         }
         return;
       }
-      if (ev === 'net') emit(g, 'net', {});
+      if (ev === 'net') { emit(g, 'net', {}); easeOff(g); }
       if (ev === 'bounce') onBounce(g);
       if (g.phase === 'rally') checkCrossings(g);
       if (Math.abs(b.pos.y) > 40 || Math.abs(b.pos.x) > 25) b.active = false;

@@ -280,6 +280,7 @@ function chase(CT, x, y) {
   }
   g.ball = Object.assign(CT.makeBall(), { pos, vel, active: true, inFlight: true, bounces: 0, lastHitter: 1 });
   CT._cpuPlan(g, p);
+  p.g = g;
   return p;
 }
 
@@ -294,6 +295,26 @@ test('automove runs at a ball landing just out and lets it go, but not at one we
   assert.ok(wellOut.leaving && Math.abs(wellOut.tx) <= 2.2, `well out: ${wellOut.tx} ${wellOut.leaving}`);
   const long = chase(CT, 1, -CT.COURT.HL - 0.6);
   assert.ok(long.leaving && long.ty < -CT.COURT.HL, `long: ${long.ty}`);
+});
+
+test('automove sets off for a ball that is going into the net, then pulls up when it hits the tape', () => {
+  const CT = loadEngine();
+  // aimed at (3, -9) but launched too low: it will catch the tape
+  const p = chase(CT, 3, -9);
+  const g = p.g;
+  g.ball.vel.z -= 2.5;
+  const fl = CT.flight(g.ball.pos, g.ball.vel, 0, 0);
+  assert.ok(fl.netClear < 0, `the ball should be netted (clears by ${fl.netClear})`);
+  CT._cpuPlan(g, p);
+  assert.ok(p.tx > 1.5, `runs out to the ball as if it clears: ${p.tx}`);
+  let netAt = null;
+  g.onEvent = (t) => { if (t === 'net' && netAt === null) netAt = { x: p.x, y: p.y }; };
+  for (let i = 0; i < 120 && netAt === null; i++) CT.updateGame(g, 1 / 60);
+  assert.ok(netAt, 'the ball hit the net');
+  assert.ok(netAt.x > 0.3, `already moving toward it when it netted: ${netAt.x}`);
+  assert.ok(Math.hypot(p.tx - netAt.x, p.ty - netAt.y) <= 0.55, `pulls up within a stride: ${p.tx}, ${p.ty}`);
+  for (let i = 0; i < 60; i++) CT.updateGame(g, 1 / 60);
+  assert.ok(Math.hypot(p.x - netAt.x, p.y - netAt.y) <= 0.6, `stopped near where it netted: ${p.x}, ${p.y}`);
 });
 
 test('a fast downward swipe still slices with real backspin', () => {
