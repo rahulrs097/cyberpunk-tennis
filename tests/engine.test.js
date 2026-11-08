@@ -429,6 +429,52 @@ test('volley and smash drills: the player at the net hits the ball out of the ai
   }
 });
 
+test('a downward swipe on a lob is still a smash, not a slice', () => {
+  for (const spinDir of [1, -1]) {
+    const CT = loadEngine();
+    const play = CT.requestSwipe;
+    CT.requestSwipe = (g, side, input, err) => play(g, side, { ...input, spinDir }, err);
+    const { ends } = drill(CT, { feed: 'smash', wing: 'fh' }, true);
+    assert.equal(ends.length, 4);
+    assert.ok(ends.every((e) => e.ok === true && e.shot.kind === 'overhead' && e.shot.spin !== 'Slice'), spinDir + ' ' + JSON.stringify(ends));
+  }
+});
+
+test('a smash swiped down aims the way it was swiped, a slice is mirrored', () => {
+  // what handleSwipe sends for a swipe up-right, and for one down-right
+  const up = { aim: 0.4, landX: undefined, spinDir: 1 };
+  const down = { aim: -0.4, landX: undefined, spinDir: -1, smash: { aim: 0.4, landX: undefined } };
+  const xs = (d, input) => {
+    const CT = loadEngine();
+    const play = CT.requestSwipe;
+    CT.requestSwipe = (g, side, inp, err) => play(g, side, { ...inp, ...input }, err);
+    const { ends } = drill(CT, d, true);
+    assert.equal(ends.length, 4);
+    return ends.map((e) => e.x);
+  };
+  const smashUp = xs({ feed: 'smash', wing: 'fh' }, up), smashDown = xs({ feed: 'smash', wing: 'fh' }, down);
+  assert.ok(smashUp.every((x) => x > 1), JSON.stringify(smashUp));
+  assert.ok(smashDown.every((x) => x > 1), 'down-right smash goes right ' + JSON.stringify(smashDown));
+  // the same swipe on a groundstroke is a slice, mirrored: it goes left
+  const slice = xs({ wing: 'fh' }, down);
+  assert.ok(slice.every((x) => x < -1), 'down-right slice goes left ' + JSON.stringify(slice));
+});
+
+test('tutorial automove takes the lesson ball on the lesson wing, for both characters', () => {
+  for (const p0 of ['octopus', 'philosopher']) {
+    for (const d of [{ wing: 'fh' }, { wing: 'bh' }, { feed: 'volley', wing: 'fh' }]) {
+      const CT = loadEngine();
+      const ends = [];
+      const g = CT.createGame({ p0, p1: p0 === 'octopus' ? 'philosopher' : 'octopus', control: ['human', 'feeder'], autoMove: [true, false],
+        timeScale: 0.75, drill: { reps: 0, ...d }, onEvent: (t, e) => { if (t === 'drill') ends.push(e); } });
+      const bot = makeBot(CT, g, 0, 0, () => 0.5);
+      for (let i = 0; i < 60 * 30 && ends.length < 4; i++) { bot(); CT.updateGame(g, 1 / 60); }
+      assert.equal(ends.length, 4);
+      assert.ok(ends.every((e) => e.shot && e.shot.wing === d.wing), p0 + ' ' + JSON.stringify(d) + ' ' + ends.map((e) => e.shot && e.shot.wing));
+    }
+  }
+});
+
 test('serve drill: the player always serves, alternating courts', () => {
   const CT = loadEngine();
   const { ends } = drill(CT, { serve: true }, true);

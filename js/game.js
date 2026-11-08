@@ -342,7 +342,8 @@
 
   // Build launch parameters for p hitting the ball where it is now.
   // input: { aim (rad, + = hitter's right), pace 0..1, over 0..1, spinDir ±1, curve -1..1,
-  //          depth 0..1, landX (world x to aim at; the CPU's alternative to aim) }
+  //          depth 0..1, landX (world x to aim at; the CPU's alternative to aim),
+  //          smash ({ aim, landX } used instead if it turns out to be an overhead) }
   function computeShot(g, p, input, err) {
     const ch = p.ch, b = g.ball, f = staminaF(p), fwd = p.fwd;
     const pos = { x: b.pos.x, y: b.pos.y, z: Math.max(b.pos.z, 0.08) };
@@ -356,6 +357,8 @@
     else if (pos.z >= POWER_Z) kind = 'power';
     else kind = 'ground';
 
+    // a smash swiped down aims the way it was swiped, not mirrored like a slice
+    if (kind === 'overhead' && input.smash) input = { ...input, ...input.smash };
     const isLob = !!input.lob && kind !== 'serve' && kind !== 'overhead';
     const W = windowFor(p, wing) * (isLob ? LOB_EASE : 1);
     // Where you are matters as well as when you swing: a ball jammed into
@@ -765,6 +768,9 @@
         else if (bounced && z >= POWER_Z + 0.1) q += 1.0 + 0.5 * (z - POWER_Z);
         q -= Math.max(0, -fwd * py - ch.home) * 0.25;   // don't drift too far back
         q += ch.tactics.late * t + (wing === 'fh' ? ch.tactics.fhPref : 0);
+        // in a tutorial drill, automove sets the player up on the lesson's
+        // wing (Octopus would otherwise take a forehand feed on his backhand)
+        if (g.drill && c.side === 0 && wing === (g.drill.wing || 'fh')) q += 3;
         q -= dist * 0.05;
         cands.push({ t, x: px, y: py, z, slack, q, wing });
       }
