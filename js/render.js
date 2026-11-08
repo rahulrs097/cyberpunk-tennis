@@ -863,7 +863,71 @@
     }
     boardBorder(ctx);
   }
-  const BOARD_ANIMS = { parking: animParking, tentacle: animTentacle, thought: animThought };
+  // Rocket Serve: a rocket streaks across the sign leaving a burning trail,
+  // and the serve's speed is left glowing where it passed, then the name.
+  function animRocket(ctx, r, age, data) {
+    const W = BOARD_TEX.w, H = BOARD_TEX.h;
+    boardFrame(ctx);
+    const fly = Math.min(1, age / 0.9), y = H / 2 + 6;
+    const k = fly * fly;   // speeding up as it goes
+    const rx = -60 + (W + 160) * k;
+    // the trail: a flame-coloured streak fading behind the rocket
+    const tail = Math.max(14, Math.min(rx, W) - 320 + 420 * Math.max(0, age - 0.9));
+    if (rx > 14 && tail < W - 14) {
+      const g = ctx.createLinearGradient(tail, 0, Math.min(rx, W), 0);
+      const fade = Math.max(0, 1 - Math.max(0, age - 1.2) / 0.8);
+      g.addColorStop(0, `rgba(255,63,108,${0.05 * fade})`);
+      g.addColorStop(0.7, `rgba(255,140,40,${0.55 * fade})`);
+      g.addColorStop(1, `rgba(255,236,120,${0.9 * fade})`);
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.moveTo(tail, y);
+      ctx.lineTo(Math.min(rx, W - 14), y - 12);
+      ctx.lineTo(Math.min(rx, W - 14), y + 12);
+      ctx.closePath(); ctx.fill();
+      // sparks left behind
+      ctx.fillStyle = `rgba(255,200,80,${fade})`;
+      for (let i = 0; i < 18; i++) {
+        const sx = 20 + ((i * 97) % (W - 40));
+        if (sx > rx) continue;
+        const drift = (age - sx / (W + 160)) * 30;
+        ctx.fillRect(sx, y + Math.sin(i * 2.3) * 14 + drift * Math.sin(i), 3, 3);
+      }
+    }
+    // the speed, burnt in where the rocket passed, then the name under it
+    const kmh = data && data.kmh ? Math.round(data.kmh) + ' KM/H' : null;
+    if (age > 0.5) {
+      ctx.save();
+      ctx.beginPath(); ctx.rect(0, 0, Math.min(W, rx - 30), H); ctx.clip();
+      if (kmh && age < 2.2) neonText(ctx, r, kmh, W / 2, y - 4, 76, '#ffb23a', W - 70);
+      ctx.restore();
+    }
+    if (age >= 2.2 || (!kmh && age > 1)) {
+      ctx.globalAlpha = Math.min(1, (age - (kmh ? 2.2 : 1)) / 0.2);
+      neonText(ctx, r, 'ROCKET SERVE', W / 2, y - 4, 66, '#ff8a3a', W - 70);
+      ctx.globalAlpha = 1;
+    }
+    // the rocket itself, nose to the right
+    if (rx < W + 60) {
+      ctx.save();
+      ctx.translate(rx, y);
+      ctx.fillStyle = '#e8f6ff';
+      ctx.beginPath(); ctx.moveTo(34, 0); ctx.quadraticCurveTo(18, -14, -16, -12); ctx.lineTo(-16, 12); ctx.quadraticCurveTo(18, 14, 34, 0); ctx.fill();
+      ctx.fillStyle = '#ff3f6c';
+      ctx.beginPath(); ctx.moveTo(-16, -12); ctx.lineTo(-28, -22); ctx.lineTo(-22, -6); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(-16, 12); ctx.lineTo(-28, 22); ctx.lineTo(-22, 6); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#25d9ff';
+      ctx.beginPath(); ctx.arc(10, 0, 5, 0, Math.PI * 2); ctx.fill();
+      // the exhaust flame, flickering
+      ctx.fillStyle = '#ffd23a';
+      if (r.quality) { ctx.shadowColor = '#ff8a3a'; ctx.shadowBlur = 16; }
+      const fl = 22 + Math.sin(age * 60) * 6;
+      ctx.beginPath(); ctx.moveTo(-16, -7); ctx.lineTo(-16 - fl, 0); ctx.lineTo(-16, 7); ctx.closePath(); ctx.fill();
+      ctx.restore();
+    }
+    boardBorder(ctx);
+  }
+  const BOARD_ANIMS = { parking: animParking, tentacle: animTentacle, thought: animThought, rocket: animRocket };
 
   function drawBillboard(ctx, r) {
     const B = BOARD, z1 = B.z + B.h;
@@ -900,7 +964,7 @@
       if (key === null || src.key !== key) {
         src.key = key;
         if (cur.photo || cur.score) drawBoardPhoto(src.getContext('2d'), r, now, cur);
-        else if (cur.anim) BOARD_ANIMS[cur.anim](src.getContext('2d'), r, age);
+        else if (cur.anim) BOARD_ANIMS[cur.anim](src.getContext('2d'), r, age, cur.data);
         else drawBoardCall(src.getContext('2d'), r, cur.call, age);
       }
     } else src = boardTexture(r, cur.text, cur.color);
@@ -922,8 +986,9 @@
 
   // Flash a word on the billboard for `secs` seconds. With `anim` (an id in
   // BOARD_ANIMS) the sign plays that animation instead of the word.
-  function showBillboard(r, text, color, secs, anim) {
-    r.board = { text, color: color || '#e4ff4a', from: performance.now() / 1000, until: performance.now() / 1000 + (secs || 2.5), anim: BOARD_ANIMS[anim] ? anim : null };
+  // `data` is anything the animation shows, such as Rocket Serve's { kmh }.
+  function showBillboard(r, text, color, secs, anim, data) {
+    r.board = { text, color: color || '#e4ff4a', from: performance.now() / 1000, until: performance.now() / 1000 + (secs || 2.5), anim: BOARD_ANIMS[anim] ? anim : null, data };
   }
 
   // Zen mode's score for the billboard: { text, label, server } (server 0 is
@@ -1712,7 +1777,7 @@
   CT.renderGame = render;
   CT.showBillboard = showBillboard;
   CT.BOARD_ANIMS = Object.keys(BOARD_ANIMS);
-  CT.drawBoardAnim = (id, ctx, r, age) => BOARD_ANIMS[id](ctx, r, age);
+  CT.drawBoardAnim = (id, ctx, r, age, data) => BOARD_ANIMS[id](ctx, r, age, data);
   CT.showLineCall = showLineCall;
   CT.showPing = showPing;
   CT.showScore = showScore;

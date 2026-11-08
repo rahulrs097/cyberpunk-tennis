@@ -361,6 +361,8 @@
   // Parallel Parking goes up straight away, while the opponent is in the bays.
   const ACH_DELAY = 1.3, ACH_SECS = 2.4, ANIM_SECS = 3.4;
   let achQueue = [], achFreeAt = 0, achNew = [];
+  // what an animation shows, by achievement: Rocket Serve's speed
+  const achData = {};
   function track(type, d) {
     if (!tracker || (type !== 'point' && type !== 'hit' && type !== 'parked')) return;
     const res = tracker[type](d);
@@ -370,6 +372,7 @@
       CT.addHistory({ at: Date.now(), mode: tracker.mode, me: game.players[me].ch.id, opp: game.players[1 - me].ch.id,
         won: res.over.won, games: res.over.games, tiebreak: res.over.tiebreak, totals: res.over.totals });
     }
+    if (res.earned.includes('rocket')) achData.rocket = { kmh: res.best.fastestServe };
     const show = res.earned.filter((id) => fresh.includes(id) || !CT.achievement(id).common);
     if (!show.length) return;
     const now = performance.now() / 1000;
@@ -382,7 +385,7 @@
     const a = CT.achievement(achQueue.shift());
     // a few have their own animation on the sign, which runs a little longer
     const anim = CT.BOARD_ANIMS.includes(a.id), secs = anim ? ANIM_SECS : ACH_SECS;
-    CT.showBillboard(renderer, a.name.toUpperCase(), a.pro ? '#ffc23d' : '#25d9ff', secs, anim ? a.id : null);
+    CT.showBillboard(renderer, a.name.toUpperCase(), a.pro ? '#ffc23d' : '#25d9ff', secs, anim ? a.id : null, achData[a.id]);
     achFreeAt = now + secs;
   }
 
