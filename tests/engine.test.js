@@ -429,6 +429,17 @@ test('volley and smash drills: the player at the net hits the ball out of the ai
   }
 });
 
+test('a downward swipe on a lob is still a smash, not a slice', () => {
+  for (const spinDir of [1, -1]) {
+    const CT = loadEngine();
+    const play = CT.requestSwipe;
+    CT.requestSwipe = (g, side, input, err) => play(g, side, { ...input, spinDir }, err);
+    const { ends } = drill(CT, { feed: 'smash', wing: 'fh' }, true);
+    assert.equal(ends.length, 4);
+    assert.ok(ends.every((e) => e.ok === true && e.shot.kind === 'overhead' && e.shot.spin !== 'Slice'), spinDir + ' ' + JSON.stringify(ends));
+  }
+});
+
 test('serve drill: the player always serves, alternating courts', () => {
   const CT = loadEngine();
   const { ends } = drill(CT, { serve: true }, true);

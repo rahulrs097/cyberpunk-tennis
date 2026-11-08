@@ -85,7 +85,7 @@
       intro: 'A slow, long swipe up lobs', pass: (d) => d.ok && d.shot && d.shot.spin === 'Lob' },
     { title: 'Volley', feed: 'volley', wing: 'fh', need: 2, hint: 'At the net, swipe as the ring closes, before the ball bounces',
       intro: 'You\'re at the net: hit it out of the air', pass: (d) => d.ok && d.shot && /volley/i.test(d.shot.kind) },
-    { title: 'Smash', feed: 'smash', need: 1, hint: 'Wait under the lob and swipe up hard as the ring closes',
+    { title: 'Smash', feed: 'smash', need: 1, hint: 'Wait under the lob and swipe hard, up or down, as the ring closes',
       intro: 'A lob is coming: smash it', pass: (d) => d.ok && d.shot && d.shot.kind === 'overhead' },
     { title: 'Play a point', rally: true, need: 1, hint: 'Rally with the CPU. Move it side to side and win one point',
       intro: 'Now win a point against the CPU', pass: (d) => d.ok },
@@ -582,7 +582,9 @@
   }
 
   // Turn a finger path into a shot: direction = aim, speed = pace vs spin,
-  // up = topspin, down = slice, a bowed path = sidespin.
+  // up = topspin, down = slice, a bowed path = sidespin. On a ball above
+  // the player's overheadZ either way is a smash, so swiping down like a real
+  // overhead works too.
   // A lob: an upward swipe at least LOB_LEN screens long, averaging under
   // LOB_SPEED screens a second.
   const LOB_LEN = 0.22, LOB_SPEED = 1.4;
