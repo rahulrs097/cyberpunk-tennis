@@ -810,7 +810,7 @@
     ctx.setLineDash([10, 10]);
     ctx.lineWidth = 1.5;
     ctx.beginPath();
-    for (const sx of [-1, 1]) pathSeg(ctx, r, [sx * 7.2, LOT_BACK], [sx * 7.2, LOT_EDGE]);
+    for (const sx of [-1, 1]) pathSeg(ctx, r, [sx * COURT.PARK, LOT_BACK], [sx * COURT.PARK, LOT_EDGE]);
     ctx.stroke();
     ctx.restore();
   }

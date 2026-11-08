@@ -1066,23 +1066,30 @@ test('clinical: a match won with only 24 points, whatever the score and whatever
   assert.ok(!r.earned.includes('clinical'));
 });
 
-test('parallel parking: win the point after they hit from past the sideline', () => {
+test('parallel parking: the opponent runs past the yellow line into the parking bays', () => {
   const CT = loadEngine();
-  const pt = (winner, text) => ({ winner, text, result: 'point', server: 0, shots: 3, tiebreak: false, games: [0, 0] });
-  const rally = (theirs, p) => {
-    const t = CT.createAchievementTracker(0, 'club', null, 'philosopher');
-    t.hit({ side: 0, kind: 'serve', kmh: 150 });
-    t.hit({ side: 1, kind: 'ground', wing: 'fh', ...theirs });
-    t.hit({ side: 0, kind: 'ground', wing: 'fh' });
-    return t.point(p).earned;
-  };
-  assert.ok(rally({ wide: true }, pt(0, 'Winner')).includes('parking'));
-  assert.ok(!rally({ wide: false }, pt(0, 'Winner')).includes('parking'), 'they were inside the court');
-  assert.ok(!rally({ wide: true }, pt(1, 'Winner')).includes('parking'), 'they won the point');
-  // only their last shot counts: they got back into the court
-  const t = CT.createAchievementTracker(0, 'club', null, 'philosopher');
-  t.hit({ side: 1, kind: 'ground', wing: 'fh', wide: true });
-  t.hit({ side: 0, kind: 'ground', wing: 'fh' });
-  t.hit({ side: 1, kind: 'ground', wing: 'bh', wide: false });
-  assert.ok(!t.point(pt(0, 'Out')).earned.includes('parking'));
+  const pt = (winner, parked) => ({ winner, text: 'Winner', result: 'point', server: 0, shots: 3, tiebreak: false, games: [0, 0], parked });
+  const got = (winner, parked) => CT.createAchievementTracker(0, 'club', null, 'philosopher').point(pt(winner, parked)).earned.includes('parking');
+  assert.ok(got(0, [false, true]));
+  assert.ok(got(1, [false, true]), 'whoever wins the point');
+  assert.ok(!got(0, [true, false]), 'we ran there, not them');
+  assert.ok(!got(0, [false, false]));
+});
+
+test('point events say who ran past the yellow line during the point', () => {
+  const CT = loadEngine(3);
+  const pts = [];
+  // (side 1 is a human that never swings, so only the test moves it)
+  const g = CT.createGame({ p0: 'octopus', p1: 'philosopher', control: ['cpu', 'human'], ...levelOpts(CT, 'club'), onEvent: (t, d) => { if (t === 'point') pts.push(d); } });
+  let deepest = 0;
+  for (let i = 0; i < 60 * 3600 && g.phase !== 'matchOver'; i++) {
+    CT.updateGame(g, 1 / 60);
+    // send side 1 into the bays once mid-rally
+    if (g.phase === 'rally' && pts.length === 3) CT.requestMove(g, 1, 7.5, g.players[1].y);
+    if (g.phase === 'preServe' && g.server === 1 && g.phaseWall > 0.5) CT.requestToss(g, 1);
+    deepest = Math.max(deepest, Math.abs(g.players[1].x));
+  }
+  assert.ok(pts.every((d) => d.parked.length === 2));
+  assert.equal(pts[0].parked[1], false);
+  assert.ok(pts.some((d) => d.parked[1]), `side 1 reached ${deepest.toFixed(2)} m`);
 });
