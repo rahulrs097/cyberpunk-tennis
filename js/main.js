@@ -359,7 +359,7 @@
 
   // Achievements go up on the billboard after the point's word, one at a time.
   // Parallel Parking goes up straight away, while the opponent is in the bays.
-  const ACH_DELAY = 1.3, ACH_SECS = 2.4;
+  const ACH_DELAY = 1.3, ACH_SECS = 2.4, ANIM_SECS = 3.4;
   let achQueue = [], achFreeAt = 0, achNew = [];
   function track(type, d) {
     if (!tracker || (type !== 'point' && type !== 'hit' && type !== 'parked')) return;
@@ -380,8 +380,10 @@
   function showAchievements(now) {
     if (!achQueue.length || now < achFreeAt) return;
     const a = CT.achievement(achQueue.shift());
-    CT.showBillboard(renderer, a.name.toUpperCase(), a.pro ? '#ffc23d' : '#25d9ff', ACH_SECS);
-    achFreeAt = now + ACH_SECS;
+    // a few have their own animation on the sign, which runs a little longer
+    const anim = CT.BOARD_ANIMS.includes(a.id), secs = anim ? ANIM_SECS : ACH_SECS;
+    CT.showBillboard(renderer, a.name.toUpperCase(), a.pro ? '#ffc23d' : '#25d9ff', secs, anim ? a.id : null);
+    achFreeAt = now + secs;
   }
 
   function onEvent(type, d) {
