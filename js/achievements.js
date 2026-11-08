@@ -40,7 +40,8 @@
   // Follows `side` through one match. mode: the CPU level id, or 'online'.
   // point(d) takes each 'point' event (winner, text, result, server, shots,
   // matchPoint: [side 0 had one, side 1 had one], lineM: the last bounce's line margin,
-  // tiebreak, games) and hit(d) each 'hit'; both return what they changed:
+  // tiebreak, games), hit(d) each 'hit' and parked(d) each 'parked' (side: who
+  // ran past the yellow line); all return what they changed:
   // { earned: [ids, in list order], stats: { name: amount }, best: { name: value },
   // over: { won, games, tiebreak, totals } once the match is over: games is
   // the set score and tiebreak the tiebreak's points (or null), both ours
@@ -106,8 +107,6 @@
         if (wideShot) got.add('tentacle');
         if (kinds.size === 4) got.add('thought');
       }
-      // (won or lost, the point's over: they ran into the parking bays during it)
-      if (d.parked && d.parked[opp]) got.add('parking');
       kinds = new Set(); wideShot = false; pressed = false; lastRally = false;
       if (d.shots) best.longestRally = d.shots;
       if (!mine) lostPoint = true;
@@ -165,7 +164,14 @@
       lastRally = d.side === side && d.kind !== 'serve';
       return out(got, {}, best, null);
     }
-    return { side, mode, point, hit, state };
+    // the opponent just ran past the yellow line into the parking bays
+    // (it counts there and then, whoever goes on to win the point)
+    function parked(d) {
+      const got = new Set();
+      if (d.side === opp) got.add('parking');
+      return out(got, {}, {}, null);
+    }
+    return { side, mode, point, hit, parked, state };
   }
 
   // one match's stats: points won (and played), aces and so on

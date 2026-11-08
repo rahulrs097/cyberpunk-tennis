@@ -1089,19 +1089,19 @@ test('clinical: a match won with only 24 points, whatever the score and whatever
 
 test('parallel parking: the opponent runs past the yellow line into the parking bays', () => {
   const CT = loadEngine();
-  const pt = (winner, parked) => ({ winner, text: 'Winner', result: 'point', server: 0, shots: 3, tiebreak: false, games: [0, 0], parked });
-  const got = (winner, parked) => CT.createAchievementTracker(0, 'club', null, 'philosopher').point(pt(winner, parked)).earned.includes('parking');
-  assert.ok(got(0, [false, true]));
-  assert.ok(got(1, [false, true]), 'whoever wins the point');
-  assert.ok(!got(0, [true, false]), 'we ran there, not them');
-  assert.ok(!got(0, [false, false]));
+  const got = (side) => CT.createAchievementTracker(0, 'club', null, 'philosopher').parked({ side }).earned.includes('parking');
+  assert.ok(got(1), 'the opponent is in the bays: it counts there and then');
+  assert.ok(!got(0), 'we ran there, not them');
+  const t = CT.createAchievementTracker(0, 'club', null, 'philosopher');
+  const pt = { winner: 1, text: 'Winner', result: 'point', server: 0, shots: 3, tiebreak: false, games: [0, 0], parked: [false, true] };
+  assert.ok(!t.point(pt).earned.includes('parking'), 'not again at the end of the point');
 });
 
-test('point events say who ran past the yellow line during the point', () => {
+test('the engine says the moment a player runs past the yellow line', () => {
   const CT = loadEngine(3);
-  const pts = [];
+  const pts = [], parks = [];
   // (side 1 is a human that never swings, so only the test moves it)
-  const g = CT.createGame({ p0: 'octopus', p1: 'philosopher', control: ['cpu', 'human'], ...levelOpts(CT, 'club'), onEvent: (t, d) => { if (t === 'point') pts.push(d); } });
+  const g = CT.createGame({ p0: 'octopus', p1: 'philosopher', control: ['cpu', 'human'], ...levelOpts(CT, 'club'), onEvent: (t, d) => { if (t === 'point') pts.push(d); if (t === 'parked') parks.push({ ...d, during: pts.length, x: g.players[d.side].x }); } });
   let deepest = 0;
   for (let i = 0; i < 60 * 3600 && g.phase !== 'matchOver'; i++) {
     CT.updateGame(g, 1 / 60);
@@ -1113,4 +1113,9 @@ test('point events say who ran past the yellow line during the point', () => {
   assert.ok(pts.every((d) => d.parked.length === 2));
   assert.equal(pts[0].parked[1], false);
   assert.ok(pts.some((d) => d.parked[1]), `side 1 reached ${deepest.toFixed(2)} m`);
+  // the moment side 1 crossed the line, once, mid-rally in the fourth point
+  assert.equal(parks.length, 1);
+  assert.equal(parks[0].side, 1);
+  assert.equal(parks[0].during, 3);
+  assert.ok(Math.abs(parks[0].x) > CT.COURT.PARK);
 });

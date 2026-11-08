@@ -1113,7 +1113,10 @@
         p.x += ux * step; p.y += uy * step;
         p.moving = true;
         // (for the achievements) ran out past the yellow line into the parking bays
-        if (g.phase === 'rally' && Math.abs(p.x) > COURT.PARK) p.parked = true;
+        if (g.phase === 'rally' && !p.parked && Math.abs(p.x) > COURT.PARK) {
+          p.parked = true;
+          emit(g, 'parked', { side: p.side });
+        }
         if (g.phase === 'rally') {
           p.run += step;
           p.stamina = Math.max(0, p.stamina - step * p.ch.drain);

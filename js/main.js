@@ -358,10 +358,11 @@
   let lineCallShown = false;
 
   // Achievements go up on the billboard after the point's word, one at a time.
+  // Parallel Parking goes up straight away, while the opponent is in the bays.
   const ACH_DELAY = 1.3, ACH_SECS = 2.4;
   let achQueue = [], achFreeAt = 0, achNew = [];
   function track(type, d) {
-    if (!tracker || (type !== 'point' && type !== 'hit')) return;
+    if (!tracker || (type !== 'point' && type !== 'hit' && type !== 'parked')) return;
     const res = tracker[type](d);
     const fresh = CT.recordAchievements(ach, res, tracker.mode);
     achNew.push(...fresh);
@@ -372,6 +373,7 @@
     const show = res.earned.filter((id) => fresh.includes(id) || !CT.achievement(id).common);
     if (!show.length) return;
     const now = performance.now() / 1000;
+    if (type === 'parked') { achQueue.unshift(...show); achFreeAt = Math.min(achFreeAt, now); return; }
     if (!achQueue.length) achFreeAt = Math.max(achFreeAt, now + ACH_DELAY);
     achQueue.push(...show);
   }
