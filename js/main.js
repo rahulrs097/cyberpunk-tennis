@@ -1387,6 +1387,8 @@
     const cb = $('camBtn');
     cb.textContent = v === 'first' ? '3P' : '1P';
     cb.setAttribute('aria-label', v === 'first' ? 'Switch to chase view' : 'Switch to first-person view');
+    // the pause menu's camera switch, so zen (no 1P/3P button) can still change view
+    $('camPause').textContent = v === 'first' ? 'Camera: first person' : 'Camera: chase';
   }
 
   function setPaused(v) {
@@ -1549,6 +1551,7 @@
     $('musicPause').textContent = musicOn ? 'Music on' : 'Music off';
     document.querySelectorAll('[data-zen]').forEach((b) => b.addEventListener('click', () => setZen(!zen)));
     $('zenPause').addEventListener('click', () => setZen(!zen));
+    $('camPause').addEventListener('click', () => setView(view === 'first' ? 'chase' : 'first'));
     document.querySelectorAll('[data-full]').forEach((b) => b.addEventListener('click', () => setFull(!fullOn)));
     // the setting does nothing where pages can't go full screen (iPhone)
     $('fullPause').addEventListener('click', () => setFull($('fullPause').getAttribute('aria-pressed') !== 'true'));
