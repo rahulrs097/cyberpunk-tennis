@@ -180,7 +180,7 @@
     for (const p of g.players) {
       p.tx = p.x; p.ty = p.y; p.swing = -1; p.pending = null; p.plan = null;
       p.cross = null; p.prevRel = null; p.streak = 0; p.v = 0; p.atNet = false; p.netSpot = null;
-      p.pattern = null; p.shotN = 0; p.lastTx = 0; p.seenAtNet = false;
+      p.pattern = null; p.shotN = 0; p.lastTx = 0; p.seenAtNet = false; p.parked = false;
       if (!fresh) p.stamina = Math.min(p.cap, p.stamina + (p.cap - p.stamina) * (changeover ? STAMINA_CHANGEOVER : STAMINA_POINT));
     }
     g.serveBox = { side: recv, sign: boxSign };
@@ -1041,7 +1041,7 @@
     g.phaseWall = 0;
     for (const p of g.players) p.pending = null;
     emit(g, 'point', { winner: w, text, detail, result: res, server: g.server, shots: g.shots, tiebreak, games: g.match.games.slice(), points: g.match.points.slice(),
-      matchPoint, lineM: g.lineM });
+      matchPoint, lineM: g.lineM, parked: g.players.map((p) => !!p.parked) });
   }
 
   function fault(g, text) {
@@ -1112,6 +1112,8 @@
         const step = Math.min(d, p.v * dt);
         p.x += ux * step; p.y += uy * step;
         p.moving = true;
+        // (for the achievements) ran out past the yellow line into the parking bays
+        if (g.phase === 'rally' && Math.abs(p.x) > COURT.PARK) p.parked = true;
         if (g.phase === 'rally') {
           p.run += step;
           p.stamina = Math.max(0, p.stamina - step * p.ch.drain);

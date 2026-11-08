@@ -1065,3 +1065,52 @@ test('point events carry who had match point and the last bounce\'s line margin'
   assert.ok(pts.filter((d) => d.text === 'Winner').every((d) => d.lineM <= 0), 'a winner landed in');
   assert.ok(pts.filter((d) => d.text === 'Out').every((d) => d.lineM > 0));
 });
+
+test('clinical: a match won with only 24 points, whatever the score and whatever the opponent scored', () => {
+  const CT = loadEngine();
+  assert.ok(trackSeq(CT, holdGames(6), 'club').earned.includes('clinical'), 'a golden set is clinical too');
+  const tight = []; for (let i = 0; i < 6; i++) tight.push(0, 1, 0, 1, 0, 0);   // every game 40-30
+  let r = trackSeq(CT, tight, 'club');
+  assert.deepEqual(plain(r.m.games), [6, 0]);
+  assert.ok(r.earned.includes('clinical') && !r.earned.includes('goldenSet'));
+  // one game through deuce means 25 points
+  r = trackSeq(CT, [0, 1, 0, 1, 0, 1, 0, 0, ...tight.slice(6)], 'club');
+  assert.deepEqual(plain(r.m.games), [6, 0]);
+  assert.ok(!r.earned.includes('clinical'));
+  // any score: 6-2 with both lost games lost to love is still 24
+  r = trackSeq(CT, [1, 1, 1, 1, 1, 1, 1, 1, ...tight]);
+  assert.deepEqual(plain(r.m.games), [6, 2]);
+  assert.ok(r.earned.includes('clinical'));
+  // but a point won in a lost game makes it 25
+  r = trackSeq(CT, [0, 1, 1, 1, 1, ...tight]);
+  assert.deepEqual(plain(r.m.games), [6, 1]);
+  assert.ok(!r.earned.includes('clinical'));
+});
+
+test('parallel parking: the opponent runs past the yellow line into the parking bays', () => {
+  const CT = loadEngine();
+  const pt = (winner, parked) => ({ winner, text: 'Winner', result: 'point', server: 0, shots: 3, tiebreak: false, games: [0, 0], parked });
+  const got = (winner, parked) => CT.createAchievementTracker(0, 'club', null, 'philosopher').point(pt(winner, parked)).earned.includes('parking');
+  assert.ok(got(0, [false, true]));
+  assert.ok(got(1, [false, true]), 'whoever wins the point');
+  assert.ok(!got(0, [true, false]), 'we ran there, not them');
+  assert.ok(!got(0, [false, false]));
+});
+
+test('point events say who ran past the yellow line during the point', () => {
+  const CT = loadEngine(3);
+  const pts = [];
+  // (side 1 is a human that never swings, so only the test moves it)
+  const g = CT.createGame({ p0: 'octopus', p1: 'philosopher', control: ['cpu', 'human'], ...levelOpts(CT, 'club'), onEvent: (t, d) => { if (t === 'point') pts.push(d); } });
+  let deepest = 0;
+  for (let i = 0; i < 60 * 3600 && g.phase !== 'matchOver'; i++) {
+    CT.updateGame(g, 1 / 60);
+    // send side 1 into the bays once mid-rally
+    if (g.phase === 'rally' && pts.length === 3) CT.requestMove(g, 1, 7.5, g.players[1].y);
+    if (g.phase === 'preServe' && g.server === 1 && g.phaseWall > 0.5) CT.requestToss(g, 1);
+    deepest = Math.max(deepest, Math.abs(g.players[1].x));
+  }
+  assert.ok(pts.every((d) => d.parked.length === 2));
+  assert.equal(pts[0].parked[1], false);
+  assert.ok(pts.some((d) => d.parked[1]), `side 1 reached ${deepest.toFixed(2)} m`);
+});

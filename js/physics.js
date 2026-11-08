@@ -14,6 +14,7 @@
     NET_C: 0.914,      // net height at the centre strap
     NET_P: 1.07,       // net height at the posts
     POST_X: 6.4,
+    PARK: 7.2,         // the yellow dashed line: past it are the parking bays
   };
 
   const PHYS = {
