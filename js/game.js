@@ -768,6 +768,9 @@
         else if (bounced && z >= POWER_Z + 0.1) q += 1.0 + 0.5 * (z - POWER_Z);
         q -= Math.max(0, -fwd * py - ch.home) * 0.25;   // don't drift too far back
         q += ch.tactics.late * t + (wing === 'fh' ? ch.tactics.fhPref : 0);
+        // in a tutorial drill, automove sets the player up on the lesson's
+        // wing (Octopus would otherwise take a forehand feed on his backhand)
+        if (g.drill && c.side === 0 && wing === (g.drill.wing || 'fh')) q += 3;
         q -= dist * 0.05;
         cands.push({ t, x: px, y: py, z, slack, q, wing });
       }
