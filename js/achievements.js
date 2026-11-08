@@ -24,6 +24,8 @@
     { id: 'proChampion', name: 'Pro Champion', desc: 'Win a match on Pro', pro: true },
     { id: 'paint', name: 'Painting the Lines', desc: 'Hit a winner or an ace that lands on the line' },
     { id: 'saveMP', name: 'Escape Artist', desc: 'Save a match point and go on to win the match' },
+    { id: 'parking', name: 'Parallel Parking', desc: 'Win a point after making your opponent hit from outside the court, past the sideline' },
+    { id: 'clinical', name: 'Clinical', desc: 'Win a match with only 24 points won' },
     { id: 'tentacle', name: 'The Tentacle', desc: 'Hit a winner from outside the court, past the sideline', char: 'octopus' },
     { id: 'thought', name: 'The Thought', desc: 'Hit a forehand, a backhand, a volley and a smash in one rally, and win it with a winner', char: 'philosopher' },
     { id: 'goldenSet', name: 'Golden Set', desc: 'Win a match without losing a single point', pro: true },
@@ -59,6 +61,8 @@
     // this rally: the kinds of shot we've hit (fh, bh, volley, smash), and
     // our last shot, if it was hit from past the sideline
     let kinds = new Set(), wideShot = false;
+    // their last shot this rally was hit from past the sideline
+    let oppWide = false;
     // our last rally shot was hit under pressure (stretched, jammed or on
     // the run), so missing it is a forced error, not an unforced one
     let pressed = false, lastRally = false;
@@ -104,7 +108,8 @@
         if (wideShot) got.add('tentacle');
         if (kinds.size === 4) got.add('thought');
       }
-      kinds = new Set(); wideShot = false; pressed = false; lastRally = false;
+      if (mine && oppWide) got.add('parking');
+      kinds = new Set(); wideShot = false; pressed = false; lastRally = false; oppWide = false;
       if (d.shots) best.longestRally = d.shots;
       if (!mine) lostPoint = true;
       won[d.winner]++;
@@ -136,6 +141,9 @@
           if (a === 6 && b === 0) got.add('bagel');
           if (everyGame) got.add('noLove');
           if (!lostPoint) got.add('goldenSet');
+          // the fewest points a match can be won with: every game won with
+          // exactly four points, and none at all in the games lost
+          if (totals.points + (stats.points || 0) === 24) got.add('clinical');
         }
       }
       return out(got, stats, best, over);
@@ -145,7 +153,8 @@
       // (a fault is followed by the second serve, which replaces it)
       if (d.side === side && d.kind === 'serve') serveKmh = d.kmh || 0;
       else if (d.side === opp) serveIn(got, best);
-      if (d.kind === 'serve') { kinds = new Set(); wideShot = false; }
+      if (d.kind === 'serve') { kinds = new Set(); wideShot = false; oppWide = false; }
+      if (d.side === opp) oppWide = d.kind !== 'serve' && !!d.wide;
       if (d.side === side) {
         const ground = d.kind === 'ground' || d.kind === 'power';
         if (ground) kinds.add(d.wing);

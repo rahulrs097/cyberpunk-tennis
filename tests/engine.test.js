@@ -1044,3 +1044,45 @@ test('point events carry who had match point and the last bounce\'s line margin'
   assert.ok(pts.filter((d) => d.text === 'Winner').every((d) => d.lineM <= 0), 'a winner landed in');
   assert.ok(pts.filter((d) => d.text === 'Out').every((d) => d.lineM > 0));
 });
+
+test('clinical: a match won with only 24 points, whatever the score and whatever the opponent scored', () => {
+  const CT = loadEngine();
+  assert.ok(trackSeq(CT, holdGames(6), 'club').earned.includes('clinical'), 'a golden set is clinical too');
+  const tight = []; for (let i = 0; i < 6; i++) tight.push(0, 1, 0, 1, 0, 0);   // every game 40-30
+  let r = trackSeq(CT, tight, 'club');
+  assert.deepEqual(plain(r.m.games), [6, 0]);
+  assert.ok(r.earned.includes('clinical') && !r.earned.includes('goldenSet'));
+  // one game through deuce means 25 points
+  r = trackSeq(CT, [0, 1, 0, 1, 0, 1, 0, 0, ...tight.slice(6)], 'club');
+  assert.deepEqual(plain(r.m.games), [6, 0]);
+  assert.ok(!r.earned.includes('clinical'));
+  // any score: 6-2 with both lost games lost to love is still 24
+  r = trackSeq(CT, [1, 1, 1, 1, 1, 1, 1, 1, ...tight]);
+  assert.deepEqual(plain(r.m.games), [6, 2]);
+  assert.ok(r.earned.includes('clinical'));
+  // but a point won in a lost game makes it 25
+  r = trackSeq(CT, [0, 1, 1, 1, 1, ...tight]);
+  assert.deepEqual(plain(r.m.games), [6, 1]);
+  assert.ok(!r.earned.includes('clinical'));
+});
+
+test('parallel parking: win the point after they hit from past the sideline', () => {
+  const CT = loadEngine();
+  const pt = (winner, text) => ({ winner, text, result: 'point', server: 0, shots: 3, tiebreak: false, games: [0, 0] });
+  const rally = (theirs, p) => {
+    const t = CT.createAchievementTracker(0, 'club', null, 'philosopher');
+    t.hit({ side: 0, kind: 'serve', kmh: 150 });
+    t.hit({ side: 1, kind: 'ground', wing: 'fh', ...theirs });
+    t.hit({ side: 0, kind: 'ground', wing: 'fh' });
+    return t.point(p).earned;
+  };
+  assert.ok(rally({ wide: true }, pt(0, 'Winner')).includes('parking'));
+  assert.ok(!rally({ wide: false }, pt(0, 'Winner')).includes('parking'), 'they were inside the court');
+  assert.ok(!rally({ wide: true }, pt(1, 'Winner')).includes('parking'), 'they won the point');
+  // only their last shot counts: they got back into the court
+  const t = CT.createAchievementTracker(0, 'club', null, 'philosopher');
+  t.hit({ side: 1, kind: 'ground', wing: 'fh', wide: true });
+  t.hit({ side: 0, kind: 'ground', wing: 'fh' });
+  t.hit({ side: 1, kind: 'ground', wing: 'bh', wide: false });
+  assert.ok(!t.point(pt(0, 'Out')).earned.includes('parking'));
+});
