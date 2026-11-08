@@ -440,6 +440,26 @@ test('a downward swipe on a lob is still a smash, not a slice', () => {
   }
 });
 
+test('a smash swiped down aims the way it was swiped, a slice is mirrored', () => {
+  // what handleSwipe sends for a swipe up-right, and for one down-right
+  const up = { aim: 0.4, landX: undefined, spinDir: 1 };
+  const down = { aim: -0.4, landX: undefined, spinDir: -1, smash: { aim: 0.4, landX: undefined } };
+  const xs = (d, input) => {
+    const CT = loadEngine();
+    const play = CT.requestSwipe;
+    CT.requestSwipe = (g, side, inp, err) => play(g, side, { ...inp, ...input }, err);
+    const { ends } = drill(CT, d, true);
+    assert.equal(ends.length, 4);
+    return ends.map((e) => e.x);
+  };
+  const smashUp = xs({ feed: 'smash', wing: 'fh' }, up), smashDown = xs({ feed: 'smash', wing: 'fh' }, down);
+  assert.ok(smashUp.every((x) => x > 1), JSON.stringify(smashUp));
+  assert.ok(smashDown.every((x) => x > 1), 'down-right smash goes right ' + JSON.stringify(smashDown));
+  // the same swipe on a groundstroke is a slice, mirrored: it goes left
+  const slice = xs({ wing: 'fh' }, down);
+  assert.ok(slice.every((x) => x < -1), 'down-right slice goes left ' + JSON.stringify(slice));
+});
+
 test('serve drill: the player always serves, alternating courts', () => {
   const CT = loadEngine();
   const { ends } = drill(CT, { serve: true }, true);

@@ -584,7 +584,7 @@
   // Turn a finger path into a shot: direction = aim, speed = pace vs spin,
   // up = topspin, down = slice, a bowed path = sidespin. On a ball above
   // the player's overheadZ either way is a smash, so swiping down like a real
-  // overhead works too.
+  // overhead works too, and aims the way it's swiped.
   // A lob: an upward swipe at least LOB_LEN screens long, averaging under
   // LOB_SPEED screens a second.
   const LOB_LEN = 0.22, LOB_SPEED = 1.4;
@@ -622,9 +622,15 @@
     const curve = -CT.clamp(bulge * 5, -1, 1);
     aim += CT.clamp(bulge * 0.45, -0.12, 0.12);
     // A slice is swiped the other way: top-left to bottom-right goes left.
-    if (spinDir < 0) aim = -aim;
+    // But a smash swiped down goes the way the swipe goes, like the racket
+    // coming down through the ball: the engine picks that aim (`smash`) if
+    // the ball turns out to be above smash height when it's hit.
     // (a swipe pad's swipe has nothing to do with the view in the headset)
-    const input = { aim, pace, over, spinDir, curve, depth, landX: vr ? undefined : pointAt(aim), lob };
+    const at = (a) => (vr ? undefined : pointAt(a));
+    const smash = spinDir < 0 ? { aim, landX: at(aim) } : undefined;
+    if (spinDir < 0) aim = -aim;
+    const input = { aim, pace, over, spinDir, curve, depth, landX: at(aim), lob };
+    if (smash) input.smash = smash;
     // A slow swipe is still going when the ball arrives: its timing counts
     // from partway through, not from when the finger lifts.
     // And it always goes deep, however long the swipe: a short lob is just a

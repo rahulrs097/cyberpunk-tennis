@@ -342,7 +342,8 @@
 
   // Build launch parameters for p hitting the ball where it is now.
   // input: { aim (rad, + = hitter's right), pace 0..1, over 0..1, spinDir ±1, curve -1..1,
-  //          depth 0..1, landX (world x to aim at; the CPU's alternative to aim) }
+  //          depth 0..1, landX (world x to aim at; the CPU's alternative to aim),
+  //          smash ({ aim, landX } used instead if it turns out to be an overhead) }
   function computeShot(g, p, input, err) {
     const ch = p.ch, b = g.ball, f = staminaF(p), fwd = p.fwd;
     const pos = { x: b.pos.x, y: b.pos.y, z: Math.max(b.pos.z, 0.08) };
@@ -356,6 +357,8 @@
     else if (pos.z >= POWER_Z) kind = 'power';
     else kind = 'ground';
 
+    // a smash swiped down aims the way it was swiped, not mirrored like a slice
+    if (kind === 'overhead' && input.smash) input = { ...input, ...input.smash };
     const isLob = !!input.lob && kind !== 'serve' && kind !== 'overhead';
     const W = windowFor(p, wing) * (isLob ? LOB_EASE : 1);
     // Where you are matters as well as when you swing: a ball jammed into
