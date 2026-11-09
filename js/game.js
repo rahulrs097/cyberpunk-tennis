@@ -355,7 +355,8 @@
     if (isServe) kind = 'serve';
     else if (pos.z >= ch.overheadZ) kind = 'overhead';
     else if (b.bounces === 0) kind = pos.z >= POWER_Z ? 'powerVolley' : 'volley';
-    else if (pos.z >= POWER_Z) kind = 'power';
+    // (input.roll: a high ball rolled back as a normal drive, not driven down flat)
+    else if (pos.z >= POWER_Z && !input.roll) kind = 'power';
     else kind = 'ground';
 
     // a smash swiped down aims the way it was swiped, not mirrored like a slice
@@ -888,7 +889,9 @@
     // A high, heavy ball taken above the shoulder from near the baseline (a
     // moonball). Going for the lines off it hands the point away, so a
     // smart CPU punishes it with pace well inside the lines, away from the
-    // opponent, and a weaker one rolls it back deep.
+    // opponent, and a weaker one rolls it back deep. Either way it's hit as
+    // a normal drive (roll), not a power shot: a run of those drains stamina,
+    // so a player lobbing every ball used to wear the CPU out.
     const highDeep = b.bounces > 0 && b.pos.z > POWER_Z + 0.1 && fromNet > 10;
     if (highDeep && !lob && !touch) {
       if (Math.random() < g.cpuSmart) { pace = Math.max(pace, T.pace[1] * g.cpuPace); tx = away * edge * rand(0.35, 0.55); }
@@ -916,7 +919,7 @@
     let input = null;
     for (let i = 0; i < 6; i++) {
       // the CPU plays with a safe margin over the net
-      input = { aim: 0, landX: tx, pace, over: 0, spinDir, curve, lob, clear: 0.4, depth };
+      input = { aim: 0, landX: tx, pace, over: 0, spinDir, curve, lob, clear: 0.4, depth, roll: highDeep };
       const shot = computeShot(g, c, input, 0);
       const fl = CT.flight(shot.pos, shot.vel, shot.spin, shot.side), land = fl.land;
       const safe = fwd * land.y > 0.3 && fl.netClear > 0.3 && Math.abs(land.x) < COURT.SW - 0.25 && Math.abs(land.y) < COURT.HL - 0.3;
