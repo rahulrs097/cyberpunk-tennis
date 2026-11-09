@@ -142,7 +142,7 @@
      screen then starts at the top and scrolls, instead of losing its top */
   .sheet { width: 100%; max-width: 440px; display: grid; gap: 16px; margin: auto; }
   /* screens opened over the menu hide it, so its buttons don't show through */
-  #help, #trophies { background: rgba(5, 4, 12, 0.94); }
+  #help, #trophies, #settings { background: rgba(5, 4, 12, 0.94); }
   /* the end screen sits low and clear of the sky, so the billboard (and the
      achievements going up on it) stays in view over the result */
   #end { background: linear-gradient(to bottom, rgba(5, 4, 12, 0) 0%, rgba(5, 4, 12, 0) 35%, rgba(5, 4, 12, 0.85) 60%); backdrop-filter: none; }
@@ -178,7 +178,11 @@
     background: var(--panel); color: var(--ink); font: 600 14px var(--ui); letter-spacing: 0.06em; text-transform: uppercase;
   }
   .seg button[aria-pressed="true"] { border-color: var(--gold); color: var(--gold); }
-  #resumeMatch small { display: block; margin-top: 3px; font-family: inherit; font-weight: 400; font-size: 13px; letter-spacing: 0.02em; }
+  .profile { display: flex; gap: 8px; align-items: center; }
+  #picBtn { flex: 0 0 48px; height: 48px; padding: 0; border-radius: 10px; border: 1px dashed var(--cyan); background: rgba(10,8,30,0.9) center / cover no-repeat; image-rendering: pixelated; color: var(--cyan); font: 700 24px var(--display); cursor: pointer; }
+  #picBtn.set { border-style: solid; color: transparent; }
+  #nameInput { flex: 1; min-width: 0; height: 48px; box-sizing: border-box; padding: 0 12px; border-radius: 10px; border: 1px solid var(--cyan); background: rgba(10,8,30,0.9); color: var(--ball); font: 700 18px var(--display); letter-spacing: 0.06em; text-transform: uppercase; }
+  #resumeMatch small, #quickBtn small { display: block; margin-top: 3px; font-family: inherit; font-weight: 400; font-size: 13px; letter-spacing: 0.02em; }
   .btn.primary { background: var(--pink); border-color: var(--pink); color: #14001a; font-family: var(--display); font-weight: 700; font-size: 17px; box-shadow: 0 0 24px rgba(255,63,180,0.45); }
   button:focus-visible { outline: 2px solid var(--ball); outline-offset: 2px; }
   .how { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; font-size: 13px; line-height: 1.4; }
@@ -274,11 +278,6 @@
     </div>
     <button class="btn primary" id="resumeMatch" hidden>Resume match<small id="resumeScore"></small></button>
     <button class="btn primary" id="play">Play vs CPU</button>
-    <div class="label">Play a friend online</div>
-    <div class="seg">
-      <button id="hostBtn">Create room</button>
-      <button id="joinBtn">Join room</button>
-    </div>
     <div class="opts">
       <div class="label">Level</div>
       <div class="seg">
@@ -286,6 +285,37 @@
         <button data-level="club" aria-pressed="true">Club</button>
         <button data-level="pro" aria-pressed="false">Pro</button>
       </div>
+    </div>
+    <div class="label">Play online</div>
+    <button class="btn" id="quickBtn">Quick match<small>Play anyone who's looking</small></button>
+    <div class="seg">
+      <button id="hostBtn">Create room</button>
+      <button id="joinBtn">Join room</button>
+    </div>
+    <div class="seg">
+      <button id="tutBtn">Tutorial</button>
+      <button id="howBtn">How to play</button>
+    </div>
+    <div class="seg">
+      <button id="achBtn">Achievements</button>
+      <button id="statsBtn">Stats</button>
+      <button id="settingsBtn">Settings</button>
+    </div>
+    <button class="btn" id="installBtn" hidden>Install app</button>
+    <p class="lede" id="installHint" hidden>In Safari, tap Share, then Add to Home Screen. It opens full screen and plays the CPU offline.</p>
+  </div>
+</div>
+<div class="overlay" id="settings" hidden>
+  <div class="sheet">
+    <div class="title"><b>Settings</b></div>
+    <!-- on/off settings: each button is lit while its setting is on -->
+    <div class="seg toggles">
+      <button data-auto aria-pressed="true">Automove</button>
+      <button data-music aria-pressed="true">Music</button>
+      <button data-zen aria-pressed="false">Zen</button>
+      <button data-full id="fullBtn" aria-pressed="true">Full screen</button>
+    </div>
+    <div class="opts">
       <div class="label">Camera</div>
       <div class="seg">
         <button data-view="chase" aria-pressed="true">Chase</button>
@@ -321,23 +351,15 @@
         <p class="lede" id="padState"></p>
       </div>
     </div>
-    <!-- on/off settings: each button is lit while its setting is on -->
-    <div class="seg toggles">
-      <button data-auto aria-pressed="true">Automove</button>
-      <button data-music aria-pressed="true">Music</button>
-      <button data-zen aria-pressed="false">Zen</button>
-      <button data-full id="fullBtn" aria-pressed="true">Full screen</button>
+    <div class="label">Online name and picture</div>
+    <p class="lede">The other player sees these on the billboard in an online match.</p>
+    <!-- what the other player sees on the billboard -->
+    <div class="profile">
+      <button id="picBtn" aria-label="Your picture">+</button>
+      <input id="nameInput" maxlength="16" autocomplete="nickname" spellcheck="false" placeholder="Your name" aria-label="Your name for online matches">
+      <input type="file" id="picFile" accept="image/*" hidden>
     </div>
-    <div class="seg">
-      <button id="tutBtn">Tutorial</button>
-      <button id="howBtn">How to play</button>
-    </div>
-    <div class="seg">
-      <button id="achBtn">Achievements</button>
-      <button id="statsBtn">Stats</button>
-    </div>
-    <button class="btn" id="installBtn" hidden>Install app</button>
-    <p class="lede" id="installHint" hidden>In Safari, tap Share, then Add to Home Screen. It opens full screen and plays the CPU offline.</p>
+    <button class="btn primary" id="settingsClose">Done</button>
   </div>
 </div>
 <div class="overlay" id="trophies" hidden>
@@ -383,7 +405,7 @@
       <li><b>Timing</b><span>Swipe as the ring closes. Late forehands drift right, late backhands drift left. The yellow X shows where the ball will bounce, and on a serve it shows before the ring does.</span></li>
       <li><b>Stamina</b><span>Running, every swing and repeated power shots tire you, and you only get part of it back between points. Tired players run slower and have less time to swing. The striped part of the bar is gone for the set.</span></li>
       <li><b>Zen</b><span>Zen mode clears the screen: no scoreboard, hints, timing ring or landing X, just the pause button. The score goes up on the billboard in the sky. Switch camera from the pause menu. It has its own calm music, and the ball sounds closer to a real court.</span></li>
-      <li><b>VR</b><span>Pick VR under Camera and put the phone in a Cardboard headset. Look down the court and press the button to start. Watch the ball and press the button as it arrives: where the shot goes is picked for you. For a power shot, press early, hold, and let go as the ball arrives; the ring in the middle of your view fills when the hold is long enough. You see your racket swing through the ball. A small ring on the ball closes as it comes, and if you look away an arrow points to the ball and two ticks then a high beep count you down. On your serve, press to toss, then press again at the top. Look down at your feet and press to pause. The pause menu appears in the headset: turn to Exit VR on the left, Resume ahead or Quit on the right, and press. At the end of a match the score shows the same way, with Rematch ahead and Menu on the right. Look straight up at the sky and press to recentre (then look down the court and press again), or tap the pad with two fingers. The white line down the middle lines the phone up with the headset's divider. Automove runs for you. For full swipe control, tap Link a phone under Swipe pad, then on a second phone pick VR, tap Be the pad and enter the code: swipe on that phone exactly as on the game screen. On a laptop the mouse is your head and the space bar is the button.</span></li>
+      <li><b>VR</b><span>In Settings, pick VR under Camera and put the phone in a Cardboard headset. Look down the court and press the button to start. Watch the ball and press the button as it arrives: where the shot goes is picked for you. For a power shot, press early, hold, and let go as the ball arrives; the ring in the middle of your view fills when the hold is long enough. You see your racket swing through the ball. A small ring on the ball closes as it comes, and if you look away an arrow points to the ball and two ticks then a high beep count you down. On your serve, press to toss, then press again at the top. Look down at your feet and press to pause. The pause menu appears in the headset: turn to Exit VR on the left, Resume ahead or Quit on the right, and press. At the end of a match the score shows the same way, with Rematch ahead and Menu on the right. Look straight up at the sky and press to recentre (then look down the court and press again), or tap the pad with two fingers. The white line down the middle lines the phone up with the headset's divider. Automove runs for you. For full swipe control, in Settings tap Link a phone under Swipe pad, then on a second phone open Settings, pick VR, tap Be the pad and enter the code: swipe on that phone exactly as on the game screen. On a laptop the mouse is your head and the space bar is the button.</span></li>
       <li><b>Full screen</b><span>The game fills the screen when a match starts. If Safari on iPad stops the match with a "typing while in full screen" warning, switch it off. On iPhone and iPad, Add to Home Screen plays full screen anyway.</span></li>
       <li><b>Level</b><span>Chill is slower and the CPU covers less court. Pro is full speed against a CPU that rarely misses.</span></li>
     </ul>

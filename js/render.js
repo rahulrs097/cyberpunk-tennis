@@ -469,20 +469,23 @@
   const BOARD_PHOTO = new Image();
   BOARD_PHOTO.src = 'img/billboard.jpg';
 
+  // In an online match the sign shows the other player instead: their name
+  // and 32×32 picture (CT.showOpponent), or just the name with no picture.
   // what the sign says now: the latest word until it expires, else the
   // photo (or just the tag until the photo has loaded). Online, a slow
   // ping takes the tag's place, and a match paused for lag says so over
   // everything else.
   function boardText(r, now) {
-    const b = r.board, p = r.ping;
-    const photo = BOARD_PHOTO.complete && BOARD_PHOTO.naturalWidth > 0;
+    const b = r.board, p = r.ping, o = r.opponent;
+    const img = o ? o.img : BOARD_PHOTO;
+    const photo = !!img && img.complete && img.naturalWidth > 0 ? img : null;
     if (p && p.held) return { text: p.ms + ' MS', label: 'PAUSED', color: PAL.warn, from: p.from, photo };
     if (b && now < b.until) return b;
     // in zen mode the score stands in for the tag, with a slow ping under it
     const s = r.score;
     if (s) return { score: true, text: s.text, label: s.label, server: s.server, ping: p, color: PAL.ball, from: Math.max(s.from, p ? p.from : 0, b ? b.until : 0) };
     if (p) return { text: p.ms + ' MS', label: p.direct ? 'DIRECT PING' : 'RELAY PING', color: p.red ? PAL.warn : p.slow ? '#e4ff4a' : '#25d9ff', from: Math.max(p.from, b ? b.until : 0), photo };
-    return { text: BOARD.tag, color: '#25d9ff', from: b ? b.until : 0, photo };
+    return { text: o ? o.name : BOARD.tag, color: '#25d9ff', from: Math.max(o ? o.from : 0, b ? b.until : 0), photo };
   }
 
   // 1 once the display font has loaded (signs drawn before then are redrawn)
@@ -528,13 +531,14 @@
   // the sign (so it only needs redrawing when that changes). It eases at
   // each end.
   const PHOTO_SIDE = BOARD_TEX.h - 24;
-  function photoStep(now) {
-    const img = BOARD_PHOTO, sh = Math.min(img.naturalHeight, img.naturalWidth);
+  function photoStep(now, img) {
+    if (!img) return 0;
+    const sh = Math.min(img.naturalHeight, img.naturalWidth);
     return Math.round((0.5 - 0.5 * Math.cos(now * 0.5)) * (img.naturalHeight - sh) * PHOTO_SIDE / sh);
   }
 
   function drawBoardPhoto(ctx, r, now, cur) {
-    const W = BOARD_TEX.w, H = BOARD_TEX.h, m = 12, img = BOARD_PHOTO;
+    const W = BOARD_TEX.w, H = BOARD_TEX.h, m = 12, img = cur.photo;
     ctx.clearRect(0, 0, W, H);
     ctx.fillStyle = 'rgba(8,6,22,0.88)';
     ctx.fillRect(0, 0, W, H);
@@ -543,7 +547,10 @@
     ctx.strokeRect(8, 8, W - 16, H - 16);
     if (!cur.score) {
       const sw = img.naturalWidth, sh = Math.min(img.naturalHeight, sw);
-      ctx.drawImage(img, 0, photoStep(now) * sh / side, sw, sh, m, m, side, side);
+      // a player's 32×32 picture is blown up as crisp pixels
+      ctx.imageSmoothingEnabled = img === BOARD_PHOTO;
+      ctx.drawImage(img, 0, photoStep(now, img) * sh / side, sw, sh, m, m, side, side);
+      ctx.imageSmoothingEnabled = true;
       ctx.beginPath(); ctx.moveTo(m + side + 3, 8); ctx.lineTo(m + side + 3, H - 8); ctx.stroke();
     }
     const cx = (m + side + W) / 2, tw = W - side - 60, pl = cur.ping;
@@ -959,8 +966,8 @@
       // between points, the photo each time its slide moves on a whole pixel
       // of the sign (about ten times a second). The line-call close-up zooms,
       // so it is drawn every frame.
-      const pl = cur.ping, slide = cur.score ? -1 : photoStep(now);
-      const key = cur.score || cur.photo ? [slide, cur.text, cur.label, cur.server, cur.color, pl ? [pl.ms, pl.red, pl.slow, pl.direct].join() : '', r.quality, fontReady()].join('|') : null;
+      const pl = cur.ping, slide = cur.score ? -1 : photoStep(now, cur.photo);
+      const key = cur.score || cur.photo ? [slide, cur.photo ? cur.photo.src.length + cur.photo.src.slice(-24) : '', cur.text, cur.label, cur.server, cur.color, pl ? [pl.ms, pl.red, pl.slow, pl.direct].join() : '', r.quality, fontReady()].join('|') : null;
       if (key === null || src.key !== key) {
         src.key = key;
         if (cur.photo || cur.score) drawBoardPhoto(src.getContext('2d'), r, now, cur);
@@ -1011,6 +1018,15 @@
     // flickers on when it first shows, turns red, or pauses the match
     const from = was && was.red === p.red && was.held === p.held && was.direct === p.direct ? was.from : performance.now() / 1000;
     r.ping = { ...p, from };
+  }
+
+  // The other player in an online match, for the billboard: { name, pic }
+  // (pic a data URL, or ''), or null to go back to the tag and photo.
+  function showOpponent(r, o) {
+    if (!o) { r.opponent = null; return; }
+    let img = null;
+    if (o.pic) { img = new Image(); img.src = o.pic; }
+    r.opponent = { name: (o.name || 'PLAYER').toUpperCase(), img, from: performance.now() / 1000 };
   }
 
   // Put a close line call up on the billboard for `secs` seconds (the
@@ -1778,6 +1794,7 @@
   CT.showBillboard = showBillboard;
   CT.BOARD_ANIMS = Object.keys(BOARD_ANIMS);
   CT.drawBoardAnim = (id, ctx, r, age, data) => BOARD_ANIMS[id](ctx, r, age, data);
+  CT.showOpponent = showOpponent;
   CT.showLineCall = showLineCall;
   CT.showPing = showPing;
   CT.showScore = showScore;
