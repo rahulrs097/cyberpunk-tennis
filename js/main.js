@@ -1296,7 +1296,7 @@
   }
   function reloadIfNewBuild() {
     if (!newBuild || document.hidden) return;
-    const quiet = ['lobby', 'pad', 'trophies', 'help', 'end', 'pauseMenu'].every((id) => $(id).hidden);
+    const quiet = ['lobby', 'pad', 'trophies', 'help', 'settings', 'end', 'pauseMenu'].every((id) => $(id).hidden);
     if (!$('menu').hidden && quiet) location.reload();
   }
 
@@ -1372,6 +1372,7 @@
       if (shotTimer > 0) { shotTimer -= dt; if (shotTimer <= 0) $('shot').hidden = true; }
       showAchievements(now / 1000);
     }
+    syncBack();
     if (game) {
       // draw the ball where it's shown (online it can lag the real one briefly)
       const info = paused ? null : CT.incomingInfo(game, me), ball = game.ball;
@@ -1380,6 +1381,36 @@
       try { CT.renderGame(renderer, game, me, info, land); } finally { game.ball = ball; }
     }
     requestAnimationFrame(frame);
+  }
+
+  // The phone's back button. On the main menu it leaves the game as usual.
+  // Anywhere else (a screen over the menu, the online lobby, a match) the
+  // page keeps one extra history entry, so back stays in the game and
+  // steps back once: it closes the screen, cancels the lobby, or pauses a
+  // match (and resumes it from the pause menu). The entry is checked every
+  // frame and taken away again once you're back on the menu.
+  let backEntry = false, dropping = false;
+  function backCloses() {
+    return $('menu').hidden || ['settings', 'trophies', 'help'].some((id) => !$(id).hidden);
+  }
+  function syncBack() {
+    if (dropping) return;
+    const want = backCloses();
+    if (want && !backEntry) { backEntry = true; try { history.pushState({ ct: 'back' }, ''); } catch (e) { /* not allowed here */ } }
+    else if (!want && backEntry) { backEntry = false; dropping = true; history.back(); }
+  }
+  function onBack() {
+    if (dropping) { dropping = false; return; }   // our own step back
+    backEntry = false;
+    const open = (id) => !$(id).hidden;
+    if (open('settings')) $('settingsClose').click();
+    else if (open('trophies')) $('achClose').click();
+    else if (open('help')) $('helpClose').click();
+    else if (open('lobby')) $('lobbyCancel').click();
+    else if (open('pad')) $('padLeave').click();
+    else if (open('end')) showMenu();
+    else if (game && $('menu').hidden) setPaused(!paused);
+    syncBack();
   }
 
   function pickChar(id) {
@@ -1623,7 +1654,7 @@
     checkBuild();
     setInterval(() => { if (!document.hidden) checkBuild(); }, 5 * 60 * 1000);
     // closing the trophies or help sheet lands back on the menu
-    for (const id of ['trophies', 'help']) new MutationObserver(reloadIfNewBuild).observe($(id), { attributes: true, attributeFilter: ['hidden'] });
+    for (const id of ['trophies', 'help', 'settings']) new MutationObserver(reloadIfNewBuild).observe($(id), { attributes: true, attributeFilter: ['hidden'] });
     document.querySelectorAll('.pick').forEach((b) => b.addEventListener('click', () => pickChar(b.dataset.char)));
     const pickLevel = (id) => {
       level = id;
@@ -1682,6 +1713,9 @@
     $('achBtn').addEventListener('click', () => showTrophies('ach'));
     $('statsBtn').addEventListener('click', () => showTrophies('stats'));
     $('achClose').addEventListener('click', () => { $('trophies').hidden = true; });
+    $('settingsBtn').addEventListener('click', () => { $('settings').hidden = false; $('settings').scrollTop = 0; });
+    $('settingsClose').addEventListener('click', () => { $('settings').hidden = true; });
+    window.addEventListener('popstate', onBack);
     document.querySelectorAll('[data-stats]').forEach((b) => b.addEventListener('click', () => showStats(b.dataset.stats)));
     $('histNewer').addEventListener('click', () => showHistory(statMode, histPage - 1));
     $('histOlder').addEventListener('click', () => showHistory(statMode, histPage + 1));
