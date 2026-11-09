@@ -364,10 +364,13 @@
   let lineCallShown = false;
 
   // Achievements go up on the billboard after the point's word, one at a time.
-  const ACH_DELAY = 1.3, ACH_SECS = 2.4;
+  // Parallel Parking goes up straight away, while the opponent is in the bays.
+  const ACH_DELAY = 1.3, ACH_SECS = 2.4, ANIM_SECS = 3.4;
   let achQueue = [], achFreeAt = 0, achNew = [];
+  // what an animation shows, by achievement: Rocket Serve's speed
+  const achData = {};
   function track(type, d) {
-    if (!tracker || (type !== 'point' && type !== 'hit')) return;
+    if (!tracker || (type !== 'point' && type !== 'hit' && type !== 'parked')) return;
     const res = tracker[type](d);
     const fresh = CT.recordAchievements(ach, res, tracker.mode);
     achNew.push(...fresh);
@@ -375,17 +378,21 @@
       CT.addHistory({ at: Date.now(), mode: tracker.mode, me: game.players[me].ch.id, opp: game.players[1 - me].ch.id,
         won: res.over.won, games: res.over.games, tiebreak: res.over.tiebreak, totals: res.over.totals });
     }
+    if (res.earned.includes('rocket')) achData.rocket = { kmh: res.best.fastestServe };
     const show = res.earned.filter((id) => fresh.includes(id) || !CT.achievement(id).common);
     if (!show.length) return;
     const now = performance.now() / 1000;
+    if (type === 'parked') { achQueue.unshift(...show); achFreeAt = Math.min(achFreeAt, now); return; }
     if (!achQueue.length) achFreeAt = Math.max(achFreeAt, now + ACH_DELAY);
     achQueue.push(...show);
   }
   function showAchievements(now) {
     if (!achQueue.length || now < achFreeAt) return;
     const a = CT.achievement(achQueue.shift());
-    CT.showBillboard(renderer, a.name.toUpperCase(), a.pro ? '#ffc23d' : '#25d9ff', ACH_SECS);
-    achFreeAt = now + ACH_SECS;
+    // a few have their own animation on the sign, which runs a little longer
+    const anim = CT.BOARD_ANIMS.includes(a.id), secs = anim ? ANIM_SECS : ACH_SECS;
+    CT.showBillboard(renderer, a.name.toUpperCase(), a.pro ? '#ffc23d' : '#25d9ff', secs, anim ? a.id : null, achData[a.id]);
+    achFreeAt = now + secs;
   }
 
   function onEvent(type, d) {
@@ -1550,6 +1557,7 @@
     ['Aces', (s) => s.aces], ['Double faults', (s) => s.doubleFaults], ['Winners', (s) => s.winners], ['Unforced errors', (s) => s.unforcedErrors], ['Longest rally', (s) => s.longestRally ? s.longestRally + ' shots' : '–'],
     ['Fastest serve', (s) => s.fastestServe ? s.fastestServe + ' km/h' : '–']];
   let statMode = 'all';
+  const GOLDEN = 1000;
   // The menu has separate Achievements and Stats buttons; both open this
   // sheet, showing one part or the other.
   function showTrophies(part) {
@@ -1563,13 +1571,16 @@
     for (const a of [...got, ...locked]) {
       const e = ach.earned[a.id];
       const li = document.createElement('li');
+      // earned 1000 times, it turns gold and stops counting
+      const golden = e && e.n >= GOLDEN;
       if (!e) li.className = 'locked';
+      else if (golden) li.className = 'golden';
       const nm = document.createElement('b'); nm.textContent = a.name;
       const tag = a.pro ? 'Pro' : a.char ? CT.CHARACTERS[a.char].name : '';
       if (tag) { const t = document.createElement('i'); t.textContent = tag; nm.append(' ', t); }
       const ds = document.createElement('span'); ds.textContent = a.desc;
       const n = document.createElement('em'); n.textContent = e ? '×' + e.n : 'Locked';
-      li.append(nm, n, ds);
+      if (golden) li.append(nm, ds); else li.append(nm, n, ds);
       list.append(li);
     }
     $('achEmpty').hidden = got.length > 0;

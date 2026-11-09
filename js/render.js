@@ -677,6 +677,265 @@
     ctx.fillText(dist, cx, H * 0.7, tw);
   }
 
+  // ---------------- animated achievements ----------------
+  // A few achievements get their own little show on the sign instead of a
+  // flashing word (CT.showBillboard's `anim`). Each is drawn afresh every
+  // frame from its age in seconds.
+  const ease = (x) => { x = Math.min(1, Math.max(0, x)); return x * x * (3 - 2 * x); };
+  function neonText(ctx, r, text, x, y, size, color, maxW) {
+    ctx.font = `900 ${size}px Tektur, sans-serif`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = color;
+    if (r.quality) { ctx.shadowColor = color; ctx.shadowBlur = 18; }
+    ctx.fillText(text, x, y, maxW);
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.fillText(text, x, y, maxW);
+  }
+  function boardFrame(ctx) {
+    const W = BOARD_TEX.w, H = BOARD_TEX.h;
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = 'rgba(8,6,22,0.88)';
+    ctx.fillRect(0, 0, W, H);
+  }
+  function boardBorder(ctx) {
+    const W = BOARD_TEX.w, H = BOARD_TEX.h;
+    ctx.strokeStyle = '#ff3fb4'; ctx.lineWidth = 6;
+    ctx.strokeRect(8, 8, W - 16, H - 16);
+  }
+
+  // Parallel Parking: PARALLEL and PARKING are two cars. Each drives in
+  // along the top lane, stops past its bay and reverses into it, brake
+  // lights on, then nudges forward and settles.
+  function animParking(ctx, r, age) {
+    const W = BOARD_TEX.w, H = BOARD_TEX.h;
+    boardFrame(ctx);
+    // the two bays, side by side along the kerb at the bottom
+    const bays = [W * 0.28, W * 0.72], bw = W * 0.42, by = H - 22;
+    ctx.strokeStyle = '#ffd23a'; ctx.lineWidth = 3; ctx.setLineDash([12, 9]);
+    ctx.beginPath();
+    for (const e of [bays[0] - bw / 2, bays[0] + bw / 2, bays[1] + bw / 2]) { ctx.moveTo(e, by); ctx.lineTo(e, by - 52); }
+    ctx.moveTo(14, by); ctx.lineTo(W - 14, by);
+    ctx.stroke(); ctx.setLineDash([]);
+    const words = ['PARALLEL', 'PARKING'];
+    for (let i = 0; i < 2; i++) {
+      const t = age - i * 0.45;
+      if (t <= 0) continue;
+      const tx = bays[i], ty = by - 30, laneY = 42;
+      const pastX = tx + 120;
+      let x, y, tilt = 0, braking = false;
+      if (t < 0.9) {   // drive in from the right along the lane, slowing
+        const k = ease(t / 0.9);
+        x = W + 150 + (pastX - W - 150) * k; y = laneY;
+      } else if (t < 1.7) {   // reverse in: back and down in an S
+        const k = ease((t - 0.9) / 0.8);
+        x = pastX + (tx - 14 - pastX) * k; y = laneY + (ty - laneY) * k;
+        tilt = Math.sin(k * Math.PI) * 0.22;
+        braking = true;
+      } else {   // a little nudge forward to straighten up
+        const k = ease((t - 1.7) / 0.35);
+        x = tx - 14 + 14 * k; y = ty;
+        braking = t < 1.85;
+      }
+      ctx.save();
+      ctx.translate(x, y); ctx.rotate(tilt);
+      // the body: the word, on wheels
+      ctx.font = '900 40px Tektur, sans-serif';
+      const w = Math.min(bw - 30, ctx.measureText(words[i]).width + 22);
+      ctx.fillStyle = 'rgba(37,217,255,0.16)';
+      ctx.strokeStyle = '#25d9ff'; ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.rect(-w / 2, -22, w, 40); ctx.fill(); ctx.stroke();
+      neonText(ctx, r, words[i], 0, -1, 34, '#25d9ff', w - 16);
+      ctx.fillStyle = '#0d0b1c'; ctx.strokeStyle = '#7af6ff'; ctx.lineWidth = 2;
+      for (const wx of [-w / 2 + 18, w / 2 - 18]) { ctx.beginPath(); ctx.arc(wx, 19, 7, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
+      // headlight at the front (left), tail light at the back, bright when braking
+      ctx.fillStyle = '#fff6c0'; ctx.fillRect(-w / 2 - 4, -12, 5, 8);
+      ctx.fillStyle = braking ? '#ff3040' : '#7a1020';
+      if (braking && r.quality) { ctx.shadowColor = '#ff3040'; ctx.shadowBlur = 14; }
+      ctx.fillRect(w / 2 - 1, -12, 5, 8);
+      ctx.shadowBlur = 0;
+      ctx.restore();
+    }
+    boardBorder(ctx);
+  }
+
+  // The Tentacle: an octopus arm rises from the bottom corner, curls round
+  // the words and pulls them in across the sign, then lets go.
+  function animTentacle(ctx, r, age) {
+    const W = BOARD_TEX.w, H = BOARD_TEX.h, c = CT.CHARACTERS.octopus.colors;
+    boardFrame(ctx);
+    const grow = ease(age / 0.7), pull = ease((age - 0.7) / 0.7), let_go = ease((age - 1.6) / 0.6);
+    // where the words are: dragged in from the left, then held in the middle
+    const textX = -160 + (W / 2 + 160) * pull;
+    // the arm's spine from its base at the bottom left, its tip hooked over the words
+    const base = [40, H + 20];
+    const tip = [Math.max(70, textX - 200), H * 0.3 - 20 * (1 - grow)];
+    const reach = grow * (1 - let_go * 0.85);
+    const N = 34, pts = [];
+    for (let i = 0; i <= N; i++) {
+      const s = (i / N) * reach;
+      // up from the base, bending over towards the tip, with a slow wave
+      const x = base[0] + (tip[0] - base[0]) * Math.sin(s * Math.PI / 2) + Math.sin(s * 5 + age * 4) * 8 * s;
+      const y = base[1] + (tip[1] - base[1]) * Math.sin(s * Math.PI / 2) - 18 * Math.sin(s * Math.PI);
+      pts.push([x, y]);
+    }
+    // the curl at the tip, hooked over the first letter: it carries on
+    // from the arm's heading, turning tighter and tighter
+    if (reach > 0.5) {
+      const curl = Math.min(1, (reach - 0.5) / 0.4);
+      let [x, y] = pts[pts.length - 1];
+      const [px, py] = pts[pts.length - 2];
+      let a = Math.atan2(y - py, x - px), step = 12;
+      for (let i = 0; i < 14 * curl; i++) {
+        a += 0.5; step *= 0.9;
+        x += Math.cos(a) * step; y += Math.sin(a) * step;
+        pts.push([x, y]);
+      }
+    }
+    // the words, behind the arm
+    neonText(ctx, r, 'THE TENTACLE', textX, H / 2 + 4, 70, c.main, W - 70);
+    // the arm: thick at the base, thin at the tip, with suckers along it
+    for (let i = 0; i < pts.length; i++) {
+      const rad = 18 * (1 - i / (pts.length + 4)) + 2;
+      ctx.beginPath(); ctx.arc(pts[i][0], pts[i][1], rad, 0, Math.PI * 2);
+      ctx.fillStyle = c.main; ctx.fill();
+    }
+    if (r.quality) { ctx.shadowColor = c.glow; ctx.shadowBlur = 10; }
+    ctx.fillStyle = '#e8d8ff';
+    for (let i = 2; i < pts.length - 2; i += 3) {
+      const rad = 4.5 * (1 - i / (pts.length + 4)) + 1;
+      ctx.beginPath(); ctx.arc(pts[i][0] + 6, pts[i][1] + 4, rad, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.shadowBlur = 0;
+    boardBorder(ctx);
+  }
+
+  // The Thought: little bubbles float up into a thought cloud; in it the
+  // four shots light up one by one, then the name.
+  function animThought(ctx, r, age) {
+    const W = BOARD_TEX.w, H = BOARD_TEX.h, c = CT.CHARACTERS.philosopher.colors;
+    boardFrame(ctx);
+    const cx = W / 2 + 30, cy = H / 2 - 2;
+    // the trail of small bubbles from the bottom left
+    const trail = [[50, H - 26, 7], [86, H - 40, 11], [130, H - 54, 15]];
+    trail.forEach(([x, y, rad], i) => {
+      const k = ease((age - i * 0.12) / 0.2);
+      if (k <= 0) return;
+      ctx.beginPath(); ctx.arc(x, y, rad * k, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(236,230,255,0.12)'; ctx.fill();
+      ctx.strokeStyle = c.main; ctx.lineWidth = 2.5; ctx.stroke();
+    });
+    // the cloud: puffs round an oval, popping up to size
+    // (it overshoots a touch as it pops)
+    const pk = Math.min(1, Math.max(0, (age - 0.4) / 0.3));
+    const pop = pk * (1 + 0.12 * Math.sin(pk * Math.PI));
+    if (pop > 0) {
+      ctx.save();
+      ctx.translate(cx, cy); ctx.scale(pop, pop);
+      const rx = 165, ry = 38, pr = 26;
+      ctx.beginPath();
+      for (let i = 0; i < 12; i++) {
+        const a = (i / 12) * Math.PI * 2;
+        ctx.moveTo(Math.cos(a) * rx + pr, Math.sin(a) * ry);
+        ctx.arc(Math.cos(a) * rx, Math.sin(a) * ry, pr, 0, Math.PI * 2);
+      }
+      // outlined first, then filled over, so only the cloud's outer edge shows
+      ctx.strokeStyle = c.main; ctx.lineWidth = 5;
+      if (r.quality) { ctx.shadowColor = c.glow; ctx.shadowBlur = 12; }
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = '#1a1538'; ctx.fill();
+      ctx.beginPath(); ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2); ctx.fillStyle = '#1a1538'; ctx.fill();
+      ctx.restore();
+    }
+    if (age < 0.7) { boardBorder(ctx); return; }
+    if (age < 2.1) {
+      // the four shots, ticked off in turn
+      // spaced out by their widths, across the middle of the cloud
+      const shots = ['FH', 'BH', 'VOL', 'SMASH'], size = 32, gap = 24;
+      ctx.font = `900 ${size}px Tektur, sans-serif`;
+      const ws = shots.map((s) => ctx.measureText(s).width);
+      let x = cx - (ws.reduce((a, b) => a + b, 0) + gap * 3) / 2;
+      shots.forEach((s, i) => {
+        const lit = age > 0.8 + i * 0.28, mid = x + ws[i] / 2;
+        neonText(ctx, r, s, mid, cy - 8, size, lit ? c.glow : 'rgba(236,230,255,0.25)', 200);
+        if (lit) neonText(ctx, r, '✓', mid, cy + 26, 20, '#3fff9a', 40);
+        x += ws[i] + gap;
+      });
+    } else {
+      const k = Math.min(1, (age - 2.1) / 0.2);
+      ctx.globalAlpha = k;
+      neonText(ctx, r, 'THE THOUGHT', cx, cy + 2, 54, c.glow, 330);
+      ctx.globalAlpha = 1;
+    }
+    boardBorder(ctx);
+  }
+  // Rocket Serve: a rocket streaks across the sign leaving a burning trail,
+  // and the serve's speed is left glowing where it passed, then the name.
+  function animRocket(ctx, r, age, data) {
+    const W = BOARD_TEX.w, H = BOARD_TEX.h;
+    boardFrame(ctx);
+    const fly = Math.min(1, age / 0.9), y = H / 2 + 6;
+    const k = fly * fly;   // speeding up as it goes
+    const rx = -60 + (W + 160) * k;
+    // the trail: a flame-coloured streak fading behind the rocket
+    const tail = Math.max(14, Math.min(rx, W) - 320 + 420 * Math.max(0, age - 0.9));
+    if (rx > 14 && tail < W - 14) {
+      const g = ctx.createLinearGradient(tail, 0, Math.min(rx, W), 0);
+      const fade = Math.max(0, 1 - Math.max(0, age - 1.2) / 0.8);
+      g.addColorStop(0, `rgba(255,63,108,${0.05 * fade})`);
+      g.addColorStop(0.7, `rgba(255,140,40,${0.55 * fade})`);
+      g.addColorStop(1, `rgba(255,236,120,${0.9 * fade})`);
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.moveTo(tail, y);
+      ctx.lineTo(Math.min(rx, W - 14), y - 12);
+      ctx.lineTo(Math.min(rx, W - 14), y + 12);
+      ctx.closePath(); ctx.fill();
+      // sparks left behind
+      ctx.fillStyle = `rgba(255,200,80,${fade})`;
+      for (let i = 0; i < 18; i++) {
+        const sx = 20 + ((i * 97) % (W - 40));
+        if (sx > rx) continue;
+        const drift = (age - sx / (W + 160)) * 30;
+        ctx.fillRect(sx, y + Math.sin(i * 2.3) * 14 + drift * Math.sin(i), 3, 3);
+      }
+    }
+    // the speed, burnt in where the rocket passed, then the name under it
+    const kmh = data && data.kmh ? Math.round(data.kmh) + ' KM/H' : null;
+    if (age > 0.5) {
+      ctx.save();
+      ctx.beginPath(); ctx.rect(0, 0, Math.min(W, rx - 30), H); ctx.clip();
+      if (kmh && age < 2.2) neonText(ctx, r, kmh, W / 2, y - 4, 76, '#ffb23a', W - 70);
+      ctx.restore();
+    }
+    if (age >= 2.2 || (!kmh && age > 1)) {
+      ctx.globalAlpha = Math.min(1, (age - (kmh ? 2.2 : 1)) / 0.2);
+      neonText(ctx, r, 'ROCKET SERVE', W / 2, y - 4, 66, '#ff8a3a', W - 70);
+      ctx.globalAlpha = 1;
+    }
+    // the rocket itself, nose to the right
+    if (rx < W + 60) {
+      ctx.save();
+      ctx.translate(rx, y);
+      ctx.fillStyle = '#e8f6ff';
+      ctx.beginPath(); ctx.moveTo(34, 0); ctx.quadraticCurveTo(18, -14, -16, -12); ctx.lineTo(-16, 12); ctx.quadraticCurveTo(18, 14, 34, 0); ctx.fill();
+      ctx.fillStyle = '#ff3f6c';
+      ctx.beginPath(); ctx.moveTo(-16, -12); ctx.lineTo(-28, -22); ctx.lineTo(-22, -6); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(-16, 12); ctx.lineTo(-28, 22); ctx.lineTo(-22, 6); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#25d9ff';
+      ctx.beginPath(); ctx.arc(10, 0, 5, 0, Math.PI * 2); ctx.fill();
+      // the exhaust flame, flickering
+      ctx.fillStyle = '#ffd23a';
+      if (r.quality) { ctx.shadowColor = '#ff8a3a'; ctx.shadowBlur = 16; }
+      const fl = 22 + Math.sin(age * 60) * 6;
+      ctx.beginPath(); ctx.moveTo(-16, -7); ctx.lineTo(-16 - fl, 0); ctx.lineTo(-16, 7); ctx.closePath(); ctx.fill();
+      ctx.restore();
+    }
+    boardBorder(ctx);
+  }
+  const BOARD_ANIMS = { parking: animParking, tentacle: animTentacle, thought: animThought, rocket: animRocket };
+
   function drawBillboard(ctx, r) {
     const B = BOARD, z1 = B.z + B.h;
     // an online guest plays from the other end, so the sign stands over
@@ -692,13 +951,13 @@
     const cur = boardText(r, now);
     // a new word flickers on, then hums
     const age = now - cur.from;
-    const on = age < 0.35 ? (Math.floor(age * 24) % 2 ? 0.25 : 1) : 0.88 + 0.12 * Math.sin(now * 3);
+    const on = cur.anim ? 1 : age < 0.35 ? (Math.floor(age * 24) % 2 ? 0.25 : 1) : 0.88 + 0.12 * Math.sin(now * 3);
     // the pylon it stands on, down into the skyline
     const pb = at(0.5, 0), pt = at(0.5, B.z);
     ctx.strokeStyle = '#1c1b2a'; ctx.lineWidth = Math.max(2, (pt.s || 0) * 0.5);
     ctx.beginPath(); ctx.moveTo(pb.x, pb.y); ctx.lineTo(pt.x, pt.y); ctx.stroke();
     let src;
-    if (cur.photo || cur.score || cur.call !== undefined) {
+    if (cur.photo || cur.score || cur.call !== undefined || cur.anim) {
       src = r.boardPhotoTex || (r.boardPhotoTex = document.createElement('canvas'));
       if (src.width !== BOARD_TEX.w) { src.width = BOARD_TEX.w; src.height = BOARD_TEX.h; }
       // A sign redrawn every frame is slow to show (the browser has to send
@@ -712,6 +971,7 @@
       if (key === null || src.key !== key) {
         src.key = key;
         if (cur.photo || cur.score) drawBoardPhoto(src.getContext('2d'), r, now, cur);
+        else if (cur.anim) BOARD_ANIMS[cur.anim](src.getContext('2d'), r, age, cur.data);
         else drawBoardCall(src.getContext('2d'), r, cur.call, age);
       }
     } else src = boardTexture(r, cur.text, cur.color);
@@ -731,9 +991,11 @@
     ctx.restore();
   }
 
-  // Flash a word on the billboard for `secs` seconds.
-  function showBillboard(r, text, color, secs) {
-    r.board = { text, color: color || '#e4ff4a', from: performance.now() / 1000, until: performance.now() / 1000 + (secs || 2.5) };
+  // Flash a word on the billboard for `secs` seconds. With `anim` (an id in
+  // BOARD_ANIMS) the sign plays that animation instead of the word.
+  // `data` is anything the animation shows, such as Rocket Serve's { kmh }.
+  function showBillboard(r, text, color, secs, anim, data) {
+    r.board = { text, color: color || '#e4ff4a', from: performance.now() / 1000, until: performance.now() / 1000 + (secs || 2.5), anim: BOARD_ANIMS[anim] ? anim : null, data };
   }
 
   // Zen mode's score for the billboard: { text, label, server } (server 0 is
@@ -1530,6 +1792,8 @@
   CT.setVR = setVR;
   CT.renderGame = render;
   CT.showBillboard = showBillboard;
+  CT.BOARD_ANIMS = Object.keys(BOARD_ANIMS);
+  CT.drawBoardAnim = (id, ctx, r, age, data) => BOARD_ANIMS[id](ctx, r, age, data);
   CT.showOpponent = showOpponent;
   CT.showLineCall = showLineCall;
   CT.showPing = showPing;
