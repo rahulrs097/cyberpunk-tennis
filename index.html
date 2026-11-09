@@ -168,7 +168,7 @@
     background: var(--panel); color: var(--ink); font: 600 14px var(--ui); letter-spacing: 0.06em; text-transform: uppercase;
   }
   .seg button[aria-pressed="true"] { border-color: var(--gold); color: var(--gold); }
-  #resumeMatch small { display: block; margin-top: 3px; font-family: inherit; font-weight: 400; font-size: 13px; letter-spacing: 0.02em; }
+  #resumeMatch small, #quickBtn small { display: block; margin-top: 3px; font-family: inherit; font-weight: 400; font-size: 13px; letter-spacing: 0.02em; }
   .btn.primary { background: var(--pink); border-color: var(--pink); color: #14001a; font-family: var(--display); font-weight: 700; font-size: 17px; box-shadow: 0 0 24px rgba(255,63,180,0.45); }
   button:focus-visible { outline: 2px solid var(--ball); outline-offset: 2px; }
   .how { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; font-size: 13px; line-height: 1.4; }
@@ -261,7 +261,8 @@
     </div>
     <button class="btn primary" id="resumeMatch" hidden>Resume match<small id="resumeScore"></small></button>
     <button class="btn primary" id="play">Play vs CPU</button>
-    <div class="label">Play a friend online</div>
+    <div class="label">Play online</div>
+    <button class="btn" id="quickBtn">Quick match<small>Play anyone who's looking</small></button>
     <div class="seg">
       <button id="hostBtn">Create room</button>
       <button id="joinBtn">Join room</button>

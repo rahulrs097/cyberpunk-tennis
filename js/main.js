@@ -997,6 +997,7 @@
   }
 
   function leaveOnline(tellOther) {
+    stopQuick();
     if (!net) return;
     if (tellOther) send({ t: 'bye' });
     clearInterval(net.timer);
@@ -1087,6 +1088,7 @@
   function onLink(n, status) {
     if (net !== n || net.started || status === 'open') return;
     clearInterval(net.timer);
+    if (net.quick) { quickMatch(); return; }   // try someone else
     if (status === 'full') {
       // (a host whose new code is somehow taken just picks another)
       if (net.role === 'host') hostRoom();
@@ -1096,33 +1098,66 @@
     lobby("Couldn't reach the online server. Check your connection and try again.", '', net.role === 'guest');
   }
 
-  function hostRoom() {
+  // A quick match comes with a room code from the relay's queue (quickCode)
+  // instead of making one up, and nobody needs to see it.
+  function hostRoom(quickCode) {
     ensureAudio();
     leaveOnline(true);
     lobbyMode = null;
-    const code = CT.Net.makeCode();
-    net = { role: 'host', code, started: false, lastHeard: performance.now(), sendT: 0 };
+    const code = quickCode || CT.Net.makeCode();
+    net = { role: 'host', code, quick: !!quickCode, started: false, lastHeard: performance.now(), sendT: 0 };
     const n = net;
     net.link = CT.Net.connect(code, 'host', onNet, (st) => onLink(n, st));
-    lobby('Send this code to a friend. The match starts as soon as they join.', code, false);
+    if (!quickCode) { lobby('Send this code to a friend. The match starts as soon as they join.', code, false); return; }
+    lobby('Found a player. Starting…', '', false);
+    // they never turned up: back in the queue
+    net.timer = setTimeout(() => { if (net === n && !n.started) quickMatch(); }, QUICK_WAIT);
   }
 
-  function joinRoom(code) {
+  function joinRoom(code, quick) {
     ensureAudio();
     leaveOnline(true);
     lobbyMode = null;
-    net = { role: 'guest', code, started: false, lastHeard: performance.now() };
+    net = { role: 'guest', code, quick: !!quick, started: false, lastHeard: performance.now() };
     const n = net;
     net.link = CT.Net.connect(code, 'guest', onNet, (st) => onLink(n, st));
-    lobby('Connecting to room ' + code + '…', '', false);
+    lobby(quick ? 'Found a player. Starting…' : 'Connecting to room ' + code + '…', '', false);
     // keep knocking until the host answers
     const t0 = performance.now();
     const hello = () => {
       send({ t: 'hello', char: humanChar, autoMove });
-      if (performance.now() - t0 > 8000) lobby('No answer from room ' + code + '. Check the code, and that your friend is still on the room screen.', '', true);
+      if (performance.now() - t0 < (quick ? QUICK_WAIT : 8000)) return;
+      if (quick) quickMatch();
+      else lobby('No answer from room ' + code + '. Check the code, and that your friend is still on the room screen.', '', true);
     };
     hello();
     net.timer = setInterval(hello, 500);
+  }
+
+  // Quick match: wait in the relay's queue for anyone else who is, then play
+  // them in a room of the queue's choosing. Room codes still work as before.
+  const QUICK_WAIT = 10000;   // ms for a matched phone to show up in the room
+  let quick = null;           // the queue while this phone is waiting in it
+  function quickMatch() {
+    ensureAudio();
+    leaveOnline(true);
+    lobbyMode = null;
+    lobby('Looking for a player…', '', false);
+    const q = (quick = CT.Net.seekMatch((m) => {
+      if (quick !== q) return;
+      quick = null;
+      if (m.role === 'host') hostRoom(m.code); else joinRoom(m.code, true);
+    }, (st) => {
+      if (quick !== q) return;
+      lobby(st === 'error' ? "Couldn't reach the online server. Still trying…" : 'Looking for a player…', '', false);
+    }));
+  }
+
+  function stopQuick() {
+    if (!quick) return;
+    const q = quick;
+    quick = null;
+    q.close();
   }
 
   function hostStart() {
@@ -1603,7 +1638,8 @@
     document.querySelectorAll('[data-stats]').forEach((b) => b.addEventListener('click', () => showStats(b.dataset.stats)));
     $('histNewer').addEventListener('click', () => showHistory(statMode, histPage - 1));
     $('histOlder').addEventListener('click', () => showHistory(statMode, histPage + 1));
-    $('hostBtn').addEventListener('click', hostRoom);
+    $('quickBtn').addEventListener('click', quickMatch);
+    $('hostBtn').addEventListener('click', () => hostRoom());
     $('joinBtn').addEventListener('click', () => { leaveOnline(true); lobbyMode = null; lobby('Enter the 4-letter code your friend sees.', '', true); $('codeInput').value = ''; $('codeInput').focus(); });
     $('lobbyGo').addEventListener('click', () => {
       const code = $('codeInput').value.toUpperCase().replace(/[^A-Z]/g, '');

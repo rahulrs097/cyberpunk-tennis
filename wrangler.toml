@@ -1,5 +1,6 @@
 # One Cloudflare Worker serves the game (static files in this folder) and
-# the online-play relay (server/relay.js) at /room/<CODE>.
+# the online-play relay (server/relay.js) at /room/<CODE>, plus the quick-match
+# queue at /quick (no extra Durable Object class, so no new migration).
 # Cloudflare deploys it from this repo on every push to main.
 name = "cyberpunk-tennis"
 main = "server/relay.js"
@@ -8,7 +9,7 @@ compatibility_date = "2026-09-01"
 [assets]
 directory = "."
 binding = "ASSETS"
-run_worker_first = ["/room/*", "/version"]
+run_worker_first = ["/room/*", "/quick", "/version"]
 
 # The deployment's id, served at /version so open games spot a new build
 [version_metadata]
