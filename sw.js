@@ -65,7 +65,7 @@ async function freshFirst(req) {
   const key = nav ? new URL('./', self.registration.scope).href : req;
   try {
     const res = await fetch(req, { cache: 'no-cache' });
-    if (res.ok && (nav || SHELL_URLS.has(stripSearch(req.url)))) await cache.put(key, res.clone());
+    if (res.ok && (nav || SHELL_URLS.has(stripSearch(req.url)) || isAd(req.url))) await cache.put(key, res.clone());
     return res;
   } catch (err) {
     const hit = await cache.match(key, { ignoreSearch: true });
@@ -82,5 +82,9 @@ async function cachedFirst(req) {
   if (res.ok || res.type === 'opaque') await cache.put(req, res.clone());
   return res;
 }
+
+// the billboard's ads (ads/list.json and its pictures), kept once seen so
+// they still show offline
+function isAd(u) { return new URL(u).pathname.startsWith(new URL('ads/', self.registration.scope).pathname); }
 
 function stripSearch(u) { const x = new URL(u); x.search = ''; x.hash = ''; return x.href; }
