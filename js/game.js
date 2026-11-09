@@ -886,10 +886,14 @@
       tx = rand(-edge, edge) * 0.8;
     }
     // A high, heavy ball taken above the shoulder from near the baseline (a
-    // moonball) can't be attacked safely: roll it back deep and wait for a
-    // better one. (Going for broke off every moonball handed the point away.)
+    // moonball). Going for the lines off it hands the point away, so a
+    // smart CPU punishes it with pace well inside the lines, away from the
+    // opponent, and a weaker one rolls it back deep.
     const highDeep = b.bounces > 0 && b.pos.z > POWER_Z + 0.1 && fromNet > 10;
-    if (highDeep) pace = Math.min(pace, T.pace[0]);
+    if (highDeep && !lob && !touch) {
+      if (Math.random() < g.cpuSmart) { pace = Math.max(pace, T.pace[1] * g.cpuPace); tx = away * edge * rand(0.35, 0.55); }
+      else pace = Math.min(pace, T.pace[0]);
+    }
     // an easy ball with plenty of time: go for it, away from them
     let goFor = !lob && !touch && !highDeep && slack > 0.6 && b.pos.z > 0.8;
     if (goFor) { pace = Math.max(pace, T.pace[1] * g.cpuPace); tx = away * edge * 0.85; }
@@ -902,7 +906,7 @@
       tx = away * edge * rand(0.75, 0.9);
     }
     // well ahead: a bit more margin
-    if (!goFor && !touch) tx *= T.safe * (1 + 0.1 * Math.min(0, mood));
+    if (!goFor && !touch && !highDeep) tx *= T.safe * (1 + 0.1 * Math.min(0, mood));
     if (slack < 0.2 && !lob) tx *= 0.5;           // stretched: play it back through the middle
     // A short ball with time to spare: hit an approach and follow it in.
     const approach = !lob && !touch && T.approach > 0 && fromNet < 11 && slack > 0.15 && b.pos.z > 0.6 &&
