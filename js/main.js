@@ -24,7 +24,15 @@
   // in full screen" warning; players can switch it off there.
   // Installed to the home screen, the game already opens full screen, so the
   // setting goes and only the screen's turn (landscape for VR) is managed.
-  const installed = (() => { try { return navigator.standalone === true || matchMedia('(display-mode: fullscreen), (display-mode: standalone)').matches; } catch (e) { return false; } })();
+  // The Play Store app (a Trusted Web Activity) opens the page with an
+  // android-app:// referrer; it's kept for the session, since a reload drops it.
+  const twa = (() => {
+    try {
+      if (document.referrer.startsWith('android-app://')) sessionStorage.setItem('ct.twa', '1');
+      return sessionStorage.getItem('ct.twa') === '1';
+    } catch (e) { return document.referrer.startsWith('android-app://'); }
+  })();
+  const installed = (() => { try { return twa || navigator.standalone === true || matchMedia('(display-mode: fullscreen), (display-mode: standalone)').matches; } catch (e) { return twa; } })();
   const canFull = !installed && !!(document.documentElement.requestFullscreen || document.documentElement.webkitRequestFullscreen);
   let fullOn = canFull;
   try { const v = localStorage.getItem('ct.full'); if (v !== null) fullOn = canFull && v === '1'; } catch (e) { /* storage is optional */ }

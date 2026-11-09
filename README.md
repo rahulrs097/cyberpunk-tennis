@@ -22,6 +22,13 @@ which only adds the doctype and viewport tags the artifact host normally supplie
 | `sw.js`, `manifest.webmanifest`, `icons/` | The installable app: the service worker keeps the CPU game, tutorial and VR playable offline (online matches still need the network). It asks the network first for every file and only falls back to its cache when offline, so a new build loads as soon as there's a connection. An installed app mostly comes back from the background instead of starting afresh, so the page also asks the Worker's `/version` (its deployment id) whenever it comes back and every five minutes, and reloads on the main menu when the build has changed (never mid-match; a match gets it when it ends). Add any new file the page loads to `SHELL` in `sw.js` (a test checks). `icons/icon.svg` is the source; the PNGs are rendered from it |
 | `tests/` | Engine and relay tests (`npm test`) and the balance simulation (`npm run sim`) |
 
+## Android app (Google Play)
+
+The Play Store app is a Trusted Web Activity: a small Android wrapper, built with PWABuilder or Bubblewrap from `manifest.webmanifest`, that opens the live game full screen in Chrome with no address bar. The game itself stays this website, so every deploy reaches the app straight away; the wrapper only needs rebuilding when Google raises the Android target level. It can tell it's inside the app from the `android-app://` referrer it's opened with (`twa` in `main.js`), which counts as installed (no Install app button, no Full screen setting).
+
+- `privacy.html` is the privacy policy the store listing links to. Update it if the game ever sends anything new off the phone.
+- `.well-known/assetlinks.json` (added once the app has its signing key) proves to Android that the app and this site belong together; without it Chrome shows an address bar. It holds the app's package name and the SHA-256 fingerprint of Play's app signing key (Play Console, Test and release, App integrity). It has to stay at the site's root, which the Worker serves.
+
 ## How the spec maps to the code
 
 - **Swipe = shot, tap = move.** `main.js` `handleSwipe` / `handleTap`.

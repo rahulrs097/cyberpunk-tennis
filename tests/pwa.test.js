@@ -33,3 +33,9 @@ test('the manifest makes the game installable', () => {
   assert.ok(m.icons.some((i) => i.purpose === 'maskable'));
   for (const i of m.icons) assert.ok(shell().includes(i.src), `${i.src} is not in sw.js SHELL`);
 });
+
+test('the privacy policy the Play Store listing links to is there and loads nothing from elsewhere', () => {
+  const html = read('privacy.html');
+  assert.match(html, /<title>Privacy policy/);
+  assert.ok(!/<(?:script|link rel="stylesheet")[^>]+https?:/.test(html), 'privacy.html loads something from another site');
+});

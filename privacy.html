@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy policy · Cyberpunk Tennis</title>
+<meta name="theme-color" content="#05040c">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<style>
+  /* The game's privacy policy, for the Play Store listing. Plain system fonts so it loads nothing from anyone else. */
+  :root { --void: #05040c; --ink: #eae6ff; --muted: #9d95c9; --cyan: #25d9ff; --pink: #ff3fb4; color-scheme: dark; }
+  body { margin: 0; background: var(--void); color: var(--ink); font: 16px/1.6 system-ui, sans-serif; }
+  main { max-width: 680px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 1.8rem; line-height: 1.2; margin: 0 0 4px; color: var(--cyan); }
+  h2 { font-size: 1.1rem; margin: 2em 0 0.4em; color: var(--pink); }
+  p, li { color: var(--ink); }
+  .muted { color: var(--muted); }
+  a { color: var(--cyan); }
+  ul { padding-left: 1.2em; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Privacy policy</h1>
+  <p class="muted">Cyberpunk Tennis · last updated 9 November 2026</p>
+
+  <p>Cyberpunk Tennis has no accounts, no ads and no analytics. The developer does not collect, store, sell or share any personal information about you.</p>
+
+  <h2>What stays on your phone</h2>
+  <p>The game saves a few things in your phone's own storage so they are there next time: your settings (camera, music, zen mode and the like), your achievements, stats and match history, a match against the CPU you can resume, and a random id the online relay uses to let a phone that dropped out back into its own place. None of it is sent to the developer. Clearing the app's storage, or uninstalling it, deletes it.</p>
+
+  <h2>Online matches</h2>
+  <p>When you play a friend online, the two phones exchange game moves (taps, swipes and the state of the match), either through a relay server run on Cloudflare or directly between the phones. The relay passes each message on and keeps nothing once the room closes. To find a direct route between the phones, they ask public STUN servers run by Cloudflare and Google for their own network address. Playing against the CPU, the tutorial and VR need none of this and work offline.</p>
+
+  <h2>Services the game uses</h2>
+  <ul>
+    <li><strong>Cloudflare</strong> hosts the game and the online relay. Like any web host it sees your IP address when your phone loads the game or checks for an update.</li>
+    <li><strong>Google Fonts</strong> serves the game's fonts, so Google sees your IP address when they load.</li>
+    <li>Both handle that under their own privacy policies: <a href="https://www.cloudflare.com/privacypolicy/">Cloudflare</a> and <a href="https://policies.google.com/privacy">Google</a>.</li>
+  </ul>
+
+  <h2>Phone sensors</h2>
+  <p>In VR the game reads the phone's motion sensors to turn the view with your head. The readings are used on the phone, moment to moment, and never leave it.</p>
+
+  <h2>Children</h2>
+  <p>The game is not aimed at children under 13 and collects nothing from anyone.</p>
+
+  <h2>Changes and contact</h2>
+  <p>If this policy changes, the new version will be posted on this page with a new date. For any question about it, write to the developer at the email address on the game's Google Play listing.</p>
+</main>
+</body>
+</html>
