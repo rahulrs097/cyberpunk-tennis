@@ -885,13 +885,18 @@
     } else {
       tx = rand(-edge, edge) * 0.8;
     }
+    // A high, heavy ball taken above the shoulder from near the baseline (a
+    // moonball) can't be attacked safely: roll it back deep and wait for a
+    // better one. (Going for broke off every moonball handed the point away.)
+    const highDeep = b.bounces > 0 && b.pos.z > POWER_Z + 0.1 && fromNet > 10;
+    if (highDeep) pace = Math.min(pace, T.pace[0]);
     // an easy ball with plenty of time: go for it, away from them
-    let goFor = !lob && !touch && slack > 0.6 && b.pos.z > 0.8;
+    let goFor = !lob && !touch && !highDeep && slack > 0.6 && b.pos.z > 0.8;
     if (goFor) { pace = Math.max(pace, T.pace[1] * g.cpuPace); tx = away * edge * 0.85; }
     // Stronger levels also finish points: a ball with time to set up, or an
     // opponent pulled out of position, gets hit near the line away from them.
     const attack = g.cpuAttack * T.attack * (Math.abs(opp.x) > 1.8 ? 1.5 : 1) * (1 + 0.3 * mood);
-    if (!lob && !touch && !goFor && slack > 0.3 && b.pos.z > 0.6 && Math.random() < attack) {
+    if (!lob && !touch && !goFor && !highDeep && slack > 0.3 && b.pos.z > 0.6 && Math.random() < attack) {
       goFor = true;
       pace = Math.max(pace, Math.min(1, T.pace[1] + 0.15));
       tx = away * edge * rand(0.75, 0.9);

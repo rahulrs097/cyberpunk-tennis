@@ -413,6 +413,12 @@ test('the levels get harder: the same player wins more games on Chill than on Pr
   assert.ok(games.chill > 0, 'an average player beats Chill');
 });
 
+test('moonballing every ball does not beat Pro: high deep balls are rolled back, not hit for broke', () => {
+  const CT = loadEngine(100);
+  const r = playSet(CT, { p0: 'philosopher', p1: 'octopus', control: ['bot', 'cpu'], skill: 0.7, style: 'moonball', extra: levelOpts(CT, 'pro') });
+  assert.ok(r.games[1] > r.games[0], JSON.stringify(r.games));
+});
+
 // ---------------- tutorial ----------------
 function drill(CT, d, play) {
   const ends = [];

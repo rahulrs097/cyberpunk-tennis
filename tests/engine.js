@@ -51,8 +51,8 @@ function levelOpts(CT, level) {
 
 // A scripted player on `side`. skill = timing spread in timing windows
 // (0.4 = skilled, 0.7 = average). Moves with automove and aims away from
-// the opponent, like a person would.
-function makeBot(CT, g, side, skill, rnd) {
+// the opponent, like a person would. style 'moonball' lobs every rally ball.
+function makeBot(CT, g, side, skill, rnd, style) {
   const gauss = () => { let u = 0; for (let i = 0; i < 6; i++) u += rnd(); return (u - 3) / Math.sqrt(0.5); };
   const p = g.players[side], opp = g.players[1 - side];
   let plan = null, lastHit = -2;
@@ -80,6 +80,8 @@ function makeBot(CT, g, side, skill, rnd) {
         e: gauss() * skill * p.ch.window[wing],
         input: { aim: 0, landX, pace: 0.55 + rnd() * 0.4, spinDir: rnd() < 0.85 ? 1 : -1, curve: 0, depth: 0.85 + rnd() * 0.15 },
       };
+      // moonballer: every rally ball is a high, deep topspin lob
+      if (style === 'moonball') plan.input = { aim: 0, landX: landX * 0.7, pace: 0.5, spinDir: 1, curve: 0, depth: 1, lob: true, lead: 0.1 };
     }
     if (plan.hitT !== g.lastHitT) { plan = null; return; }
     const crossed = p.cross && p.cross.t >= g.lastHitT;
@@ -110,7 +112,7 @@ function playSet(CT, opts) {
       if (t === 'hit') stats.shots++;
     },
   });
-  const bots = opts.control.map((c, i) => (c === 'bot' ? makeBot(CT, g, i, opts.skill, rnd) : null));
+  const bots = opts.control.map((c, i) => (c === 'bot' ? makeBot(CT, g, i, opts.skill, rnd, opts.style) : null));
   let wall = 0;
   while (g.phase !== 'matchOver' && wall < 3600) {
     for (const b of bots) if (b) b();
