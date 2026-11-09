@@ -277,6 +277,18 @@
     return { close };
   }
 
+  // An online player's profile: a name (16 letters at most) and a 32×32
+  // picture (a PNG data URL), kept on the phone and sent to the other phone
+  // when a match connects. Whatever arrives is checked again here, so a
+  // made-up message can't put anything else on the other player's sign.
+  const NAME_MAX = 16, PIC_SIDE = 32, PIC_MAX = 12000;
+  function cleanProfile(p) {
+    const name = p && typeof p.name === 'string'
+      ? p.name.replace(/[\u0000-\u001f\u007f-\u009f]/g, '').replace(/\s+/g, ' ').trim().slice(0, NAME_MAX) : '';
+    const pic = p && typeof p.pic === 'string' && p.pic.length <= PIC_MAX && /^data:image\/png;base64,[A-Za-z0-9+/]+=*$/.test(p.pic) ? p.pic : '';
+    return { name, pic };
+  }
+
   const lagParam = /[?&]lag=(\d+)/.exec(location.search);
-  CT.Net = { connect, seekMatch, makeCode, createLagMeter, PING_EVERY, LAG, lag: lagParam ? +lagParam[1] : 0 };
+  CT.Net = { connect, seekMatch, makeCode, cleanProfile, NAME_MAX, PIC_SIDE, createLagMeter, PING_EVERY, LAG, lag: lagParam ? +lagParam[1] : 0 };
 })();

@@ -111,3 +111,29 @@ test('quick match: a phone is never matched with itself, and pairs are taken in 
   const c = await seek('phoneC');
   assert.equal(c.sent, undefined, 'the next phone waits for its own opponent');
 });
+
+// js/net.js is a browser script; run it with just enough of a page around it
+function loadNet() {
+  const store = {};
+  const sandbox = {
+    location: { search: '', hostname: 'localhost', host: 'localhost' },
+    localStorage: { getItem: (k) => store[k] || null, setItem: (k, v) => { store[k] = v; } },
+    performance: { now: () => 0 }, setTimeout, clearTimeout, Math,
+  };
+  sandbox.window = sandbox;
+  vm.createContext(sandbox);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'js', 'net.js'), 'utf8'), sandbox, { filename: 'net.js' });
+  return sandbox.CT.Net;
+}
+
+test('profiles: only a short clean name and a small PNG picture get through', () => {
+  const { cleanProfile } = loadNet();
+  const png = 'data:image/png;base64,iVBORw0KGgo=';
+  assert.deepEqual({ ...cleanProfile({ name: '  Neon\n  Rahul  ', pic: png }) }, { name: 'Neon Rahul', pic: png });
+  assert.equal(cleanProfile({ name: 'A'.repeat(40) }).name.length, 16);
+  assert.equal(cleanProfile({ pic: 'javascript:alert(1)' }).pic, '');
+  assert.equal(cleanProfile({ pic: 'data:image/svg+xml;base64,PHN2Zz4=' }).pic, '', 'no SVG');
+  assert.equal(cleanProfile({ pic: 'data:image/png;base64,' + 'A'.repeat(20000) }).pic, '', 'too big');
+  assert.deepEqual({ ...cleanProfile(null) }, { name: '', pic: '' });
+  assert.deepEqual({ ...cleanProfile({ name: 7, pic: {} }) }, { name: '', pic: '' });
+});
