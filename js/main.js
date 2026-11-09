@@ -10,6 +10,10 @@
   let game = null;
   let paused = false;
   let humanChar = 'octopus';
+  // Your online profile: { name, pic } (see CT.Net.cleanProfile), kept on
+  // this phone and sent to the other player when an online match connects.
+  let profile = { name: '', pic: '' };
+  try { profile = CT.Net.cleanProfile(JSON.parse(localStorage.getItem('ct.profile'))); } catch (e) { /* storage is optional */ }
   // Chill / Club / Pro: ball speed and how well the CPU plays (CT.CPU_LEVELS)
   let level = 'club';
   try { const v = localStorage.getItem('ct.level'); if (CT.CPU_LEVELS[v]) level = v; } catch (e) { /* storage is optional */ }
@@ -295,7 +299,9 @@
       const p = game.players[side];
       const row = $('row' + (side === me ? 0 : 1));
       const q = (sel) => row.querySelector(sel);
-      put(row, 'name', p.ch.name + (side === me ? ' (you)' : '') + (p.stamina < 35 ? ' · tired' : ''), (v) => { q('.name').textContent = v; });
+      // online, the other player's own name if they've set one
+      const opp = side !== me && net && net.opp && net.opp.name;
+      put(row, 'name', (opp || p.ch.name) + (side === me ? ' (you)' : '') + (p.stamina < 35 ? ' · tired' : ''), (v) => { q('.name').textContent = v; });
       put(row, 'games', String(m.games[side]), (v) => { q('.games').textContent = v; });
       put(row, 'pts', CT.pointLabel(m, side), (v) => { q('.pts').textContent = v; });
       put(row, 'serve', srv === side && !m.over ? 'visible' : 'hidden', (v) => { q('.serve').style.visibility = v; });
@@ -997,6 +1003,7 @@
   }
 
   function leaveOnline(tellOther) {
+    stopQuick();
     if (!net) return;
     if (tellOther) send({ t: 'bye' });
     clearInterval(net.timer);
@@ -1005,6 +1012,7 @@
     net = null;
     me = 0;
     CT.showPing(renderer, null);
+    CT.showOpponent(renderer, null);
   }
 
   function onNet(m) {
@@ -1017,6 +1025,7 @@
       if (m.t === 'hello' && !net.started) {
         net.guestChar = CT.CHARACTERS[m.char] ? m.char : 'philosopher';
         net.guestAuto = !!m.autoMove;
+        meetOpponent(m.profile);
         hostStart();
       } else if (m.t === 'in' && game && net.started) {
         if (m.k === 'move') CT.requestMove(game, 1, +m.x, +m.y);
@@ -1032,6 +1041,7 @@
         net.lastSnap = performance.now();
         startPings();
         me = 1;
+        meetOpponent(m.profile);
         $('lobby').hidden = true;
         beginMatch({ p0: m.p0, p1: m.p1, timeScale: m.timeScale, control: ['remote', 'human'], remote: true, serveClock: m.serveClock });
       } else if (m.t === 'st' && game && game.remote) {
@@ -1049,6 +1059,44 @@
         onEvent(m.type, m.d);
       }
     }
+  }
+
+  // The other player's name and picture go on the billboard in place of the
+  // tag and photo, and the name on the scoreboard.
+  function meetOpponent(p) {
+    net.opp = CT.Net.cleanProfile(p);
+    CT.showOpponent(renderer, net.opp);
+  }
+
+  // Your profile in the menu: a name box and a picture you pick, cut to a
+  // 32×32 square from its middle.
+  function saveProfile() {
+    try { localStorage.setItem('ct.profile', JSON.stringify(profile)); } catch (e) { /* storage is optional */ }
+  }
+  function showProfile() {
+    $('nameInput').value = profile.name;
+    $('picBtn').style.backgroundImage = profile.pic ? `url("${profile.pic}")` : '';
+    $('picBtn').classList.toggle('set', !!profile.pic);
+  }
+  function pickPicture(file) {
+    if (!file || !/^image\//.test(file.type)) return;
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const S = CT.Net.PIC_SIDE, c = document.createElement('canvas');
+      c.width = c.height = S;
+      const g = c.getContext('2d'), side = Math.min(img.naturalWidth, img.naturalHeight);
+      g.imageSmoothingQuality = 'high';
+      g.drawImage(img, (img.naturalWidth - side) / 2, (img.naturalHeight - side) / 2, side, side, 0, 0, S, S);
+      URL.revokeObjectURL(url);
+      const p = CT.Net.cleanProfile({ name: profile.name, pic: c.toDataURL('image/png') });
+      if (!p.pic) return;
+      profile = p;
+      saveProfile();
+      showProfile();
+    };
+    img.onerror = () => URL.revokeObjectURL(url);
+    img.src = url;
   }
 
   // Both phones ping each other every half second to measure the lag.
@@ -1087,6 +1135,7 @@
   function onLink(n, status) {
     if (net !== n || net.started || status === 'open') return;
     clearInterval(net.timer);
+    if (net.quick) { quickMatch(); return; }   // try someone else
     if (status === 'full') {
       // (a host whose new code is somehow taken just picks another)
       if (net.role === 'host') hostRoom();
@@ -1096,33 +1145,66 @@
     lobby("Couldn't reach the online server. Check your connection and try again.", '', net.role === 'guest');
   }
 
-  function hostRoom() {
+  // A quick match comes with a room code from the relay's queue (quickCode)
+  // instead of making one up, and nobody needs to see it.
+  function hostRoom(quickCode) {
     ensureAudio();
     leaveOnline(true);
     lobbyMode = null;
-    const code = CT.Net.makeCode();
-    net = { role: 'host', code, started: false, lastHeard: performance.now(), sendT: 0 };
+    const code = quickCode || CT.Net.makeCode();
+    net = { role: 'host', code, quick: !!quickCode, started: false, lastHeard: performance.now(), sendT: 0 };
     const n = net;
     net.link = CT.Net.connect(code, 'host', onNet, (st) => onLink(n, st));
-    lobby('Send this code to a friend. The match starts as soon as they join.', code, false);
+    if (!quickCode) { lobby('Send this code to a friend. The match starts as soon as they join.', code, false); return; }
+    lobby('Found a player. Starting…', '', false);
+    // they never turned up: back in the queue
+    net.timer = setTimeout(() => { if (net === n && !n.started) quickMatch(); }, QUICK_WAIT);
   }
 
-  function joinRoom(code) {
+  function joinRoom(code, quick) {
     ensureAudio();
     leaveOnline(true);
     lobbyMode = null;
-    net = { role: 'guest', code, started: false, lastHeard: performance.now() };
+    net = { role: 'guest', code, quick: !!quick, started: false, lastHeard: performance.now() };
     const n = net;
     net.link = CT.Net.connect(code, 'guest', onNet, (st) => onLink(n, st));
-    lobby('Connecting to room ' + code + '…', '', false);
+    lobby(quick ? 'Found a player. Starting…' : 'Connecting to room ' + code + '…', '', false);
     // keep knocking until the host answers
     const t0 = performance.now();
     const hello = () => {
-      send({ t: 'hello', char: humanChar, autoMove });
-      if (performance.now() - t0 > 8000) lobby('No answer from room ' + code + '. Check the code, and that your friend is still on the room screen.', '', true);
+      send({ t: 'hello', char: humanChar, autoMove, profile: CT.Net.cleanProfile(profile) });
+      if (performance.now() - t0 < (quick ? QUICK_WAIT : 8000)) return;
+      if (quick) quickMatch();
+      else lobby('No answer from room ' + code + '. Check the code, and that your friend is still on the room screen.', '', true);
     };
     hello();
     net.timer = setInterval(hello, 500);
+  }
+
+  // Quick match: wait in the relay's queue for anyone else who is, then play
+  // them in a room of the queue's choosing. Room codes still work as before.
+  const QUICK_WAIT = 10000;   // ms for a matched phone to show up in the room
+  let quick = null;           // the queue while this phone is waiting in it
+  function quickMatch() {
+    ensureAudio();
+    leaveOnline(true);
+    lobbyMode = null;
+    lobby('Looking for a player…', '', false);
+    const q = (quick = CT.Net.seekMatch((m) => {
+      if (quick !== q) return;
+      quick = null;
+      if (m.role === 'host') hostRoom(m.code); else joinRoom(m.code, true);
+    }, (st) => {
+      if (quick !== q) return;
+      lobby(st === 'error' ? "Couldn't reach the online server. Still trying…" : 'Looking for a player…', '', false);
+    }));
+  }
+
+  function stopQuick() {
+    if (!quick) return;
+    const q = quick;
+    quick = null;
+    q.close();
   }
 
   function hostStart() {
@@ -1131,7 +1213,7 @@
     me = 0;
     // online matches always use Pro ball speed, with a serve clock
     const cfg = { p0: humanChar, p1: net.guestChar, timeScale: 1, control: ['human', 'remote'], autoMove: [autoMove, net.guestAuto], serveClock: SERVE_CLOCK };
-    send({ t: 'start', p0: cfg.p0, p1: cfg.p1, timeScale: cfg.timeScale, serveClock: cfg.serveClock });
+    send({ t: 'start', p0: cfg.p0, p1: cfg.p1, timeScale: cfg.timeScale, serveClock: cfg.serveClock, profile: CT.Net.cleanProfile(profile) });
     $('lobby').hidden = true;
     beginMatch(cfg);
   }
@@ -1214,7 +1296,7 @@
   }
   function reloadIfNewBuild() {
     if (!newBuild || document.hidden) return;
-    const quiet = ['lobby', 'pad', 'trophies', 'help', 'end', 'pauseMenu'].every((id) => $(id).hidden);
+    const quiet = ['lobby', 'pad', 'trophies', 'help', 'settings', 'end', 'pauseMenu'].every((id) => $(id).hidden);
     if (!$('menu').hidden && quiet) location.reload();
   }
 
@@ -1290,6 +1372,7 @@
       if (shotTimer > 0) { shotTimer -= dt; if (shotTimer <= 0) $('shot').hidden = true; }
       showAchievements(now / 1000);
     }
+    syncBack();
     if (game) {
       // draw the ball where it's shown (online it can lag the real one briefly)
       const info = paused ? null : CT.incomingInfo(game, me), ball = game.ball;
@@ -1298,6 +1381,36 @@
       try { CT.renderGame(renderer, game, me, info, land); } finally { game.ball = ball; }
     }
     requestAnimationFrame(frame);
+  }
+
+  // The phone's back button. On the main menu it leaves the game as usual.
+  // Anywhere else (a screen over the menu, the online lobby, a match) the
+  // page keeps one extra history entry, so back stays in the game and
+  // steps back once: it closes the screen, cancels the lobby, or pauses a
+  // match (and resumes it from the pause menu). The entry is checked every
+  // frame and taken away again once you're back on the menu.
+  let backEntry = false, dropping = false;
+  function backCloses() {
+    return $('menu').hidden || ['settings', 'trophies', 'help'].some((id) => !$(id).hidden);
+  }
+  function syncBack() {
+    if (dropping) return;
+    const want = backCloses();
+    if (want && !backEntry) { backEntry = true; try { history.pushState({ ct: 'back' }, ''); } catch (e) { /* not allowed here */ } }
+    else if (!want && backEntry) { backEntry = false; dropping = true; history.back(); }
+  }
+  function onBack() {
+    if (dropping) { dropping = false; return; }   // our own step back
+    backEntry = false;
+    const open = (id) => !$(id).hidden;
+    if (open('settings')) $('settingsClose').click();
+    else if (open('trophies')) $('achClose').click();
+    else if (open('help')) $('helpClose').click();
+    else if (open('lobby')) $('lobbyCancel').click();
+    else if (open('pad')) $('padLeave').click();
+    else if (open('end')) showMenu();
+    else if (game && $('menu').hidden) setPaused(!paused);
+    syncBack();
   }
 
   function pickChar(id) {
@@ -1541,7 +1654,7 @@
     checkBuild();
     setInterval(() => { if (!document.hidden) checkBuild(); }, 5 * 60 * 1000);
     // closing the trophies or help sheet lands back on the menu
-    for (const id of ['trophies', 'help']) new MutationObserver(reloadIfNewBuild).observe($(id), { attributes: true, attributeFilter: ['hidden'] });
+    for (const id of ['trophies', 'help', 'settings']) new MutationObserver(reloadIfNewBuild).observe($(id), { attributes: true, attributeFilter: ['hidden'] });
     document.querySelectorAll('.pick').forEach((b) => b.addEventListener('click', () => pickChar(b.dataset.char)));
     const pickLevel = (id) => {
       level = id;
@@ -1600,10 +1713,23 @@
     $('achBtn').addEventListener('click', () => showTrophies('ach'));
     $('statsBtn').addEventListener('click', () => showTrophies('stats'));
     $('achClose').addEventListener('click', () => { $('trophies').hidden = true; });
+    $('settingsBtn').addEventListener('click', () => { $('settings').hidden = false; $('settings').scrollTop = 0; });
+    $('settingsClose').addEventListener('click', () => { $('settings').hidden = true; });
+    window.addEventListener('popstate', onBack);
     document.querySelectorAll('[data-stats]').forEach((b) => b.addEventListener('click', () => showStats(b.dataset.stats)));
     $('histNewer').addEventListener('click', () => showHistory(statMode, histPage - 1));
     $('histOlder').addEventListener('click', () => showHistory(statMode, histPage + 1));
-    $('hostBtn').addEventListener('click', hostRoom);
+    $('quickBtn').addEventListener('click', quickMatch);
+    showProfile();
+    $('nameInput').addEventListener('input', () => {
+      profile = { name: $('nameInput').value.slice(0, CT.Net.NAME_MAX), pic: profile.pic };
+      saveProfile();
+    });
+    // tidied up (spaces, odd characters) once you're done typing
+    $('nameInput').addEventListener('change', () => { profile = CT.Net.cleanProfile(profile); saveProfile(); showProfile(); });
+    $('picBtn').addEventListener('click', () => $('picFile').click());
+    $('picFile').addEventListener('change', () => { pickPicture($('picFile').files[0]); $('picFile').value = ''; });
+    $('hostBtn').addEventListener('click', () => hostRoom());
     $('joinBtn').addEventListener('click', () => { leaveOnline(true); lobbyMode = null; lobby('Enter the 4-letter code your friend sees.', '', true); $('codeInput').value = ''; $('codeInput').focus(); });
     $('lobbyGo').addEventListener('click', () => {
       const code = $('codeInput').value.toUpperCase().replace(/[^A-Z]/g, '');

@@ -218,6 +218,77 @@
     };
   }
 
+  // Quick match: wait in the relay's queue until another phone is there,
+  // then onMatch({ code, role }) once, with the room to meet in and which
+  // side this phone takes. Without the relay (?local), tabs in the same
+  // browser find each other over a BroadcastChannel instead: each one says
+  // it's looking, and of two looking the one with the lower id makes the
+  // room and hosts. onStatus gets 'open', or 'error' when the server can't be
+  // reached (the queue keeps trying again every few seconds until closed).
+  function seekMatch(onMatch, onStatus) {
+    const status = onStatus || (() => {});
+    let done = false, ws = null, retry = 0;
+    const found = (m) => {
+      if (done) return;
+      done = true;
+      close();
+      onMatch(m);
+    };
+    function close() {
+      done = true;
+      clearTimeout(retry);
+      if (ws) { ws.onclose = null; try { ws.close(); } catch (e) { /* gone */ } }
+      if (ch) { clearInterval(ch.timer); ch.close(); }
+    }
+    let ch = null;
+    if (CT.RELAY_URL) {
+      const open = () => {
+        if (done) return;
+        ws = new WebSocket(`${CT.RELAY_URL}/quick?id=${phoneId}`);
+        ws.onopen = () => status('open');
+        ws.onmessage = (e) => {
+          let m = null;
+          try { m = JSON.parse(e.data); } catch (err) { /* not for us */ }
+          if (m && m.t === 'match' && /^[A-Z]{4}$/.test(m.code) && (m.role === 'host' || m.role === 'guest')) found({ code: m.code, role: m.role });
+        };
+        // closed without a match (the other phone vanished, or the
+        // connection dropped): join the queue again
+        ws.onerror = () => status('error');
+        ws.onclose = () => { if (!done) retry = setTimeout(open, 2000); };
+      };
+      open();
+    } else {
+      // a tab's own id, so two tabs of one browser can pair
+      const me = phoneId + Math.random().toString(36).slice(2, 8);
+      ch = new BroadcastChannel('ct-quick');
+      ch.onmessage = (e) => {
+        const m = e.data || {};
+        if (m.k === 'seek' && m.id !== me && me < m.id) {
+          const code = makeCode();
+          ch.postMessage({ k: 'match', to: m.id, code });
+          found({ code, role: 'host' });
+        } else if (m.k === 'match' && m.to === me) found({ code: m.code, role: 'guest' });
+      };
+      const say = () => ch.postMessage({ k: 'seek', id: me });
+      ch.timer = setInterval(say, 1000);
+      say();
+      setTimeout(() => status('open'), 0);
+    }
+    return { close };
+  }
+
+  // An online player's profile: a name (16 letters at most) and a 32×32
+  // picture (a PNG data URL), kept on the phone and sent to the other phone
+  // when a match connects. Whatever arrives is checked again here, so a
+  // made-up message can't put anything else on the other player's sign.
+  const NAME_MAX = 16, PIC_SIDE = 32, PIC_MAX = 12000;
+  function cleanProfile(p) {
+    const name = p && typeof p.name === 'string'
+      ? p.name.replace(/[\u0000-\u001f\u007f-\u009f]/g, '').replace(/\s+/g, ' ').trim().slice(0, NAME_MAX) : '';
+    const pic = p && typeof p.pic === 'string' && p.pic.length <= PIC_MAX && /^data:image\/png;base64,[A-Za-z0-9+/]+=*$/.test(p.pic) ? p.pic : '';
+    return { name, pic };
+  }
+
   const lagParam = /[?&]lag=(\d+)/.exec(location.search);
-  CT.Net = { connect, makeCode, createLagMeter, PING_EVERY, LAG, lag: lagParam ? +lagParam[1] : 0 };
+  CT.Net = { connect, seekMatch, makeCode, cleanProfile, NAME_MAX, PIC_SIDE, createLagMeter, PING_EVERY, LAG, lag: lagParam ? +lagParam[1] : 0 };
 })();
