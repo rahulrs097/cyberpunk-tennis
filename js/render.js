@@ -469,6 +469,38 @@
   const BOARD_PHOTO = new Image();
   BOARD_PHOTO.src = 'img/billboard.jpg';
 
+  // Ads: the pictures in the ads/ folder take turns with the photo on the
+  // idle sign, AD_SECS each. ads/list.json names them; the deploy writes it
+  // from the folder (tools/ads-list.js), so adding or deleting a picture is
+  // all it takes. No list, or an empty one, leaves the sign as it was.
+  const AD_SECS = 8;
+  const BOARD_ADS = [];   // the pictures that have loaded, in the list's order
+  function loadAds() {
+    if (typeof fetch !== 'function') return;
+    fetch('ads/list.json', { cache: 'no-cache' })
+      .then((res) => (res.ok ? res.json() : { ads: [] }))
+      .then((list) => {
+        const files = (list && Array.isArray(list.ads) ? list.ads : []).filter((f) => typeof f === 'string');
+        const slots = files.map(() => null);
+        files.forEach((f, i) => {
+          const img = new Image();
+          img.onload = () => { slots[i] = img; BOARD_ADS.length = 0; for (const a of slots) if (a) BOARD_ADS.push(a); };
+          img.src = 'ads/' + encodeURIComponent(f);
+        });
+      })
+      .catch(() => { /* no ads */ });
+  }
+  loadAds();
+
+  // the ad on the idle sign now, with when its turn began, or null for the
+  // photo's turn
+  function adTurn(now) {
+    const n = BOARD_ADS.length;
+    if (!n) return null;
+    const turn = Math.floor(now / AD_SECS), slot = turn % (n + 1);
+    return { ad: slot ? BOARD_ADS[slot - 1] : null, from: turn * AD_SECS };
+  }
+
   // In an online match the sign shows the other player instead: their name
   // and 32×32 picture (CT.showOpponent), or just the name with no picture.
   // what the sign says now: the latest word until it expires, else the
@@ -485,7 +517,23 @@
     const s = r.score;
     if (s) return { score: true, text: s.text, label: s.label, server: s.server, ping: p, color: PAL.ball, from: Math.max(s.from, p ? p.from : 0, b ? b.until : 0) };
     if (p) return { text: p.ms + ' MS', label: p.direct ? 'DIRECT PING' : 'RELAY PING', color: p.red ? PAL.warn : p.slow ? '#e4ff4a' : '#25d9ff', from: Math.max(p.from, b ? b.until : 0), photo };
-    return { text: o ? o.name : BOARD.tag, color: '#25d9ff', from: Math.max(o ? o.from : 0, b ? b.until : 0), photo };
+    const was = b ? b.until : 0, t = adTurn(now);
+    if (t && t.ad) return { ad: t.ad, from: Math.max(t.from, was) };
+    return { text: o ? o.name : BOARD.tag, color: '#25d9ff', from: Math.max(o ? o.from : 0, t ? t.from : 0, was), photo };
+  }
+
+  // an ad fills the sign inside its frame, cropped to fit (best at about
+  // 1040 x 336, the sign's shape)
+  function drawBoardAd(ctx, img) {
+    const W = BOARD_TEX.w, H = BOARD_TEX.h, m = 12;
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = 'rgba(8,6,22,0.88)';
+    ctx.fillRect(0, 0, W, H);
+    const bw = W - 2 * m, bh = H - 2 * m, iw = img.naturalWidth, ih = img.naturalHeight;
+    const k = Math.min(iw / bw, ih / bh), sw = bw * k, sh = bh * k;
+    ctx.drawImage(img, (iw - sw) / 2, (ih - sh) / 2, sw, sh, m, m, bw, bh);
+    ctx.strokeStyle = '#ff3fb4'; ctx.lineWidth = 6;
+    ctx.strokeRect(8, 8, W - 16, H - 16);
   }
 
   // 1 once the display font has loaded (signs drawn before then are redrawn)
@@ -698,7 +746,13 @@
     ctx.strokeStyle = '#1c1b2a'; ctx.lineWidth = Math.max(2, (pt.s || 0) * 0.5);
     ctx.beginPath(); ctx.moveTo(pb.x, pb.y); ctx.lineTo(pt.x, pt.y); ctx.stroke();
     let src;
-    if (cur.photo || cur.score || cur.call !== undefined) {
+    if (cur.ad) {
+      // a picture that doesn't change: drawn once per ad
+      src = r.boardPhotoTex || (r.boardPhotoTex = document.createElement('canvas'));
+      if (src.width !== BOARD_TEX.w) { src.width = BOARD_TEX.w; src.height = BOARD_TEX.h; }
+      const key = 'ad|' + cur.ad.src;
+      if (src.key !== key) { src.key = key; drawBoardAd(src.getContext('2d'), cur.ad); }
+    } else if (cur.photo || cur.score || cur.call !== undefined) {
       src = r.boardPhotoTex || (r.boardPhotoTex = document.createElement('canvas'));
       if (src.width !== BOARD_TEX.w) { src.width = BOARD_TEX.w; src.height = BOARD_TEX.h; }
       // A sign redrawn every frame is slow to show (the browser has to send

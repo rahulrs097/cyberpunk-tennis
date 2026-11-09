@@ -6,6 +6,10 @@ name = "cyberpunk-tennis"
 main = "server/relay.js"
 compatibility_date = "2026-09-01"
 
+# Lists the billboard ads in ads/ (ads/list.json) before each deploy
+[build]
+command = "node tools/ads-list.js"
+
 [assets]
 directory = "."
 binding = "ASSETS"
