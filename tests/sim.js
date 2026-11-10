@@ -1,13 +1,14 @@
 // Balance check: a scripted player against each CPU level.
 //   npm run sim                    all levels, three timing skills, 6 sets each
 //   npm run sim -- club 0.7 10     one level and skill, 10 sets
+//   npm run sim -- all all 6 moonball   the player lobs every rally ball
 // skill is the player's timing spread in timing windows: 0.4 is sharp,
 // 0.7 average, 1.0 loose. Each set is seeded, so runs repeat exactly.
 const { loadEngine, levelOpts, playSet } = require('./engine');
 
-const [lv, sk, n] = process.argv.slice(2);
-const levels = lv ? [lv] : ['chill', 'club', 'pro'];
-const skills = sk ? [+sk] : [0.4, 0.7, 1.0];
+const [lv, sk, n, style] = process.argv.slice(2);
+const levels = lv && lv !== 'all' ? [lv] : ['chill', 'club', 'pro'];
+const skills = sk && sk !== 'all' ? [+sk] : [0.4, 0.7, 1.0];
 const sets = +n || 6;
 
 console.log('level  skill  sets won  games    lowest stamina (you/CPU)  tired at point end  shots/point  CPU winners / out / net');
@@ -19,7 +20,7 @@ for (const level of levels) {
     for (let i = 0; i < sets; i++) {
       const CT = loadEngine(100 + i);
       const chars = i % 2 ? ['octopus', 'philosopher'] : ['philosopher', 'octopus'];
-      const r = playSet(CT, { p0: chars[0], p1: chars[1], control: ['bot', 'cpu'], skill, extra: levelOpts(CT, level) });
+      const r = playSet(CT, { p0: chars[0], p1: chars[1], control: ['bot', 'cpu'], skill, style, extra: levelOpts(CT, level) });
       won[r.winner]++;
       games[0] += r.games[0]; games[1] += r.games[1];
       low[0] += r.stats.minStamina[0] / sets; low[1] += r.stats.minStamina[1] / sets;

@@ -355,13 +355,19 @@
     if (isServe) kind = 'serve';
     else if (pos.z >= ch.overheadZ) kind = 'overhead';
     else if (b.bounces === 0) kind = pos.z >= POWER_Z ? 'powerVolley' : 'volley';
-    else if (pos.z >= POWER_Z) kind = 'power';
+    // (input.roll: a high ball rolled back as a normal drive, not driven down flat)
+    else if (pos.z >= POWER_Z && !input.roll) kind = 'power';
     else kind = 'ground';
 
     // a smash swiped down aims the way it was swiped, not mirrored like a slice
     if (kind === 'overhead' && input.smash) input = { ...input, ...input.smash };
     const isLob = !!input.lob && kind !== 'serve' && kind !== 'overhead';
-    const W = windowFor(p, wing) * (isLob ? LOB_EASE : 1);
+    // (the lob's extra forgiveness is for lobbing over someone at the net,
+    // and for learning it in the tutorial, not for looping every ball high
+    // over a baseliner)
+    const opp = g.players[1 - p.side];
+    const easeLob = isLob && (!!g.drill || -opp.fwd * opp.y < NET_ZONE);
+    const W = windowFor(p, wing) * (easeLob ? LOB_EASE : 1);
     // Where you are matters as well as when you swing: a ball jammed into
     // your body, one at full stretch, or one hit on the run is harder to
     // strike cleanly, so it counts as extra mistiming.
@@ -778,7 +784,8 @@
         // Punish high balls: smash them out of the air, or take them at
         // shoulder height after the bounce for a power shot.
         if (z >= ch.overheadZ && !bounced) q += 2.2;
-        else if (bounced && z >= POWER_Z + 0.1) q += 1.0 + 0.5 * (z - POWER_Z);
+        // (not a moonball out deep: that's taken lower, on the rise)
+        else if (bounced && z >= POWER_Z + 0.1 && -fwd * py < 10) q += 1.0 + 0.5 * (z - POWER_Z);
         q -= Math.max(0, -fwd * py - ch.home) * 0.25;   // don't drift too far back
         q += ch.tactics.late * t + (wing === 'fh' ? ch.tactics.fhPref : 0);
         // in a tutorial drill, automove sets the player up on the lesson's
@@ -885,33 +892,53 @@
     } else {
       tx = rand(-edge, edge) * 0.8;
     }
+    // A high, heavy ball taken above the shoulder from near the baseline (a
+    // moonball). Going for the lines off it hands the point away, so a
+    // smart CPU punishes it with pace into the open court, a good way from
+    // the middle but well inside the line (Pro wider than Club), and a
+    // weaker one rolls it back deep. Either way it's hit as
+    // a normal drive (roll), not a power shot: a run of those drains stamina,
+    // so a player lobbing every ball used to wear the CPU out.
+    const highDeep = b.bounces > 0 && b.pos.z > POWER_Z + 0.1 && fromNet > 10;
+    let punish = false;
+    if (highDeep && !lob && !touch) {
+      if (Math.random() < g.cpuSmart) { punish = true; pace = Math.max(pace, T.pace[1] * g.cpuPace); tx = away * edge * rand(0.6, 0.75) * (0.6 + 0.4 * g.cpuSmart); }
+      else pace = Math.min(pace, T.pace[0]);
+    }
     // an easy ball with plenty of time: go for it, away from them
-    let goFor = !lob && !touch && slack > 0.6 && b.pos.z > 0.8;
+    let goFor = !lob && !touch && !highDeep && slack > 0.6 && b.pos.z > 0.8;
     if (goFor) { pace = Math.max(pace, T.pace[1] * g.cpuPace); tx = away * edge * 0.85; }
     // Stronger levels also finish points: a ball with time to set up, or an
     // opponent pulled out of position, gets hit near the line away from them.
     const attack = g.cpuAttack * T.attack * (Math.abs(opp.x) > 1.8 ? 1.5 : 1) * (1 + 0.3 * mood);
-    if (!lob && !touch && !goFor && slack > 0.3 && b.pos.z > 0.6 && Math.random() < attack) {
+    if (!lob && !touch && !goFor && !highDeep && slack > 0.3 && b.pos.z > 0.6 && Math.random() < attack) {
       goFor = true;
       pace = Math.max(pace, Math.min(1, T.pace[1] + 0.15));
       tx = away * edge * rand(0.75, 0.9);
     }
     // well ahead: a bit more margin
-    if (!goFor && !touch) tx *= T.safe * (1 + 0.1 * Math.min(0, mood));
+    if (!goFor && !touch && !highDeep) tx *= T.safe * (1 + 0.1 * Math.min(0, mood));
     if (slack < 0.2 && !lob) tx *= 0.5;           // stretched: play it back through the middle
     // A short ball with time to spare: hit an approach and follow it in.
     const approach = !lob && !touch && T.approach > 0 && fromNet < 11 && slack > 0.15 && b.pos.z > 0.6 &&
       Math.random() < T.approach;
     if (approach) { pace = Math.max(pace, 0.75); tx = (Math.random() < 0.5 ? weakSide : away) * edge * 0.85; spinDir = 1; depth = 1; }
     const curve = touch ? 0 : rand(-0.25, 0.25);
+    const wing = (b.pos.x - c.x) * fwd >= -0.05 ? 'fh' : 'bh';
     let input = null;
     for (let i = 0; i < 6; i++) {
       // the CPU plays with a safe margin over the net
-      input = { aim: 0, landX: tx, pace, over: 0, spinDir, curve, lob, clear: 0.4, depth };
-      const shot = computeShot(g, c, input, 0);
-      const fl = CT.flight(shot.pos, shot.vel, shot.spin, shot.side), land = fl.land;
-      const safe = fwd * land.y > 0.3 && fl.netClear > 0.3 && Math.abs(land.x) < COURT.SW - 0.25 && Math.abs(land.y) < COURT.HL - 0.3;
-      if (safe) break;
+      input = { aim: 0, landX: tx, pace, over: 0, spinDir, curve, lob, clear: 0.4, depth, roll: highDeep };
+      const lands = (err) => {
+        const shot = computeShot(g, c, input, err);
+        const fl = CT.flight(shot.pos, shot.vel, shot.spin, shot.side), land = fl.land;
+        return fwd * land.y > 0.3 && fl.netClear > 0.3 && Math.abs(land.x) < COURT.SW - 0.25 && Math.abs(land.y) < COURT.HL - 0.3;
+      };
+      // Going for a winner, it picks a shot that still goes in when mistimed
+      // by a share of its usual error (more for a smarter CPU): it wins the
+      // point with pace and angle, not by aiming at the lines and missing.
+      const e = goFor || punish ? (0.4 + 0.3 * smart) * cpuTimingError(g, c, wing, pace) : 0;
+      if (lands(0) && (!e || (lands(e) && lands(-e)))) break;
       pace = Math.max(0.15, pace - 0.12);
       tx *= 0.7;
     }
@@ -1411,8 +1438,8 @@
   // takes sharp timing.
   CT.CPU_LEVELS = {
     chill: { timeScale: 0.75, err: 1.9, react: 0.36, cover: 0.1, speed: 0.8, pace: 0.75, depth: 0.75, attack: 0, smart: 0.15 },
-    club: { timeScale: 0.88, err: 1.3, react: 0.26, cover: 0.2, speed: 0.9, pace: 0.86, depth: 0.88, attack: 0.15, smart: 0.55 },
-    pro: { timeScale: 1, err: 0.85, react: 0.14, cover: 0.38, speed: 1, pace: 1, depth: 1, attack: 0.3, smart: 1 },
+    club: { timeScale: 0.88, err: 1.5, react: 0.26, cover: 0.2, speed: 0.9, pace: 0.86, depth: 0.88, attack: 0.15, smart: 0.55 },
+    pro: { timeScale: 1, err: 1.1, react: 0.14, cover: 0.38, speed: 1, pace: 1, depth: 1, attack: 0.3, smart: 1 },
   };
   CT.levelOpts = (level) => {
     const L = CT.CPU_LEVELS[level];
