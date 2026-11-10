@@ -779,7 +779,8 @@
         // Punish high balls: smash them out of the air, or take them at
         // shoulder height after the bounce for a power shot.
         if (z >= ch.overheadZ && !bounced) q += 2.2;
-        else if (bounced && z >= POWER_Z + 0.1) q += 1.0 + 0.5 * (z - POWER_Z);
+        // (not a moonball out deep: that's taken lower, on the rise)
+        else if (bounced && z >= POWER_Z + 0.1 && -fwd * py < 10) q += 1.0 + 0.5 * (z - POWER_Z);
         q -= Math.max(0, -fwd * py - ch.home) * 0.25;   // don't drift too far back
         q += ch.tactics.late * t + (wing === 'fh' ? ch.tactics.fhPref : 0);
         // in a tutorial drill, automove sets the player up on the lesson's
@@ -893,8 +894,9 @@
     // a normal drive (roll), not a power shot: a run of those drains stamina,
     // so a player lobbing every ball used to wear the CPU out.
     const highDeep = b.bounces > 0 && b.pos.z > POWER_Z + 0.1 && fromNet > 10;
+    let punish = false;
     if (highDeep && !lob && !touch) {
-      if (Math.random() < g.cpuSmart) { pace = Math.max(pace, T.pace[1] * g.cpuPace); tx = away * edge * rand(0.35, 0.55); }
+      if (Math.random() < g.cpuSmart) { punish = true; pace = Math.max(pace, T.pace[1] * g.cpuPace); tx = away * edge * rand(0.35, 0.55); }
       else pace = Math.min(pace, T.pace[0]);
     }
     // an easy ball with plenty of time: go for it, away from them
@@ -929,7 +931,7 @@
       // Going for a winner, it picks a shot that still goes in when mistimed
       // by a share of its usual error (more for a smarter CPU): it wins the
       // point with pace and angle, not by aiming at the lines and missing.
-      const e = goFor ? (0.4 + 0.3 * smart) * cpuTimingError(g, c, wing, pace) : 0;
+      const e = goFor || punish ? (0.4 + 0.3 * smart) * cpuTimingError(g, c, wing, pace) : 0;
       if (lands(0) && (!e || (lands(e) && lands(-e)))) break;
       pace = Math.max(0.15, pace - 0.12);
       tx *= 0.7;
@@ -1430,8 +1432,8 @@
   // takes sharp timing.
   CT.CPU_LEVELS = {
     chill: { timeScale: 0.75, err: 1.9, react: 0.36, cover: 0.1, speed: 0.8, pace: 0.75, depth: 0.75, attack: 0, smart: 0.15 },
-    club: { timeScale: 0.88, err: 1.3, react: 0.26, cover: 0.2, speed: 0.9, pace: 0.86, depth: 0.88, attack: 0.15, smart: 0.55 },
-    pro: { timeScale: 1, err: 0.85, react: 0.14, cover: 0.38, speed: 1, pace: 1, depth: 1, attack: 0.3, smart: 1 },
+    club: { timeScale: 0.88, err: 1.5, react: 0.26, cover: 0.2, speed: 0.9, pace: 0.86, depth: 0.88, attack: 0.15, smart: 0.55 },
+    pro: { timeScale: 1, err: 1.1, react: 0.14, cover: 0.38, speed: 1, pace: 1, depth: 1, attack: 0.3, smart: 1 },
   };
   CT.levelOpts = (level) => {
     const L = CT.CPU_LEVELS[level];
