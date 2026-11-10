@@ -362,7 +362,12 @@
     // a smash swiped down aims the way it was swiped, not mirrored like a slice
     if (kind === 'overhead' && input.smash) input = { ...input, ...input.smash };
     const isLob = !!input.lob && kind !== 'serve' && kind !== 'overhead';
-    const W = windowFor(p, wing) * (isLob ? LOB_EASE : 1);
+    // (the lob's extra forgiveness is for lobbing over someone at the net,
+    // and for learning it in the tutorial, not for looping every ball high
+    // over a baseliner)
+    const opp = g.players[1 - p.side];
+    const easeLob = isLob && (!!g.drill || -opp.fwd * opp.y < NET_ZONE);
+    const W = windowFor(p, wing) * (easeLob ? LOB_EASE : 1);
     // Where you are matters as well as when you swing: a ball jammed into
     // your body, one at full stretch, or one hit on the run is harder to
     // strike cleanly, so it counts as extra mistiming.
