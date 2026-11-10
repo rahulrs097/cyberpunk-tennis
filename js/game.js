@@ -916,14 +916,21 @@
       Math.random() < T.approach;
     if (approach) { pace = Math.max(pace, 0.75); tx = (Math.random() < 0.5 ? weakSide : away) * edge * 0.85; spinDir = 1; depth = 1; }
     const curve = touch ? 0 : rand(-0.25, 0.25);
+    const wing = (b.pos.x - c.x) * fwd >= -0.05 ? 'fh' : 'bh';
     let input = null;
     for (let i = 0; i < 6; i++) {
       // the CPU plays with a safe margin over the net
       input = { aim: 0, landX: tx, pace, over: 0, spinDir, curve, lob, clear: 0.4, depth, roll: highDeep };
-      const shot = computeShot(g, c, input, 0);
-      const fl = CT.flight(shot.pos, shot.vel, shot.spin, shot.side), land = fl.land;
-      const safe = fwd * land.y > 0.3 && fl.netClear > 0.3 && Math.abs(land.x) < COURT.SW - 0.25 && Math.abs(land.y) < COURT.HL - 0.3;
-      if (safe) break;
+      const lands = (err) => {
+        const shot = computeShot(g, c, input, err);
+        const fl = CT.flight(shot.pos, shot.vel, shot.spin, shot.side), land = fl.land;
+        return fwd * land.y > 0.3 && fl.netClear > 0.3 && Math.abs(land.x) < COURT.SW - 0.25 && Math.abs(land.y) < COURT.HL - 0.3;
+      };
+      // Going for a winner, it picks a shot that still goes in when mistimed
+      // by a share of its usual error (more for a smarter CPU): it wins the
+      // point with pace and angle, not by aiming at the lines and missing.
+      const e = goFor ? (0.4 + 0.3 * smart) * cpuTimingError(g, c, wing, pace) : 0;
+      if (lands(0) && (!e || (lands(e) && lands(-e)))) break;
       pace = Math.max(0.15, pace - 0.12);
       tx *= 0.7;
     }
