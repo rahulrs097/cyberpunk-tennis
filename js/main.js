@@ -1019,6 +1019,7 @@
     net = null;
     me = 0;
     CT.showPing(renderer, null);
+    showLinkNotes(null);
     CT.showOpponent(renderer, null);
   }
 
@@ -1124,11 +1125,34 @@
   // (all the time with ?ping in the page URL), saying whether the phones
   // have a direct link or go through the relay.
   const alwaysPing = /[?&]ping\b/.test(location.search);
+
+  // ?ping also puts two lines of notes at the bottom left: the trip to the
+  // nearest Cloudflare data centre (and which one), the trip to the match's
+  // room through it, and the direct link's last try (how many, how it ended,
+  // and what kinds of address each phone offered: see candidateKind in
+  // net.js). null takes it away.
+  function showLinkNotes(d) {
+    let el = $('linkNotes');
+    if (!d) { if (el) el.remove(); return; }
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'linkNotes';
+      el.style.cssText = 'position:fixed;bottom:calc(30px + env(safe-area-inset-bottom));left:16px;right:8px;z-index:50;pointer-events:none;'
+        + 'font:11px/1.35 monospace;color:#9ff;text-shadow:0 0 3px #000,0 0 3px #000;white-space:pre-wrap';
+      document.body.appendChild(el);
+    }
+    const ms = (v) => (v === null ? '-' : Math.round(v) + ' ms');
+    el.textContent = `edge ${d.colo || '?'} ${ms(d.edgeMs)} · room ${ms(d.relayMs)}\n`
+      + `direct: ${d.state} (try ${d.offers}) · me ${d.mine} · them ${d.theirs}`;
+  }
   function checkLag(now) {
     const st = net.lag.state(now);
     const held = game.phase !== 'matchOver' && (net.role === 'host' ? st.held : !!net.hostHeld || now - net.lastSnap > CT.Net.LAG.pause);
     // the number on the sign changes at most four times a second
-    if (!net.shown || now - net.shown.at > 250 || held !== net.held) net.shown = { at: now, ms: Math.round(st.ms / 10) * 10 };
+    if (!net.shown || now - net.shown.at > 250 || held !== net.held) {
+      net.shown = { at: now, ms: Math.round(st.ms / 10) * 10 };
+      if (alwaysPing) showLinkNotes(net.link.diag());
+    }
     CT.showPing(renderer, st.level || held || alwaysPing ? { ms: net.shown.ms, red: st.level === 'red' || held, slow: !!st.level, held, direct: net.link.direct() } : null);
     if (held !== net.held) {
       net.held = held;

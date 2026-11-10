@@ -40,7 +40,16 @@ function fakeRTC(wire) {
     }
     async createOffer() { return { type: 'offer', sdp: 'pc' + this.id }; }
     async createAnswer() { return { type: 'answer', sdp: 'pc' + this.id }; }
-    async setLocalDescription(d) { this.localDescription = d; if (d.type === 'offer') this.signalingState = 'have-local-offer'; }
+    async setLocalDescription(d) {
+      this.localDescription = d;
+      if (d.type === 'offer') this.signalingState = 'have-local-offer';
+      // a home-network address hidden behind a .local name, and the router's
+      setTimeout(() => {
+        for (const c of [`candidate:1 1 udp 2122260223 ${this.id}abc.local 50000 typ host`, 'candidate:2 1 udp 1686052607 49.36.1.2 50001 typ srflx raddr 0.0.0.0 rport 0']) {
+          if (this.onicecandidate) this.onicecandidate({ candidate: { candidate: c, toJSON() { return { candidate: c, sdpMid: '0' }; } } });
+        }
+      }, 0);
+    }
     async setRemoteDescription(d) {
       this.other = byId[+d.sdp.slice(2)];
       if (d.type === 'offer') {
@@ -84,6 +93,9 @@ test('direct link: a quiet phone keeps its wifi awake, and the notes never reach
   t.after(() => { host.close(); guest.close(); });
   for (let i = 0; i < 50 && !(host.direct() && guest.direct()); i++) await wait(10);
   assert.ok(host.direct() && guest.direct(), 'the direct link opened');
+  await wait(20);
+  const d = guest.diag();
+  assert.deepEqual([d.state, d.offers, d.mine, d.theirs], ['trying', 1, 'mdns srflx', 'mdns srflx'], 'notes on the link for ?ping');
   guest.send({ t: 'in', k: 'toss' });
 
   // the host sends a snapshot every 50 ms; the guest sends nothing more

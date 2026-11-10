@@ -52,6 +52,22 @@ function makeRoom() {
 }
 
 
+test('relay: the room answers a ?ping echo itself and passes on everything else', async () => {
+  const { room, join } = makeRoom();
+  const host = await join('host', 'hostphone');
+  const guest = await join('guest', 'guestphone');
+  const echo = JSON.stringify({ t: 'echo', at: 12.5 });
+  room.webSocketMessage(guest, echo);
+  room.webSocketMessage(guest, 'hi');
+  assert.deepEqual(guest.sent, [echo], 'back to the phone that sent it');
+  assert.deepEqual(host.sent, ['hi'], 'and not on to the other phone');
+});
+
+test('relay: /where names the data centre that took the request', async () => {
+  const res = await loadRelay().default.fetch({ url: 'https://relay/where', cf: { colo: 'BOM' }, headers: new Map() }, {});
+  assert.deepEqual(JSON.parse(res.body), { colo: 'BOM' });
+});
+
 test('relay: a third phone with the room code is turned away, and the guest stays', async () => {
   const { room, join } = makeRoom();
   const host = await join('host', 'hostphone');
