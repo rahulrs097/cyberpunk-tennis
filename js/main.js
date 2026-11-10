@@ -43,6 +43,9 @@
   const VR_FOV = { wide: 95, normal: 80, close: 65 }, VR_LENS = { narrow: 60, normal: 64, wide: 68 };
   const VR_GFX = { auto: 'auto', smooth: 0, balanced: 1, sharp: 2 };
   let vrFit = { fov: 'normal', lens: 'normal', gfx: 'auto' };
+  // the graphics level outside VR: Auto, or one picked in Settings
+  let gfx = 'auto';
+  try { const v = localStorage.getItem('ct.gfx'); if (v in VR_GFX) gfx = v; } catch (e) { /* storage is optional */ }
   try {
     const v = JSON.parse(localStorage.getItem('ct.vrFit'));
     if (v && VR_FOV[v.fov] && VR_LENS[v.lens]) vrFit = { ...vrFit, fov: v.fov, lens: v.lens, gfx: v.gfx in VR_GFX ? v.gfx : 'auto' };
@@ -1360,7 +1363,9 @@
     // 60 frames a second at most: a 90 or 120 Hz phone would otherwise draw
     // the whole scene up to twice as often for little gain
     if (now < frameDue - 2) { requestAnimationFrame(frame); return; }
-    frameDue = now - frameDue > 50 ? now + FRAME_MS : frameDue + FRAME_MS;
+    // After a late frame the next one still waits most of a frame: on a 120 Hz
+    // screen, catching up at once would show frames 25 ms then 8 ms apart.
+    frameDue = now - frameDue > 50 ? now + FRAME_MS : Math.max(frameDue + FRAME_MS, now + FRAME_MS - 4);
     const dt = Math.min(0.05, (now - lastFrame) / 1000);
     lastFrame = now;
     // an online match can't be paused: the pause menu just sits over it.
@@ -1525,6 +1530,15 @@
     $('pauseMenu').hidden = !v;
     // back in the headset: look down the court and press to carry on
     if (vr) { vr.press = null; if (!v) vr.wait = true; }
+  }
+
+  function setGfx(value) {
+    gfx = value;
+    try { localStorage.setItem('ct.gfx', value); } catch (e) { /* storage is optional */ }
+    document.querySelectorAll('[data-gfx]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.gfx === value)));
+    const was = renderer.quality;
+    CT.setQuality(renderer, VR_GFX[value]);
+    if (renderer.quality !== was && renderer.args) CT.resizeRenderer(renderer, ...renderer.args);
   }
 
   function setVRFit(key, value) {
@@ -1707,6 +1721,8 @@
     });
     document.addEventListener('keyup', (e) => { if (vr && e.key === ' ') { e.preventDefault(); vrRelease(); } });
     setView(view);
+    document.querySelectorAll('[data-gfx]').forEach((b) => b.addEventListener('click', () => setGfx(b.dataset.gfx)));
+    setGfx(gfx);
     for (const key of ['fov', 'lens', 'gfx']) {
       document.querySelectorAll(`[data-vr-${key}]`).forEach((b) => b.addEventListener('click', () => setVRFit(key, b.getAttribute(`data-vr-${key}`))));
       setVRFit(key, vrFit[key]);
