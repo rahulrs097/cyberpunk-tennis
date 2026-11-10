@@ -894,14 +894,15 @@
     }
     // A high, heavy ball taken above the shoulder from near the baseline (a
     // moonball). Going for the lines off it hands the point away, so a
-    // smart CPU punishes it with pace well inside the lines, away from the
-    // opponent, and a weaker one rolls it back deep. Either way it's hit as
+    // smart CPU punishes it with pace into the open court, a good way from
+    // the middle but well inside the line (Pro wider than Club), and a
+    // weaker one rolls it back deep. Either way it's hit as
     // a normal drive (roll), not a power shot: a run of those drains stamina,
     // so a player lobbing every ball used to wear the CPU out.
     const highDeep = b.bounces > 0 && b.pos.z > POWER_Z + 0.1 && fromNet > 10;
     let punish = false;
     if (highDeep && !lob && !touch) {
-      if (Math.random() < g.cpuSmart) { punish = true; pace = Math.max(pace, T.pace[1] * g.cpuPace); tx = away * edge * rand(0.35, 0.55); }
+      if (Math.random() < g.cpuSmart) { punish = true; pace = Math.max(pace, T.pace[1] * g.cpuPace); tx = away * edge * rand(0.6, 0.75) * (0.6 + 0.4 * g.cpuSmart); }
       else pace = Math.min(pace, T.pace[0]);
     }
     // an easy ball with plenty of time: go for it, away from them
