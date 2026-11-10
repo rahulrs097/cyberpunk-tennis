@@ -62,6 +62,14 @@
   const STUN = [{ urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.l.google.com:19302'] }];
   const DIRECT_WAIT = 8000;   // ms to wait for the direct link to open
   const tryDirect = typeof RTCPeerConnection === 'function' && !/[?&]relay\b/.test(location.search);
+  // A phone's wifi naps when it has nothing to send, and the router then
+  // holds what comes for it until it wakes (a beacon, every 100-300 ms). On
+  // a direct link each phone therefore sends something at least this often,
+  // a two-letter note ('ka') if it has nothing else, so neither radio
+  // dozes. The host's snapshots already do it for the host; this keeps the
+  // guest awake too. Through the relay the gap is small next to the trip, and
+  // every message costs the free plan, so it's only done on the direct link.
+  const KEEP_AWAKE = 50;
 
   // role: 'host' | 'guest'. onMessage gets parsed objects; onStatus gets
   // 'open' | 'closed' | 'error', or 'full' when the room already has
@@ -70,9 +78,9 @@
   function connect(code, role, onMessage, onStatus) {
     const status = onStatus || (() => {});
     const parse = (text) => { try { return JSON.parse(text); } catch (e) { return null; } };
-    const deliver = (m) => { if (m && m.t !== 'rtc') onMessage(m); };
+    const deliver = (m) => { if (m && m.t !== 'rtc' && m.t !== 'ka') onMessage(m); };
     let pc = null, dc = null, direct = false, closed = false;
-    let offerId = 0, waitTimer = 0, askTimer = 0;
+    let offerId = 0, waitTimer = 0, askTimer = 0, awakeTimer = 0, lastSent = 0;
     // The other phone's first messages over the direct link wait here until
     // its last one through the room ('via') has arrived, so nothing is
     // taken out of order at the switch.
@@ -118,6 +126,10 @@
         signal({ k: 'via', id: offerId });   // the last message through the room
         direct = true;
         clearTimeout(waitTimer);
+        clearInterval(awakeTimer);
+        awakeTimer = setInterval(() => {
+          if (dc === ch && isDirect() && performance.now() - lastSent >= KEEP_AWAKE - 5) post('{"t":"ka"}');
+        }, KEEP_AWAKE);
         // in case the other phone's 'via' is lost
         setTimeout(() => { if (dc === ch) release(); }, 2000);
       };
@@ -138,6 +150,7 @@
     // back through the room
     function dropPeer() {
       clearTimeout(waitTimer);
+      clearInterval(awakeTimer);
       const p = pc, ch = dc;
       pc = dc = null;
       direct = false;
@@ -174,7 +187,9 @@
     // ms, in order, to try the game on a slow link
     let due = 0;
     const isDirect = () => direct && dc.readyState === 'open';
-    const post = (text) => { if (isDirect()) dc.send(text); else room.send(text); };
+    const post = (text) => {
+      if (isDirect()) { lastSent = performance.now(); dc.send(text); } else room.send(text);
+    };
     const later = (text) => {
       if (!CT.Net.lag) { post(text); return; }
       const now = performance.now();
