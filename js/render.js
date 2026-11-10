@@ -994,9 +994,15 @@
   // Flash a word on the billboard for `secs` seconds. With `anim` (an id in
   // BOARD_ANIMS) the sign plays that animation instead of the word.
   // `data` is anything the animation shows, such as Rocket Serve's { kmh }.
-  function showBillboard(r, text, color, secs, anim, data) {
-    r.board = { text, color: color || '#e4ff4a', from: performance.now() / 1000, until: performance.now() / 1000 + (secs || 2.5), anim: BOARD_ANIMS[anim] ? anim : null, data };
+  // With `hold` (an achievement) nothing without it can replace the sign
+  // until it's done: Parallel Parking goes up mid-rally, so the point's
+  // OOPS or OMG would otherwise cut it off.
+  function showBillboard(r, text, color, secs, anim, data, hold) {
+    if (!hold && boardHeld(r)) return;
+    const now = performance.now() / 1000;
+    r.board = { text, color: color || '#e4ff4a', from: now, until: now + (secs || 2.5), anim: BOARD_ANIMS[anim] ? anim : null, data, hold: !!hold };
   }
+  function boardHeld(r) { return !!(r.board && r.board.hold && performance.now() / 1000 < r.board.until); }
 
   // Zen mode's score for the billboard: { text, label, server } (server 0 is
   // you, 1 the other player, -1 nobody), or null to go back to the tag.
@@ -1032,6 +1038,7 @@
   // Put a close line call up on the billboard for `secs` seconds (the
   // engine's lineCall event).
   function showLineCall(r, call, secs) {
+    if (boardHeld(r)) return;
     const now = performance.now() / 1000;
     r.board = { call, from: now, until: now + (secs || 3) };
   }
