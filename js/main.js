@@ -419,6 +419,8 @@
 
   // Achievements go up on the billboard after the point's word, one at a time.
   // Parallel Parking goes up straight away, while the opponent is in the bays.
+  // Either way the sign is held for them: point words, WOW and line calls
+  // don't replace an achievement that's still up.
   const ACH_DELAY = 1.3, ACH_SECS = 2.4, ANIM_SECS = 3.4;
   let achQueue = [], achFreeAt = 0, achNew = [];
   // what an animation shows, by achievement: Rocket Serve's speed
@@ -445,7 +447,7 @@
     const a = CT.achievement(achQueue.shift());
     // a few have their own animation on the sign, which runs a little longer
     const anim = CT.BOARD_ANIMS.includes(a.id), secs = anim ? ANIM_SECS : ACH_SECS;
-    CT.showBillboard(renderer, a.name.toUpperCase(), a.pro ? '#ffc23d' : '#25d9ff', secs, anim ? a.id : null, achData[a.id]);
+    CT.showBillboard(renderer, a.name.toUpperCase(), a.pro ? '#ffc23d' : '#25d9ff', secs, anim ? a.id : null, achData[a.id], true);
     achFreeAt = now + secs;
   }
 
