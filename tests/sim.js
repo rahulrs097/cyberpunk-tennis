@@ -2,6 +2,7 @@
 //   npm run sim                    all levels, three timing skills, 6 sets each
 //   npm run sim -- club 0.7 10     one level and skill, 10 sets
 //   npm run sim -- all all 6 moonball   the player lobs every rally ball
+//   (other one-shot styles: push, power, short)
 // skill is the player's timing spread in timing windows: 0.4 is sharp,
 // 0.7 average, 1.0 loose. Each set is seeded, so runs repeat exactly.
 const { loadEngine, levelOpts, playSet } = require('./engine');

@@ -419,6 +419,24 @@ test('moonballing every ball does not beat Pro: it punishes high deep balls with
   assert.ok(r.games[1] > r.games[0], JSON.stringify(r.games));
 });
 
+test('feeding Pro soft balls does not beat it: it does not miss easy balls, so a pusher or a short-ball player loses', () => {
+  for (const style of ['push', 'short']) {
+    const CT = loadEngine(100);
+    const r = playSet(CT, { p0: 'philosopher', p1: 'octopus', control: ['bot', 'cpu'], skill: 0.4, style, extra: levelOpts(CT, 'pro') });
+    assert.ok(r.games[1] > r.games[0], style + ' ' + JSON.stringify(r.games));
+  }
+});
+
+test('pushing every ball back down the middle is no better than mixing it up against Club', () => {
+  const games = {};
+  for (const style of [undefined, 'push']) {
+    const CT = loadEngine(101);
+    const r = playSet(CT, { p0: 'octopus', p1: 'philosopher', control: ['bot', 'cpu'], skill: 0.7, style, extra: levelOpts(CT, 'club') });
+    games[style || 'varied'] = r.games[0] - r.games[1];
+  }
+  assert.ok(games.push <= games.varied, JSON.stringify(games));
+});
+
 // ---------------- tutorial ----------------
 function drill(CT, d, play) {
   const ends = [];
