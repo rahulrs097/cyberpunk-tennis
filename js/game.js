@@ -23,6 +23,8 @@
   const EASY = 0.6;             // share of the CPU's mistiming that an easy ball takes away
   // A smart CPU only follows a ball in when it had this much more time (s) to set up for it.
   const APPROACH_SLACK = 0.3;
+  const BISECT = 0.12;          // how far past the middle a player recovers, as a share of how wide their shot lands
+  const SERVE_READ = 3;         // serves into a box before a CPU returner starts reading where they go
   const CPU_EARLY = 0.45;       // share of the CPU's mistimed shots that are early rather than late
   // Auto-moving players still run at a ball landing this far (m) out, and let it go.
   const CHASE_OUT = 1;
@@ -123,7 +125,7 @@
       cpuSmart: opts.cpuSmart || 0,
       // what each side has shown so far: shots and errors per wing, and
       // points spent at the net (the CPU reads the other side's)
-      scout: [0, 1].map(() => ({ fh: { n: 0, err: 0 }, bh: { n: 0, err: 0 }, points: 0, net: 0 })),
+      scout: [0, 1].map(() => ({ fh: { n: 0, err: 0 }, bh: { n: 0, err: 0 }, points: 0, net: 0, serve: newServeScout() })),
       // Tutorial drills: side 1 is a ball machine ('feeder' control) that feeds
       // side 0 and never returns. Each rep ends at the first bounce with a
       // 'drill' event instead of a point. { serve: true } = side 0 serves.
@@ -157,6 +159,7 @@
   function autoMoves(g, side) { return g.control[side] === 'cpu' || !!g.autoMove[side]; }
 
   function emit(g, type, data) { g.onEvent(type, data || {}); }
+  const newServeScout = () => ({ deuce: { n: 0, u: 0 }, ad: { n: 0, u: 0 } });
   function staminaF(p) { return p.stamina / 100; }
   // Tired legs: top speed falls to 55% on empty.
   function moveSpeed(p) { return p.ch.speed * p.speedF * (0.55 + 0.45 * staminaF(p)); }
@@ -174,6 +177,12 @@
     S.x = S.fwd * rs * 0.7; S.y = -S.fwd * (COURT.HL + 0.3);
     const boxSign = deuce ? Rp.fwd : -Rp.fwd;     // receiver's deuce box is on their right
     Rp.x = boxSign * 2.5; Rp.y = -Rp.fwd * Rp.ch.returnDepth;
+    // A thinking CPU stands where this server has been serving to this box:
+    // further out against a wide server, nearer the middle against the T.
+    if (g.control[recv] === 'cpu') {
+      const sv = (g.scout[server].serve || newServeScout())[deuce ? 'deuce' : 'ad'];
+      if (sv.n >= SERVE_READ) Rp.x += boxSign * clamp(g.cpuSmart * 0.7 * (sv.u - COURT.SW / 2), -1, 1);
+    }
     // A short breather between points; a proper rest at the changeover
     // (after every odd game). Never above the cap. This is all the rest there
     // is between points: standing around before serving doesn't add to it.
@@ -720,7 +729,13 @@
     }
     c.atNet = false;
     const cover = g.control[c.side] === 'cpu' ? g.cpuCover : 0.15;
-    c.tx = clamp(opp.x * cover, -2.2, 2.2);
+    // After its own shot it covers the replies from where that shot is
+    // sending the opponent: a step to the far side of the middle from where
+    // the ball will land, which splits the line and the cross-court angle.
+    // Otherwise it shades towards where the opponent is standing.
+    const b = g.ball, land = g.predLand;
+    const mine = b.active && b.lastHitter === c.side && b.bounces === 0 && land && c.fwd * land.y > 0;
+    c.tx = mine ? clamp(-land.x * BISECT, -1, 1) : clamp(opp.x * cover, -2.2, 2.2);
     c.ty = -c.fwd * c.ch.home;
   }
 
@@ -1122,7 +1137,15 @@
         if (b.netted || !inOppHalf) fault(g, 'Net');
         else if (!CT.inServiceBox(b.pos.x, b.pos.y, g.serveBox)) fault(g, 'Fault');
         else if (g.drill) drillEnd(g, true, 'In', b.pos);
-        else b.bounces = 1;
+        else {
+          b.bounces = 1;
+          // (for the returner's scouting) how far from the centre line it landed, recent serves counting most
+          const sc = g.scout[h];
+          if (!sc.serve) sc.serve = newServeScout();
+          const sv = sc.serve[g.serveBox.sign === g.players[r].fwd ? 'deuce' : 'ad'], u = Math.abs(b.pos.x);
+          sv.u = sv.n ? sv.u + (u - sv.u) * 0.35 : u;
+          sv.n++;
+        }
         return;
       }
       if (b.netted || !inOppHalf) { pointTo(g, r, 'Net'); return; }

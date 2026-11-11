@@ -52,7 +52,8 @@ function levelOpts(CT, level) {
 // A scripted player on `side`. skill = timing spread in timing windows
 // (0.4 = skilled, 0.7 = average). Moves with automove and aims away from
 // the opponent, like a person would. A style plays one shot on every rally
-// ball: 'moonball', 'push', 'power' or 'short'.
+// ball: 'moonball', 'push', 'power' or 'short'. 'sameserve' serves the
+// same serve every time and rallies normally.
 function makeBot(CT, g, side, skill, rnd, style) {
   const gauss = () => { let u = 0; for (let i = 0; i < 6; i++) u += rnd(); return (u - 3) / Math.sqrt(0.5); };
   const p = g.players[side], opp = g.players[1 - side];
@@ -63,7 +64,9 @@ function makeBot(CT, g, side, skill, rnd, style) {
       if (g.peakT === null) return;
       if (!plan) plan = { e: Math.abs(gauss()) * skill * 0.5 * p.ch.window.fh };
       if ((g.time - g.peakT) / g.timeScale >= plan.e) {
-        CT.requestSwipe(g, side, { aim: (rnd() - 0.5) * 0.6, pace: 0.6 + rnd() * 0.3, spinDir: 1, curve: 0 });
+        // 'sameserve': the same hard serve out wide every time
+        CT.requestSwipe(g, side, style === 'sameserve' ? { aim: CT.deuceSide(g.match) ? -0.2 : 0.2, pace: 0.85, spinDir: 1, curve: 0 }
+          : { aim: (rnd() - 0.5) * 0.6, pace: 0.6 + rnd() * 0.3, spinDir: 1, curve: 0 });
         plan = null;
       }
       return;
