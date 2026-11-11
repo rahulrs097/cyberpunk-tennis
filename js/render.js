@@ -42,9 +42,11 @@
       W: 0, H: 0, dpr: 1, top: 92, bottom: 24, hudBottom: 0,
       sky: document.createElement('canvas'),
       glow: {},
-      // phones with few cores or little memory start one level down
-      quality: (navigator.hardwareConcurrency || 8) <= 4 || (navigator.deviceMemory || 8) <= 3 ? 1 : 2,
+      quality: AUTO_START,
+      auto: true,      // false once the player picks a Graphics level (setQuality)
       frames: [],
+      tried: [],       // quality levels whose trial step down didn't help (watchFrameRate)
+      trial: null,
       lastT: 0,
       anim: [],
     };
@@ -314,29 +316,65 @@
     buildSky(r);
   }
 
+  // phones with few cores or little memory start one level down
+  const AUTO_START = (navigator.hardwareConcurrency || 8) <= 4 || (navigator.deviceMemory || 8) <= 3 ? 1 : 2;
+
   // Phone screens show about this many millimetres per CSS pixel; it places
   // each eye's view under its lens.
   const MM_PER_PX = 0.17;
   // metres between the two eyes
   const IPD = 0.064;
 
+  // Pick the graphics level (0 smooth, 1 balanced, 2 sharp) or 'auto'.
+  // Auto starts at AUTO_START and steps down while the phone can't keep up.
+  // In VR the VR graphics setting applies instead, and this one comes back
+  // after it. Call resizeRenderer after.
+  function setQuality(r, level) {
+    r.auto = level === 'auto';
+    const q = r.auto ? AUTO_START : level;
+    if (r.vr) r.qualityWas = q; else r.quality = q;
+    r.frames.length = 0; r.tried = []; r.trial = null;
+  }
+
   // Quality levels, highest first. A phone that can't keep up steps down:
   // fewer pixels, no lamp pools, no glow blur on the players.
   const DPR_CAP = [1, 1.25, 1.5];
 
-  // Drop a quality level when the phone can't keep up: frames average
-  // slower than ~40 fps while drawing one takes most of a 60 fps frame
-  // (`work`, seconds), or slower than ~22 fps whatever the reason. A phone
-  // that only shows 30 frames a second but draws each one quickly (an
-  // iPhone in Low Power Mode) keeps the full look.
+  // Auto graphics: drop a quality level when the phone can't keep up.
+  // Frames average slower than ~40 fps while drawing one takes most of a
+  // 60 fps frame (`work`, seconds), or slower than ~22 fps whatever the
+  // reason: step down for good.
+  //
+  // `work` only times our drawing calls. Chrome on Android just records
+  // them, and its GPU does the real drawing (the glow blur most of all)
+  // afterwards, so a struggling phone there looks quick. So frames slower
+  // than ~45 fps with quick drawing get a trial step down: if the frame
+  // rate then rises, the lighter look stays; if not, the screen itself is
+  // what's slow (an iPhone in Low Power Mode shows 30 frames a second),
+  // and the full look comes back and isn't tried again.
   function watchFrameRate(r, dt, work) {
-    if (!dt || dt >= 0.1 || r.quality === 0 || r.vr) return;   // skip pauses and tab switches
+    if (!r.auto || !dt || dt >= 0.1 || r.vr) return;   // skip pauses and tab switches
+    if (r.quality === 0 && !r.trial) return;
     r.frames.push([dt, work]);
     if (r.frames.length < 90) return;
     const avg = (i) => r.frames.reduce((a, f) => a + f[i], 0) / r.frames.length;
     const gap = avg(0), busy = avg(1);
     r.frames.length = 0;
-    if ((gap > 0.025 && busy > 0.012) || gap > 0.045) { r.quality--; resize(r, ...r.args); }
+    const t = r.trial;
+    if (t) {
+      r.trial = null;
+      if (gap < t.gap * 0.85) return;   // it helped: keep the lighter look
+      r.tried.push(t.from);
+      r.quality = t.from;
+      resize(r, ...r.args);
+      return;
+    }
+    if ((gap > 0.025 && busy > 0.012) || gap > 0.045) { r.quality--; resize(r, ...r.args); return; }
+    if (gap > 0.022 && !r.tried.includes(r.quality)) {
+      r.trial = { from: r.quality, gap };
+      r.quality--;
+      resize(r, ...r.args);
+    }
   }
 
   // A soft radial glow, rendered once per colour and size.
@@ -1790,6 +1828,7 @@
   CT.resizeRenderer = resize;
   CT.setView = setView;
   CT.setVR = setVR;
+  CT.setQuality = setQuality;
   CT.renderGame = render;
   CT.showBillboard = showBillboard;
   CT.BOARD_ANIMS = Object.keys(BOARD_ANIMS);
