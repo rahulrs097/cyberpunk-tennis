@@ -18,7 +18,7 @@ function loadRelay() {
     .replace('export default', 'exports.default =')
     .replace('export class Room', 'exports.Room = class Room');
   const sandbox = {
-    exports: {}, URL, crypto: globalThis.crypto,
+    exports: {}, URL, Date, crypto: globalThis.crypto,
     WebSocketPair: function () { const a = new FakeSocket(), b = new FakeSocket(); a.peer = b; return { 0: a, 1: b }; },
     Response: class { constructor(body, init) { this.body = body; Object.assign(this, init); } },
   };
@@ -136,4 +136,29 @@ test('profiles: only a short clean name and a small PNG picture get through', ()
   assert.equal(cleanProfile({ pic: 'data:image/png;base64,' + 'A'.repeat(20000) }).pic, '', 'too big');
   assert.deepEqual({ ...cleanProfile(null) }, { name: '', pic: '' });
   assert.deepEqual({ ...cleanProfile({ name: 7, pic: {} }) }, { name: '', pic: '' });
+});
+
+test('relay: a socket flooding the room is cut down to the limit, then closed', async () => {
+  const { room, join } = makeRoom();
+  const host = await join('host', 'hostphone');
+  const guest = await join('guest', 'guestphone');
+  const realNow = Date.now;
+  try {
+    let t = 1000000;
+    Date.now = () => t;
+    // a normal second: everything gets through
+    for (let i = 0; i < 40; i++) room.webSocketMessage(guest, '{"t":"in"}');
+    assert.equal(host.sent.length, 40);
+    // floods: only the limit gets through each second, and it is closed in the end
+    for (let sec = 0; sec < 6 && guest.closedWith === undefined; sec++) {
+      t += 1000;
+      const before = host.sent.length;
+      for (let i = 0; i < 1000; i++) room.webSocketMessage(guest, '{"t":"in"}');
+      assert.ok(host.sent.length - before <= 120, 'passed on ' + (host.sent.length - before));
+    }
+    assert.equal(guest.closedWith, 4008);
+    // the host was never affected
+    room.webSocketMessage(host, '{"t":"st"}');
+    assert.equal(host.closedWith, undefined);
+  } finally { Date.now = realNow; }
 });

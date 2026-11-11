@@ -20,6 +20,9 @@
 const QUEUE = '~quick';
 // the room-code letters (no I or O), as in js/net.js
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+// most messages one socket may send in a second, and how many seconds in a
+// row it may go over before it is closed
+const RATE = 120, RATE_STRIKES = 3;
 
 export default {
   async fetch(request, env) {
@@ -44,6 +47,7 @@ export default {
 export class Room {
   constructor(state) {
     this.state = state;
+    this.rates = new WeakMap();   // ws -> { t, n, over }: messages this second
   }
 
   async fetch(request) {
@@ -96,6 +100,15 @@ export class Room {
     if (typeof message !== 'string' || message.length > 16384) return;
     const role = this.state.getTags(ws)[0];
     if (role === 'seek') return;   // nothing to pass on in the queue
+    // A match sends about 25 messages a second each way. A socket sending
+    // far more is dropped down to the limit, and closed if it keeps at it.
+    const now = Date.now();
+    let r = this.rates.get(ws);
+    if (!r || now - r.t >= 1000) { r = { t: now, n: 0, over: r && r.n > RATE ? r.over + 1 : 0 }; this.rates.set(ws, r); }
+    if (++r.n > RATE) {
+      if (r.over >= RATE_STRIKES) { try { ws.close(4008, 'too many messages'); } catch (e) { /* already closed */ } }
+      return;
+    }
     const other = role === 'host' ? 'guest' : 'host';
     for (const peer of this.state.getWebSockets(other)) {
       try { peer.send(message); } catch (e) { /* peer gone */ }

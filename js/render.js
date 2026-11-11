@@ -5,6 +5,8 @@
 // first-person view is drawn twice, once per eye, and turns with your head.
 (function () {
   const CT = (window.CT = window.CT || {});
+  let CALM = false;
+  try { CALM = !!window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { /* no media queries */ }
   const { COURT } = CT;
 
   const PAL = {
@@ -951,7 +953,8 @@
     const cur = boardText(r, now);
     // a new word flickers on, then hums
     const age = now - cur.from;
-    const on = cur.anim ? 1 : age < 0.35 ? (Math.floor(age * 24) % 2 ? 0.25 : 1) : 0.88 + 0.12 * Math.sin(now * 3);
+    // (no flicker for someone who has asked their phone for less motion)
+    const on = cur.anim ? 1 : age < 0.35 && !CALM ? (Math.floor(age * 24) % 2 ? 0.25 : 1) : 0.88 + 0.12 * Math.sin(now * 3);
     // the pylon it stands on, down into the skyline
     const pb = at(0.5, 0), pt = at(0.5, B.z);
     ctx.strokeStyle = '#1c1b2a'; ctx.lineWidth = Math.max(2, (pt.s || 0) * 0.5);

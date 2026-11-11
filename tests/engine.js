@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
-const FILES = ['physics.js', 'characters.js', 'match.js', 'game.js', 'achievements.js'];
+const FILES = ['physics.js', 'characters.js', 'match.js', 'game.js', 'input.js', 'achievements.js'];
 
 // Math.random is the CPU's only randomness; seeding it makes runs repeatable.
 function seeded(seed) {
