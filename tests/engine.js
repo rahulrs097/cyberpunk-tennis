@@ -51,7 +51,8 @@ function levelOpts(CT, level) {
 
 // A scripted player on `side`. skill = timing spread in timing windows
 // (0.4 = skilled, 0.7 = average). Moves with automove and aims away from
-// the opponent, like a person would. style 'moonball' lobs every rally ball.
+// the opponent, like a person would. A style plays one shot on every rally
+// ball: 'moonball', 'push', 'power' or 'short'.
 function makeBot(CT, g, side, skill, rnd, style) {
   const gauss = () => { let u = 0; for (let i = 0; i < 6; i++) u += rnd(); return (u - 3) / Math.sqrt(0.5); };
   const p = g.players[side], opp = g.players[1 - side];
@@ -82,6 +83,12 @@ function makeBot(CT, g, side, skill, rnd, style) {
       };
       // moonballer: every rally ball is a high, deep topspin lob
       if (style === 'moonball') plan.input = { aim: 0, landX: landX * 0.7, pace: 0.5, spinDir: 1, curve: 0, depth: 1, lob: true, lead: 0.1 };
+      // pusher: every rally ball goes back slow and deep down the middle
+      if (style === 'push') plan.input = { aim: 0, landX: 0, pace: 0.3, spinDir: 1, curve: 0, depth: 1 };
+      // basher: every rally ball at full pace into the open court
+      if (style === 'power') plan.input = { aim: 0, landX: away * edge * 0.8, pace: 1, spinDir: 1, curve: 0, depth: 1 };
+      // every rally ball short into the open court
+      if (style === 'short') plan.input = { aim: 0, landX: away * edge * 0.8, pace: 0.4, spinDir: 1, curve: 0, depth: 0.4 };
     }
     if (plan.hitT !== g.lastHitT) { plan = null; return; }
     const crossed = p.cross && p.cross.t >= g.lastHitT;
