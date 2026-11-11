@@ -29,7 +29,8 @@
     --pink: #ff3fb4;
     --gold: #ffc23d;
     --ball: #e4ff4a;
-    --line: rgba(122, 92, 255, 0.35);
+    --line: rgba(122, 92, 255, 0.5);
+    --warn: #ff3f6c;
     --display: "Tektur", "Chakra Petch", system-ui, sans-serif;
     --ui: "Chakra Petch", system-ui, sans-serif;
     color-scheme: dark;
@@ -49,12 +50,12 @@
 
   #hud {
     position: fixed; top: 0; left: 0; right: 0;
-    padding: calc(env(safe-area-inset-top, 0px) + 8px) 12px 0;
+    padding: calc(env(safe-area-inset-top, 0px) + 8px) max(12px, env(safe-area-inset-right, 0px)) 0 max(12px, env(safe-area-inset-left, 0px));
     display: flex; align-items: flex-start; gap: 8px;
     pointer-events: none;
   }
   .board {
-    flex: 1; min-width: 0;
+    flex: 1; min-width: 0; max-width: 360px;
     background: var(--panel);
     border: 1px solid var(--line);
     border-radius: 6px;
@@ -72,19 +73,23 @@
   .row.tired .stam-fill { background: var(--warn, #ff3f6c); box-shadow: 0 0 6px #ff3f6c; animation: tiredPulse 0.9s ease-in-out infinite alternate; }
   @keyframes tiredPulse { from { opacity: 1; } to { opacity: 0.45; } }
   .stam-cap { position: absolute; top: 0; bottom: 0; right: 0; background: repeating-linear-gradient(135deg, rgba(255,63,108,0.55) 0 3px, transparent 3px 6px); }
-  #callout { font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--gold); min-height: 0; }
+  #callout { font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--gold); min-height: 0; }
   #callout:empty { display: none; }
   .hud-btn {
     pointer-events: auto;
     background: var(--panel); color: var(--ink);
     border: 1px solid var(--line); border-radius: 6px;
-    width: 40px; height: 40px; font: 600 15px var(--ui);
+    width: 44px; height: 44px; font: 600 15px var(--ui);
   }
+  /* the buttons stay in the corner when the scoreboard doesn't fill the row */
+  #camBtn { margin-left: auto; }
 
   #msg {
     position: fixed; left: 16px; right: 16px; top: 38%;
     text-align: center; pointer-events: none;
   }
+  /* upright, the message sits in the sky over the billboard, clear of it and of the court */
+  @media (max-aspect-ratio: 1/1) { #msg { top: calc(env(safe-area-inset-top, 0px) + 15%); } }
   #msg .big { font-family: var(--display); font-weight: 900; font-size: clamp(38px, 12vw, 72px); letter-spacing: 0.04em; text-transform: uppercase; line-height: 1; color: var(--ink); text-shadow: 0 0 18px var(--cyan); }
   #msg[data-tone="good"] .big { text-shadow: 0 0 22px var(--cyan), 0 0 2px #fff; color: #dffbff; }
   #msg[data-tone="bad"] .big { text-shadow: 0 0 22px var(--pink); color: #ffe1f3; }
@@ -93,47 +98,71 @@
   #msg.pop { animation: pop 0.35s ease-out; }
   @keyframes pop { from { transform: scale(1.25); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 
-  #shot {
-    position: fixed; left: 16px; right: 16px;
-    bottom: calc(env(safe-area-inset-bottom, 0px) + 34px);
-    text-align: center; font-size: 13px; color: var(--ink);
-    text-shadow: 0 0 6px #000; pointer-events: none;
-    font-variant-numeric: tabular-nums;
+  /* The foot of the screen: what you just hit, as chips, over the hint for
+     what to do next. One stack, so the two never print over each other. */
+  #foot {
+    position: fixed; left: 12px; right: 12px;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 10px);
+    display: flex; flex-direction: column; align-items: center; gap: 6px;
+    pointer-events: none;
   }
+  #shot { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; font-size: 13px; font-variant-numeric: tabular-nums; }
+  #shot span { background: rgba(8, 6, 22, 0.82); border: 1px solid var(--line); border-radius: 4px; padding: 3px 7px; white-space: nowrap; }
+  #shot .good { border-color: var(--ball); color: var(--ball); }
+  #shot .bad { border-color: var(--warn); color: #ffd0da; }
+  /* early on the left, late on the right, the mark where this swing was */
+  #shot .meter { display: inline-block; position: relative; width: 44px; height: 8px; margin-right: 6px; border-radius: 2px; vertical-align: -1px;
+    background: linear-gradient(to right, rgba(255,255,255,0.12) 0 38%, rgba(228,255,74,0.55) 38% 62%, rgba(255,255,255,0.12) 62%); }
+  #shot .meter i { position: absolute; top: -3px; bottom: -3px; width: 3px; margin-left: -1.5px; border-radius: 1px; background: #fff; box-shadow: 0 0 4px #000; }
   #hint {
-    position: fixed; left: 16px; right: 16px;
-    bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
-    text-align: center; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
-    color: var(--muted); pointer-events: none;
+    max-width: 440px; box-sizing: border-box; text-align: center; text-wrap: balance;
+    font-size: 14px; line-height: 1.3; letter-spacing: 0.02em; color: var(--ink);
+    background: rgba(8, 6, 22, 0.82); border: 1px solid rgba(37, 217, 255, 0.45); border-radius: 18px; padding: 6px 14px;
   }
+  #hint:empty { display: none; }
+  /* a tip between points, while you're still new */
+  #hint.tip { border-color: var(--gold); }
+  #hint.tip::before { content: 'Tip · '; color: var(--gold); }
   /* sideways, your player fills the bottom middle of the screen, so the
      hint and the shot callout move out to the corners beside them */
   @media (min-aspect-ratio: 4/3) {
-    #hint { left: calc(env(safe-area-inset-left, 0px) + 16px); right: auto; max-width: 34vw; text-align: left; }
-    #shot { left: auto; right: calc(env(safe-area-inset-right, 0px) + 16px); max-width: 34vw; text-align: right; bottom: calc(env(safe-area-inset-bottom, 0px) + 12px); }
+    #foot { flex-direction: row; align-items: flex-end; left: max(12px, env(safe-area-inset-left, 0px)); right: max(12px, env(safe-area-inset-right, 0px)); }
+    #hint { max-width: 32vw; text-align: left; margin-right: auto; }
+    #shot { max-width: 32vw; justify-content: flex-end; order: 2; margin-left: auto; }
   }
+  /* the first serves and returns: a ghost finger shows the swipe */
+  #ghost { position: fixed; left: 76%; bottom: calc(env(safe-area-inset-bottom, 0px) + 16%); width: 44px; height: 120px; margin-left: -22px; pointer-events: none; }
+  #ghost::before { content: ''; position: absolute; left: 20px; top: 14px; bottom: 14px; width: 4px; border-radius: 2px; background: linear-gradient(to top, rgba(228,255,74,0), rgba(228,255,74,0.7)); }
+  #ghost::after { content: ''; position: absolute; left: 8px; bottom: 0; width: 26px; height: 26px; border-radius: 50%; border: 3px solid var(--ball); background: rgba(228,255,74,0.3); box-shadow: 0 0 14px rgba(228,255,74,0.7); animation: ghostUp 1.3s ease-in-out infinite; }
+  #ghost.tap::before { display: none; }
+  #ghost.tap::after { bottom: 46px; animation: ghostTap 1.1s ease-in-out infinite; }
+  @keyframes ghostUp { 0% { transform: translateY(0); opacity: 0; } 15% { opacity: 1; } 75% { transform: translateY(-92px); opacity: 1; } 100% { transform: translateY(-92px); opacity: 0; } }
+  @keyframes ghostTap { 0%, 100% { transform: scale(1); opacity: 0.9; } 50% { transform: scale(0.7); opacity: 0.5; } }
 
   /* Zen mode: nothing on screen but the pause button. The score goes up on
      the sky billboard instead, and the guides on the court are gone too. */
-  body.zen .board, body.zen #camBtn, body.zen #msg, body.zen #shot, body.zen #hint { display: none !important; }
+  body.zen .board, body.zen #camBtn, body.zen #msg, body.zen #foot, body.zen #ghost { display: none !important; }
   body.zen #pauseBtn { margin-left: auto; }
   /* VR: the canvas is two eyes side by side, and nothing else goes on top */
   #pad { position: fixed; inset: 0; z-index: 30; background: #05040f; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px; text-align: center; touch-action: none; user-select: none; -webkit-user-select: none; }
   #pad[hidden] { display: none; }
   #pad .pad-title { font: 900 28px var(--display); letter-spacing: 0.18em; text-transform: uppercase; color: var(--cyan); opacity: 0.6; }
-  #pad .lede { max-width: 300px; opacity: 0.7; }
+  #pad .lede { max-width: 300px; color: var(--ink); opacity: 0.85; }
   #pad .warn { color: var(--ball); }
   #pad .pad-btns { display: flex; gap: 10px; position: absolute; bottom: calc(env(safe-area-inset-bottom, 0px) + 20px); }
   body.vr #pauseMenu, body.vr #end { background: transparent; backdrop-filter: none; }
   body.vr #pauseMenu .sheet, body.vr #end .sheet { display: none; }
-  body.vr #hud, body.vr #msg, body.vr #shot, body.vr #hint { display: none !important; }
+  body.vr #hud, body.vr #msg, body.vr #foot, body.vr #ghost { display: none !important; }
+  /* a way out of VR by touch, for a phone that isn't in a headset: shown
+     while it's held upright, when the headset view can't be used anyway */
+  #vrExit { position: fixed; z-index: 20; left: 50%; transform: translateX(-50%); bottom: calc(env(safe-area-inset-bottom, 0px) + 18%); width: auto; padding: 0 22px; flex: none; }
   .opts-sub { display: contents; }
   .opts-sub .lede { grid-column: 1 / 3; font-size: 13px; }
 
   .overlay {
     position: fixed; inset: 0;
     display: flex;
-    padding: calc(env(safe-area-inset-top, 0px) + 16px) 16px calc(env(safe-area-inset-bottom, 0px) + 16px);
+    padding: calc(env(safe-area-inset-top, 0px) + 16px) max(16px, env(safe-area-inset-right, 0px)) calc(env(safe-area-inset-bottom, 0px) + 16px) max(16px, env(safe-area-inset-left, 0px));
     background: rgba(5, 4, 12, 0.72);
     backdrop-filter: blur(3px);
     overflow-y: auto;
@@ -151,27 +180,26 @@
      result goes on the right */
   @media (orientation: landscape) and (max-height: 520px) {
     #end { background: linear-gradient(to right, rgba(5, 4, 12, 0) 0%, rgba(5, 4, 12, 0) 45%, rgba(5, 4, 12, 0.85) 62%); }
-    #end .sheet { max-width: 340px; margin: auto 0 auto auto; }
+    #end .sheet { max-width: 340px; margin: auto 0 0 auto; gap: 8px; }
+    #end .title { font-size: 28px; }
+    #end .end-score { font-size: 32px; }
   }
   .title { font-family: var(--display); font-weight: 900; font-size: clamp(34px, 11vw, 54px); line-height: 0.95; letter-spacing: 0.02em; text-transform: uppercase; text-wrap: balance; }
   .title span { display: block; color: var(--pink); text-shadow: 0 0 20px rgba(255,63,180,0.7); }
   .title b { color: var(--cyan); text-shadow: 0 0 20px rgba(37,217,255,0.6); font-weight: 900; }
   .lede { color: var(--muted); font-size: 14px; line-height: 1.45; margin: 0; }
-  .label { font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); }
+  .label { font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); }
   .picks { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .pick {
-    display: grid; grid-template-rows: 120px auto auto; gap: 4px; text-align: left;
+    display: grid; grid-template-columns: 52px minmax(0, 1fr); grid-template-rows: auto auto; column-gap: 6px; align-content: center; text-align: left;
     background: var(--panel); color: var(--ink);
-    border: 1px solid var(--line); border-radius: 6px; padding: 10px; font-family: var(--ui);
+    border: 1px solid var(--line); border-radius: 6px; padding: 8px; font-family: var(--ui);
     min-width: 0;
   }
   .pick[aria-pressed="true"] { border-color: var(--cyan); box-shadow: 0 0 0 1px var(--cyan), 0 0 22px rgba(37,217,255,0.25); }
-  .pick .portrait { width: 100%; height: 96px; display: block; }
-  .pick .nm { font-family: var(--display); font-weight: 700; font-size: 15px; text-transform: uppercase; letter-spacing: 0.05em; }
-  .pick .af { font-size: 11px; color: var(--muted); }
-  .pick dl { margin: 6px 0 0; display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; font-size: 11px; }
-  .pick dt { color: var(--muted); }
-  .pick dd { margin: 0; font-variant-numeric: tabular-nums; }
+  .pick .portrait { width: 52px; height: 84px; display: block; grid-row: 1 / 3; }
+  .pick .nm { font-family: var(--display); font-weight: 700; font-size: clamp(11px, 3.3vw, 14px); text-transform: uppercase; letter-spacing: 0.02em; align-self: end; white-space: nowrap; }
+  .pick .af { font-size: 12px; line-height: 1.3; color: var(--muted); align-self: start; }
   .seg { display: flex; gap: 8px; }
   .seg button, .btn {
     flex: 1; min-height: 44px; border-radius: 6px; border: 1px solid var(--line);
@@ -182,7 +210,9 @@
   #picBtn { flex: 0 0 48px; height: 48px; padding: 0; border-radius: 10px; border: 1px dashed var(--cyan); background: rgba(10,8,30,0.9) center / cover no-repeat; image-rendering: pixelated; color: var(--cyan); font: 700 24px var(--display); cursor: pointer; }
   #picBtn.set { border-style: solid; color: transparent; }
   #nameInput { flex: 1; min-width: 0; height: 48px; box-sizing: border-box; padding: 0 12px; border-radius: 10px; border: 1px solid var(--cyan); background: rgba(10,8,30,0.9); color: var(--ball); font: 700 18px var(--display); letter-spacing: 0.06em; text-transform: uppercase; }
-  #resumeMatch small, #quickBtn small { display: block; margin-top: 3px; font-family: inherit; font-weight: 400; font-size: 13px; letter-spacing: 0.02em; }
+  #resumeMatch small { color: inherit; }
+  #resumeMatch small, .btn small, .seg button small { display: block; text-transform: none; margin-top: 3px; font-family: var(--ui); font-weight: 400; font-size: 13px; letter-spacing: 0.02em; }
+  .btn:not(.primary) small, .seg button small { color: var(--muted); }
   .btn.primary { background: var(--pink); border-color: var(--pink); color: #14001a; font-family: var(--display); font-weight: 700; font-size: 17px; box-shadow: 0 0 24px rgba(255,63,180,0.45); }
   button:focus-visible { outline: 2px solid var(--ball); outline-offset: 2px; }
   .how { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; font-size: 13px; line-height: 1.4; }
@@ -195,7 +225,11 @@
   .opts { display: grid; grid-template-columns: auto 1fr; gap: 8px 12px; align-items: center; }
   .opts .seg button { padding-top: 8px; padding-bottom: 8px; }
   #trophies .sheet { margin-top: 0; }
+  #pauseMenu .sheet { margin: auto auto 0; }
   #pauseMenu .btns { flex-direction: column; }
+  #pauseScore { color: var(--ink); font-variant-numeric: tabular-nums; }
+  /* Back stays in reach at the foot of a long list */
+  .btns.sticky { position: sticky; bottom: 0; padding: 10px 0 2px; background: linear-gradient(to bottom, rgba(5, 4, 12, 0), rgba(5, 4, 12, 0.96) 35%); }
   .ach { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
   .ach li { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; }
   .ach b { font-family: var(--display); font-weight: 700; font-size: 15px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--cyan); }
@@ -216,7 +250,7 @@
   .pager span { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
   .pager .btn:disabled { opacity: 0.35; }
   .hist li { display: block; padding: 0; }
-  .hist button { all: unset; box-sizing: border-box; width: 100%; display: flex; justify-content: space-between; align-items: center; padding: 10px; cursor: pointer; }
+  .hist button { all: unset; box-sizing: border-box; width: 100%; min-height: 48px; display: flex; justify-content: space-between; align-items: center; padding: 10px; cursor: pointer; }
   .hist button:focus-visible { outline: 2px solid var(--ball); outline-offset: -2px; border-radius: 6px; }
   .hist button::after { content: '▾'; color: var(--muted); margin-left: 10px; }
   .hist button[aria-expanded="true"]::after { content: '▴'; }
@@ -227,16 +261,71 @@
   .part { display: grid; gap: inherit; }
   .part[hidden] { display: none; }
   .hist .stats { padding: 0 10px 10px; font-size: 13px; }
-  .seg.toggles button { min-height: 40px; font-size: 12px; letter-spacing: 0.04em; padding: 0 2px; min-width: 0; }
+  /* on/off settings, the same in Settings and the pause menu: lit while on,
+     and saying so in words, not by colour alone */
+  .seg.toggles { display: grid; grid-template-columns: repeat(3, 1fr); }
+  .seg.toggles button { min-height: 48px; font-size: 13px; letter-spacing: 0.04em; padding: 4px 2px; min-width: 0; }
+  .seg.toggles button[aria-pressed]::after { display: block; margin-top: 2px; font-size: 11px; font-weight: 500; letter-spacing: 0.12em; }
+  .seg.toggles button[aria-pressed="true"]::after { content: 'On'; }
+  .seg.toggles button[aria-pressed="false"]::after { content: 'Off'; }
   .seg.toggles button[aria-pressed="false"] { color: var(--muted); }
-  .seg.tabs button { min-height: 36px; font-size: 12px; letter-spacing: 0.04em; padding: 0 2px; min-width: 0; }
-  @media (max-height: 760px) {
-    .sheet { gap: 12px; }
-    #menu .lede, .pick dl { display: none; }
-    #menu #installHint { display: block; }
-    .pick .portrait { height: 76px; }
+  .seg.tabs button { min-height: 44px; font-size: 12px; letter-spacing: 0.02em; padding: 0 2px; min-width: 0; }
+
+  /* the main menu: who you are, the match against the CPU, online, and a
+     bar along the bottom for everything else */
+  #menu .sheet { display: flex; flex-direction: column; min-height: 100%; margin: 0 auto; gap: 12px; }
+  #menu .title { font-size: clamp(24px, 7.6vw, 34px); white-space: nowrap; }
+  #menu .title span { display: inline; }
+  .panel { display: grid; gap: 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+  .panel .lede { font-size: 13px; }
+  .start { display: grid; grid-template-columns: 40px 1fr auto; gap: 12px; align-items: center; text-align: left; padding: 10px 12px; border-radius: 8px;
+    border: 1px solid var(--cyan); background: rgba(37, 217, 255, 0.08); color: var(--ink); font-family: var(--ui); box-shadow: 0 0 18px rgba(37,217,255,0.2); }
+  .start .ico { width: 40px; height: 40px; border-radius: 50%; border: 2px solid var(--cyan); display: grid; place-items: center; color: var(--cyan); font: 700 20px var(--display); }
+  .start b { display: block; font: 700 15px var(--display); letter-spacing: 0.05em; text-transform: uppercase; }
+  .start span { font-size: 13px; color: var(--muted); }
+  .start em { font-style: normal; font: 700 11px var(--ui); letter-spacing: 0.12em; text-transform: uppercase; background: var(--ball); color: #14140a; border-radius: 3px; padding: 3px 6px; }
+  .note { margin: 0; padding: 10px 12px; border-radius: 6px; border: 1px solid var(--gold); background: rgba(255, 194, 61, 0.12); color: #fff3d6; font-size: 14px; }
+  .nav { margin-top: auto; padding-top: 4px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+  .nav button { min-height: 52px; display: grid; gap: 3px; place-items: center; align-content: center; background: none; border: 0; border-top: 1px solid var(--line); border-radius: 0; color: var(--ink); font: 600 12px var(--ui); letter-spacing: 0.08em; text-transform: uppercase; }
+  .nav svg { width: 20px; height: 20px; fill: none; stroke: var(--cyan); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+  /* the lobby: waiting shows a spinner, and errors don't look like instructions */
+  #lobbyText.err { color: #ffd0da; border-left: 3px solid var(--warn); padding-left: 10px; }
+  #lobbyText.busy::before { content: ''; display: inline-block; width: 12px; height: 12px; margin-right: 8px; vertical-align: -1px; border-radius: 50%; border: 2px solid var(--cyan); border-right-color: transparent; animation: spin 0.9s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #codeInput.bad { border-color: var(--warn); }
+
+  /* how to play: a card a shot, with the swipe drawn on it */
+  .cards { display: grid; gap: 8px; }
+  .card { display: grid; grid-template-columns: 44px 1fr; gap: 12px; align-items: center; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; }
+  .card svg { width: 44px; height: 56px; fill: none; stroke: var(--ball); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+  .card svg .scr { stroke: var(--line); stroke-width: 1.5; }
+  .card svg .dim { stroke: var(--cyan); stroke-width: 2; }
+  .card b { display: block; font: 700 14px var(--display); letter-spacing: 0.05em; text-transform: uppercase; color: var(--cyan); }
+  .card span { font-size: 13px; line-height: 1.4; }
+  .card.text { grid-template-columns: 1fr; }
+  .steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; font-size: 13px; line-height: 1.4; }
+  details.card { display: block; }
+  details.card summary { font: 700 14px var(--display); letter-spacing: 0.05em; text-transform: uppercase; color: var(--cyan); min-height: 28px; display: flex; align-items: center; }
+  details.card[open] summary { margin-bottom: 8px; }
+  body.installed .web-only { display: none !important; }
+
+  .end-stats { margin: 0; display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; text-align: center; }
+  .end-stats div { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 6px 2px; }
+  .end-stats dt { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+  .end-stats dd { margin: 0; font: 700 17px var(--display); color: var(--ink); font-variant-numeric: tabular-nums; }
+  #end.lost .title b { color: var(--pink); text-shadow: 0 0 20px rgba(255,63,180,0.6); }
+  #end.lost .end-score { color: var(--ink); }
+
+  @media (max-height: 700px) {
+    #menu .sheet { gap: 9px; }
+    .pick .portrait { height: 64px; }
+    .panel { padding: 9px; gap: 8px; }
   }
-  @media (prefers-reduced-motion: reduce) { #msg.pop { animation: none; } }
+  @media (prefers-reduced-motion: reduce) {
+    #msg.pop, .row.tired .stam-fill, #ghost::after, #lobbyText.busy::before { animation: none; }
+    #ghost::after { transform: translateY(-46px); }
+  }
 </style>
 </head>
 <body>
@@ -254,55 +343,56 @@
 </div>
 
 <div id="msg" hidden><div class="big"></div><div class="sub"></div></div>
-<div id="shot" hidden></div>
-<div id="hint"></div>
+<div id="ghost" hidden></div>
+<div id="foot">
+  <div id="shot" hidden></div>
+  <div id="hint"></div>
+</div>
+<button class="btn" id="vrExit" hidden>Exit VR</button>
 
 <div class="overlay" id="menu">
   <div class="sheet">
-    <div class="title"><span>Cyberpunk</span><b>Tennis</b></div>
-    <p class="lede">One set on a rooftop parking lot under the night sky. Tiebreak at 6–6.</p>
-    <div class="label">Choose your player</div>
+    <div class="title"><span>Cyberpunk</span> <b>Tennis</b></div>
+    <p class="note" id="menuNote" role="alert" hidden></p>
+    <!-- until the tutorial is done or a match has been played -->
+    <button class="start" id="tutBtn" hidden><i class="ico" aria-hidden="true">↑</i><div><b>Learn the swipe</b><span>11 short drills, a few minutes</span></div><em>Start here</em></button>
+    <div class="label">Your player</div>
     <div class="picks">
       <button class="pick" data-char="octopus" aria-pressed="true">
         <canvas class="portrait" data-char="octopus"></canvas>
         <span class="nm">Octopus</span>
-        <span class="af">Baseline counterpuncher</span>
-        <dl><dt>Style</dt><dd>Deep defender</dd><dt>Best wing</dt><dd>Flat backhand</dd><dt>Reach</dt><dd>Longest</dd></dl>
+        <span class="af">Deep defender, longest reach</span>
       </button>
       <button class="pick" data-char="philosopher" aria-pressed="false">
         <canvas class="portrait" data-char="philosopher"></canvas>
         <span class="nm">Philosopher</span>
-        <span class="af">Topspin attacker</span>
-        <dl><dt>Style</dt><dd>Aggressive</dd><dt>Best wing</dt><dd>Topspin forehand</dd><dt>Feet</dt><dd>Quickest</dd></dl>
+        <span class="af">Topspin attacker, quickest feet</span>
       </button>
     </div>
     <button class="btn primary" id="resumeMatch" hidden>Resume match<small id="resumeScore"></small></button>
-    <button class="btn primary" id="play">Play vs CPU</button>
-    <div class="opts">
-      <div class="label">Level</div>
+    <div class="panel">
+      <div class="label">CPU level</div>
       <div class="seg">
         <button data-level="chill" aria-pressed="false">Chill</button>
         <button data-level="club" aria-pressed="true">Club</button>
         <button data-level="pro" aria-pressed="false">Pro</button>
       </div>
+      <p class="lede" id="levelNote"></p>
+      <button class="btn primary" id="play">Play vs CPU</button>
     </div>
-    <div class="label">Play online</div>
-    <button class="btn" id="quickBtn">Quick match<small>Play anyone who's looking</small></button>
+    <div class="label">Online</div>
     <div class="seg">
-      <button id="hostBtn">Create room</button>
-      <button id="joinBtn">Join room</button>
-    </div>
-    <div class="seg">
-      <button id="tutBtn">Tutorial</button>
-      <button id="howBtn">How to play</button>
-    </div>
-    <div class="seg">
-      <button id="achBtn">Achievements</button>
-      <button id="statsBtn">Stats</button>
-      <button id="settingsBtn">Settings</button>
+      <button id="quickBtn">Quick match<small>Anyone who's looking</small></button>
+      <button id="friendBtn">Play a friend<small>Create or join a room</small></button>
     </div>
     <button class="btn" id="installBtn" hidden>Install app</button>
     <p class="lede" id="installHint" hidden>In Safari, tap Share, then Add to Home Screen. It opens full screen and plays the CPU offline.</p>
+    <div class="nav">
+      <button id="howBtn"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v16H5zM9 9h6M9 13h4"/></svg>How to</button>
+      <button id="statsBtn"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 20v-7M12 20V5M18 20v-10"/></svg>Stats</button>
+      <button id="achBtn"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 4h8v5a4 4 0 0 1-8 0zM8 6H5a3 3 0 0 0 3 4M16 6h3a3 3 0 0 1-3 4M12 13v4M9 20h6"/></svg>Trophies</button>
+      <button id="settingsBtn"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/></svg>Settings</button>
+    </div>
   </div>
 </div>
 <div class="overlay" id="settings" hidden>
@@ -312,8 +402,9 @@
     <div class="seg toggles">
       <button data-auto aria-pressed="true">Automove</button>
       <button data-music aria-pressed="true">Music</button>
+      <button data-sfx aria-pressed="true">Sound</button>
       <button data-zen aria-pressed="false">Zen</button>
-      <button data-full id="fullBtn" aria-pressed="true">Full screen</button>
+      <button data-full aria-pressed="true">Full screen</button>
     </div>
     <div class="opts">
       <div class="label">Graphics</div>
@@ -330,7 +421,7 @@
         <button data-view="vr" aria-pressed="false">VR</button>
       </div>
       <div id="vrOpts" class="opts-sub" hidden>
-        <p class="lede">For a Cardboard headset. Watch the ball and press the headset's button as it arrives: the shot is picked for you. Press early, hold and let go on time for a power shot. Or link a second phone and swipe on it.</p>
+        <p class="lede">For a Cardboard headset: Play starts in the headset view while VR is picked. Watch the ball and press the headset's button as it arrives: the shot is picked for you. Press early, hold and let go on time for a power shot. Or link a second phone and swipe on it.</p>
         <div class="label">VR view</div>
         <div class="seg">
           <button data-vr-fov="wide" aria-pressed="false">Wide</button>
@@ -394,7 +485,7 @@
       <button class="btn" id="histOlder">Older ›</button>
     </div>
     </div>
-    <div class="btns">
+    <div class="btns sticky">
       <button class="btn primary" id="achClose">Back</button>
     </div>
   </div>
@@ -403,22 +494,57 @@
 <div class="overlay" id="help" hidden>
   <div class="sheet">
     <div class="title"><b>How to play</b></div>
-    <ul class="how">
-      <li><b>Tap</b><span>Run to that spot. With automove on, your player chases the ball for you and a tap overrides it until the next shot. On your serve, tap to toss.</span></li>
-      <li><b>Swipe</b><span>Hit. The swipe's direction is where the ball goes, and its length is how deep: a short swipe drops it short. A downward slice swipe aims the other way: top-left to bottom-right goes left.</span></li>
-      <li><b>Spin</b><span>Swipe up for topspin, down for slice. Bend the swipe for sidespin.</span></li>
-      <li><b>Pace</b><span>A fast flick hits hard and flat, but flick too hard and it flies long. A slow swipe adds spin and safety.</span></li>
-      <li><b>Lob</b><span>Swipe up slowly over a quarter of the screen or more to loft the ball deep, over a player at the net. Start the swipe as the ball arrives: a lob is timed from the middle of the swipe, and forgives more mistiming than a drive.</span></li>
-      <li><b>Timing</b><span>Swipe as the ring closes. Late forehands drift right, late backhands drift left. The yellow X shows where the ball will bounce, and on a serve it shows before the ring does.</span></li>
-      <li><b>Stamina</b><span>Running, every swing and repeated power shots tire you, and you only get part of it back between points. Tired players run slower and have less time to swing. The striped part of the bar is gone for the set.</span></li>
-      <li><b>Zen</b><span>Zen mode clears the screen: no scoreboard, hints, timing ring or landing X, just the pause button. The score goes up on the billboard in the sky. Switch camera from the pause menu. It has its own calm music, and the ball sounds closer to a real court.</span></li>
-      <li><b>VR</b><span>In Settings, pick VR under Camera and put the phone in a Cardboard headset. Look down the court and press the button to start. Watch the ball and press the button as it arrives: where the shot goes is picked for you. For a power shot, press early, hold, and let go as the ball arrives; the ring in the middle of your view fills when the hold is long enough. You see your racket swing through the ball. A small ring on the ball closes as it comes, and if you look away an arrow points to the ball and two ticks then a high beep count you down. On your serve, press to toss, then press again at the top. Look down at your feet and press to pause. The pause menu appears in the headset: turn to Exit VR on the left, Resume ahead or Quit on the right, and press. At the end of a match the score shows the same way, with Rematch ahead and Menu on the right. Look straight up at the sky and press to recentre (then look down the court and press again), or tap the pad with two fingers. The white line down the middle lines the phone up with the headset's divider. Automove runs for you. For full swipe control, in Settings tap Link a phone under Swipe pad, then on a second phone open Settings, pick VR, tap Be the pad and enter the code: swipe on that phone exactly as on the game screen. On a laptop the mouse is your head and the space bar is the button.</span></li>
-      <li><b>Full screen</b><span>The game fills the screen when a match starts. If Safari on iPad stops the match with a "typing while in full screen" warning, switch it off. On iPhone and iPad, Add to Home Screen plays full screen anyway.</span></li>
-      <li><b>Level</b><span>Chill is slower and the CPU covers less court. Pro is full speed against a CPU that rarely misses.</span></li>
-    </ul>
-    <div class="btns">
-      <button class="btn primary" id="helpClose">Got it</button>
-      <button class="btn" id="helpTut">Try the tutorial</button>
+    <div class="seg tabs">
+      <button data-help="shots" aria-pressed="true">Shots</button>
+      <button data-help="move" aria-pressed="false">Moving</button>
+      <button data-help="stamina" aria-pressed="false">Stamina</button>
+      <button data-help="modes" aria-pressed="false">Modes</button>
+    </div>
+    <div class="cards" data-help-part="shots">
+      <div class="card"><svg viewBox="0 0 44 56" aria-hidden="true"><rect class="scr" x="4" y="2" width="36" height="52" rx="5"/><path d="M22 44V14M14 22l8-8 8 8"/></svg><div><b>Drive</b><span>Swipe up as the ring around the ball closes. The ball goes where the swipe points.</span></div></div>
+      <div class="card"><svg viewBox="0 0 44 56" aria-hidden="true"><rect class="scr" x="4" y="2" width="36" height="52" rx="5"/><path d="M22 46V34"/><circle class="dim" cx="22" cy="16" r="6"/><path class="dim" d="M22 28v-4"/></svg><div><b>Serve</b><span>Tap to toss, then swipe up as the ball tops out in the ring. The yellow X shows where it will land.</span></div></div>
+      <div class="card"><svg viewBox="0 0 44 56" aria-hidden="true"><rect class="scr" x="4" y="2" width="36" height="52" rx="5"/><path d="M26 44L14 14M12 25l2-11 9 6"/></svg><div><b>Aim</b><span>Swipe up and left to go left, up and right to go right. A longer swipe lands deeper.</span></div></div>
+      <div class="card"><svg viewBox="0 0 44 56" aria-hidden="true"><rect class="scr" x="4" y="2" width="36" height="52" rx="5"/><path d="M22 12v30M14 34l8 8 8-8"/></svg><div><b>Slice</b><span>Swipe down for backspin. A slice aims the other way: top-left to bottom-right goes left.</span></div></div>
+      <div class="card"><svg viewBox="0 0 44 56" aria-hidden="true"><rect class="scr" x="4" y="2" width="36" height="52" rx="5"/><path d="M22 38V26M17 31l5-5 5 5"/></svg><div><b>Drop shot</b><span>A short swipe drops the ball just over the net.</span></div></div>
+      <div class="card"><svg viewBox="0 0 44 56" aria-hidden="true"><rect class="scr" x="4" y="2" width="36" height="52" rx="5"/><path d="M22 50V8M14 16l8-8 8 8"/><path class="dim" d="M34 44v-8M34 30v-6"/></svg><div><b>Lob</b><span>A slow, long swipe up (a quarter of the screen or more) lofts it over a player at the net. Start as the ball arrives.</span></div></div>
+      <div class="card"><svg viewBox="0 0 44 56" aria-hidden="true"><rect class="scr" x="4" y="2" width="36" height="52" rx="5"/><path d="M22 44V14M14 22l8-8 8 8"/><path class="dim" d="M10 46v-9M34 46v-9"/></svg><div><b>Power</b><span>A fast flick hits hard and flat. Flick too hard and it flies long. A slow swipe adds spin and safety.</span></div></div>
+      <div class="card"><svg viewBox="0 0 44 56" aria-hidden="true"><rect class="scr" x="4" y="2" width="36" height="52" rx="5"/><path d="M12 40c2-14 8-22 20-26M24 12l8 2-2 8"/></svg><div><b>Curve</b><span>Bend the swipe to bend the ball: sidespin curls it away from where you aimed.</span></div></div>
+      <div class="card"><svg viewBox="0 0 44 56" aria-hidden="true"><rect class="scr" x="4" y="2" width="36" height="52" rx="5"/><path d="M22 30V12M14 20l8-8 8 8"/><path class="dim" d="M8 36h28"/></svg><div><b>Volley and smash</b><span>At the net, swipe before the ball bounces. Under a high ball, any hard swipe is a smash.</span></div></div>
+      <div class="card"><svg viewBox="0 0 44 56" aria-hidden="true"><rect class="scr" x="4" y="2" width="36" height="52" rx="5"/><circle class="dim" cx="22" cy="28" r="14"/><circle cx="22" cy="28" r="6"/></svg><div><b>Timing</b><span>Swipe as the ring closes on the ball. Late forehands drift right, late backhands drift left.</span></div></div>
+    </div>
+    <div class="cards" data-help-part="move" hidden>
+      <div class="card"><svg viewBox="0 0 44 56" aria-hidden="true"><rect class="scr" x="4" y="2" width="36" height="52" rx="5"/><circle cx="22" cy="28" r="5"/><circle class="dim" cx="22" cy="28" r="11"/></svg><div><b>Tap to run</b><span>Tap the court and your player runs to that spot.</span></div></div>
+      <div class="card text"><div><b>Automove</b><span>With automove on, your player chases the ball for you. A tap overrides it until the next shot. Switch it off in Settings or the pause menu to do all the running yourself.</span></div></div>
+      <div class="card text"><div><b>Camera</b><span>The 1P button swaps between the chase view and your player's own eyes. In zen mode it's in the pause menu.</span></div></div>
+    </div>
+    <div class="cards" data-help-part="stamina" hidden>
+      <div class="card text"><div><b>The bar under your name</b><span>Running, every swing and repeated power shots tire you. You only get part of it back between points.</span></div></div>
+      <div class="card text"><div><b>When you're tired</b><span>The bar turns red: you run slower and have less time to swing.</span></div></div>
+      <div class="card text"><div><b>The striped part</b><span>Stamina in the striped part of the bar is gone for the set.</span></div></div>
+    </div>
+    <div class="cards" data-help-part="modes" hidden>
+      <div class="card text"><div><b>Level</b><span>Chill is slower and the CPU covers less court. Club is full pace against a steady CPU. Pro rarely misses.</span></div></div>
+      <div class="card text"><div><b>Zen</b><span>Clears the screen: no scoreboard, hints, timing ring or landing X, just the pause button. The score goes up on the billboard, with calm music and real court sounds.</span></div></div>
+      <div class="card text web-only"><div><b>Full screen</b><span>The game fills the screen when a match starts. If Safari on iPad stops the match with a "typing while in full screen" warning, switch it off. On iPhone and iPad, Add to Home Screen plays full screen anyway.</span></div></div>
+      <details class="card">
+        <summary>VR with a Cardboard headset</summary>
+        <ol class="steps">
+          <li>In Settings, pick VR under Camera, start a match and put the phone in the headset. The white line down the middle lines up with the headset's divider.</li>
+          <li>Look down the court and press the button to start.</li>
+          <li>Watch the ball and press as it arrives: where the shot goes is picked for you, and automove does the running. A small ring on the ball closes as it comes.</li>
+          <li>For a power shot, press early, hold, and let go as the ball arrives. The ring in the middle of your view fills when the hold is long enough.</li>
+          <li>If you look away, an arrow points to the ball, and two ticks then a high beep count you down.</li>
+          <li>On your serve, press to toss, then press again at the top.</li>
+          <li>Look down at your feet and press to pause. Turn to Exit VR on the left, Resume ahead or Quit on the right, and press. The end of a match works the same way.</li>
+          <li>Look straight up and press to recentre, then look down the court and press again.</li>
+          <li>For full swipe control, tap Link a phone under Swipe pad in Settings. On a second phone open Settings, pick VR, tap Be the pad and enter the code. Swipe on it as on the game screen; tap it with two fingers to recentre.</li>
+          <li>Not in a headset? Hold the phone upright and tap Exit VR. On a laptop the mouse is your head and the space bar is the button.</li>
+        </ol>
+      </details>
+    </div>
+    <div class="btns sticky">
+      <button class="btn primary" id="helpTut">Try the tutorial</button>
+      <button class="btn" id="helpClose">Back</button>
     </div>
   </div>
 </div>
@@ -433,12 +559,17 @@
 </div>
 <div class="overlay" id="lobby" hidden>
   <div class="sheet">
-    <div class="title"><b>Online</b></div>
-    <p class="lede" id="lobbyText"></p>
+    <div class="title"><b id="lobbyTitle">Online</b></div>
+    <p class="lede" id="lobbyText" role="status"></p>
     <div class="room-code" id="roomCode"></div>
     <input id="codeInput" maxlength="4" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="CODE" aria-label="Room code">
+    <div class="seg" id="friendBtns" hidden>
+      <button id="hostBtn">Create room<small>Get a code to send</small></button>
+      <button id="joinBtn">Join room<small>Enter a friend's code</small></button>
+    </div>
     <div class="btns">
       <button class="btn primary" id="lobbyGo">Join</button>
+      <button class="btn primary" id="lobbyRetry" hidden>Try again</button>
       <button class="btn" id="lobbyCancel">Cancel</button>
     </div>
   </div>
@@ -446,16 +577,20 @@
 
 <div class="overlay" id="pauseMenu" hidden>
   <div class="sheet">
-    <div class="title"><b>Paused</b></div>
+    <div class="title"><b id="pauseTitle">Paused</b></div>
+    <p class="lede" id="pauseScore"></p>
+    <p class="lede" id="pauseNote" hidden>An online match can't pause: play carries on behind this menu.</p>
+    <div class="seg toggles">
+      <button data-auto aria-pressed="true">Automove</button>
+      <button data-music aria-pressed="true">Music</button>
+      <button data-sfx aria-pressed="true">Sound</button>
+      <button data-zen aria-pressed="false">Zen</button>
+      <button data-full aria-pressed="true">Full screen</button>
+      <button id="camPause">Camera<small>Chase</small></button>
+    </div>
     <div class="btns">
       <button class="btn primary" id="resume">Resume</button>
-      <button class="btn" id="autoPause" aria-pressed="true">Automove on</button>
-      <button class="btn" id="musicPause" aria-pressed="true">Music on</button>
-      <button class="btn" id="camPause">Camera: chase</button>
-      <button class="btn" id="zenPause" aria-pressed="false">Zen mode off</button>
-      <button class="btn" id="fullPause" aria-pressed="true">Full screen on</button>
-      <button class="btn" id="mute" aria-pressed="false">Sound on</button>
-      <button class="btn" id="quit">Quit match</button>
+      <button class="btn" id="quit">Quit to menu<small id="quitNote">This match is saved</small></button>
     </div>
   </div>
 </div>
@@ -464,10 +599,11 @@
   <div class="sheet">
     <div class="title"><b id="endTitle">Set</b></div>
     <div class="end-score" id="endScore"></div>
+    <dl class="end-stats" id="endStats" hidden></dl>
     <p class="lede" id="endNote" hidden></p>
     <div class="btns">
       <button class="btn primary" id="rematch">Rematch</button>
-      <button class="btn" id="toMenu">Change player</button>
+      <button class="btn" id="toMenu">Menu</button>
     </div>
   </div>
 </div>

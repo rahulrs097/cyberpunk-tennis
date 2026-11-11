@@ -15,7 +15,8 @@
   let profile = { name: '', pic: '' };
   try { profile = CT.Net.cleanProfile(JSON.parse(localStorage.getItem('ct.profile'))); } catch (e) { /* storage is optional */ }
   // Chill / Club / Pro: ball speed and how well the CPU plays (CT.CPU_LEVELS)
-  let level = 'club';
+  // (a new player starts on Chill, as the tutorial advises)
+  let level = 'chill';
   try { const v = localStorage.getItem('ct.level'); if (CT.CPU_LEVELS[v]) level = v; } catch (e) { /* storage is optional */ }
   let tut = null;      // the tutorial in progress: { i: lesson index, done: reps passed }
   const SERVE_CLOCK = 20;   // seconds to start a serve in an online match
@@ -56,6 +57,19 @@
   // match in progress (none in the tutorial)
   const ach = CT.loadAchievements();
   let tracker = null;
+  // New players get a "start here" card for the tutorial on the menu, a
+  // ghost finger on their serves and a tip between points. That stops once
+  // the tutorial is done or a match is finished ('ct.seen').
+  let seen = false;
+  try { seen = localStorage.getItem('ct.seen') === '1' || CT.achievementStats(ach, 'all').played > 0 || CT.loadHistory().length > 0; } catch (e) { /* storage is optional */ }
+  function markSeen() {
+    seen = true;
+    try { localStorage.setItem('ct.seen', '1'); } catch (e) { /* storage is optional */ }
+  }
+  const TIPS = ['Swipe down to slice', 'A short swipe is a drop shot', 'Swipe towards a corner to aim there', 'A slow, long swipe up is a lob',
+    'Flick fast for pace. Too hard and it flies long', 'Tap the court to run there yourself', 'At the net, swipe before the ball bounces',
+    'The bar under your name is stamina: running and power shots drain it'];
+  let tipNo = 0;
   // A match vs the CPU is saved after every point (localStorage 'ct.saved':
   // the players, level, score, legs and achievement progress), so leaving
   // the page or reloading it leaves a Resume button on the menu. It carries
@@ -135,11 +149,14 @@
       return;
     }
     tut = null;
+    markSeen();
     // the practice point's match stops here, as a finished match would:
     // otherwise the CPU could go on serving behind this screen
     game.phase = 'matchOver';
     $('endTitle').textContent = 'Tutorial done';
     $('endScore').textContent = '';
+    $('endStats').hidden = true;
+    $('end').classList.remove('lost');
     $('endNote').textContent = 'One more thing: running and power shots wear down the bar under your name. When it runs low you get slower and your timing gets harder. Start on Chill.';
     $('endNote').hidden = false;
     $('rematch').textContent = 'Play vs CPU';
@@ -150,6 +167,7 @@
 
   // ---------------- sound ----------------
   let audio = null, master = null, muted = false;
+  try { muted = localStorage.getItem('ct.sfx') === '0'; } catch (e) { /* storage is optional */ }
   const SFX_GAIN = 2.6;   // sound effects level
   function ensureAudio() {
     if (audio) return;
@@ -324,14 +342,34 @@
     msgTimer = 1.6;
   }
 
-  function showShot(text) {
+  // What you just hit, as a row of chips. A part is a string, or
+  // { text, cls: 'good' | 'bad', ms: timing error for the early/late meter }.
+  const METER_MS = 120;   // the meter's full width is this far early to this far late
+  function showShot(parts) {
     const el = $('shot');
-    el.textContent = text;
+    el.textContent = '';
+    for (const part of parts) {
+      if (!part) continue;
+      const chip = document.createElement('span');
+      if (part.cls) chip.className = part.cls;
+      if (typeof part.ms === 'number') {
+        const m = document.createElement('span'), tick = document.createElement('i');
+        m.className = 'meter';
+        tick.style.left = (50 + 50 * CT.clamp(part.ms / METER_MS, -1, 1)) + '%';
+        m.append(tick);
+        m.style.cssText = 'border:0;padding:0';
+        chip.append(m);
+      }
+      chip.append(part.text || part);
+      el.append(chip);
+    }
     el.hidden = false;
     shotTimer = 3.2;
   }
 
-  function setHint(text) { $('hint').textContent = text; }
+  function setHint(text, tip) { const el = $('hint'); el.textContent = text; el.classList.toggle('tip', !!tip); }
+  // the ghost finger: 'tap', 'swipe' or nothing
+  function setGhost(kind) { const el = $('ghost'); el.hidden = !kind; el.classList.toggle('tap', kind === 'tap'); }
 
   // The HUD is refreshed every frame, but only what changed is written: a
   // DOM write each frame makes the browser restyle the HUD each frame too.
@@ -362,7 +400,9 @@
       put(row, 'stam', p.stamina.toFixed(1) + '%', (v) => { q('.stam-fill').style.width = v; });
       put(row, 'tired', p.stamina < 35, (v) => row.classList.toggle('tired', v));
       put(row, 'cap', p.cap.toFixed(1) + '%', (v) => { q('.stam-cap').style.left = v; });
-      put(row, 'pc', p.ch.colors.glow, (v) => row.style.setProperty('--pc', v));
+      // (two of the same character: the other one's row turns gold, to tell them apart)
+      const twin = side !== me && p.ch.id === game.players[me].ch.id;
+      put(row, 'pc', twin ? '#ffc23d' : p.ch.colors.glow, (v) => row.style.setProperty('--pc', v));
     }
     let call = CT.matchCallout(m) || (m.firstServe ? '' : 'Second serve');
     // the serve clock shows for its last 10 seconds
@@ -399,16 +439,21 @@
 
   function hintForState() {
     if (!game) return;
-    if (tut) { setHint(LESSONS[tut.i].hint); return; }
     const humanServing = game.server === me;
+    // new players, and the tutorial's serve lesson, get the gesture shown
+    const coach = (!seen && !tut) || (tut && LESSONS[tut.i].serve);
+    setGhost(coach && humanServing && game.control[me] === 'human' ? (game.phase === 'preServe' ? 'tap' : game.phase === 'toss' ? 'swipe' : null) : null);
+    if (tut) { setHint(LESSONS[tut.i].hint); return; }
     if (game.phase === 'preServe') setHint(humanServing ? 'Tap to toss the ball' : autoMove ? 'Get ready to return' : 'Tap the court to move into position');
-    else if (game.phase === 'toss' && humanServing) setHint('Swipe as the ball tops out in the ring');
-    else if (game.phase === 'rally') setHint(autoMove ? 'Swipe as the ring closes · Tap to reposition' : 'Tap to move · Swipe as the ring closes');
+    else if (game.phase === 'toss' && humanServing) setHint('Swipe up as the ball tops out in the ring');
+    else if (game.phase === 'rally') setHint(autoMove ? 'Swipe as the ring closes. Tap to reposition' : 'Tap to move. Swipe as the ring closes');
   }
 
   // ---------------- game events ----------------
   // the sky billboard's word for a point, by how it ended
   const BOARD_WORDS = { Ace: ['YEAH!!', '#e4ff4a'], Winner: ['OMG!!', '#e4ff4a'], Out: ['OOPS', '#ff3f6c'], Net: ['OOPS', '#ff3f6c'], 'Double fault': ['OOPS', '#ff3f6c'] };
+  // an ace or winner hit past you isn't cheered
+  const BOARD_BEATEN = ['OUCH', '#ff3fb4'];
   const LONG_RALLY = 8;   // shots in a rally that get a WOW
   let rallyShots = 0;
   // Close calls go up on the billboard as a close-up of the ball's mark
@@ -425,11 +470,13 @@
   let achQueue = [], achFreeAt = 0, achNew = [];
   // what an animation shows, by achievement: Rocket Serve's speed
   const achData = {};
+  let lastTotals = null;   // the finished match's stats, for the end screen
   function track(type, d) {
     if (!tracker || (type !== 'point' && type !== 'hit' && type !== 'parked')) return;
     const res = tracker[type](d);
     const fresh = CT.recordAchievements(ach, res, tracker.mode);
     achNew.push(...fresh);
+    if (res.over) lastTotals = res.over.totals;
     if (res.over && game) {
       CT.addHistory({ at: Date.now(), mode: tracker.mode, me: game.players[me].ch.id, opp: game.players[1 - me].ch.id,
         won: res.over.won, games: res.over.games, tiebreak: res.over.tiebreak, totals: res.over.totals });
@@ -466,7 +513,7 @@
         const timing = d.perfect ? 'Perfect timing'
           : d.note && Math.abs(d.errMs) < 15 ? d.note
           : (d.errMs > 0 ? 'Late ' : 'Early ') + Math.abs(d.errMs) + ' ms' + (d.note ? ' · ' + d.note : '');
-        showShot([label, timing, d.overhit && 'Overhit', d.kmh + ' km/h', d.spin, d.curve].filter(Boolean).join(' · '));
+        showShot([label, { text: timing, ms: d.perfect ? 0 : d.errMs, cls: d.perfect ? 'good' : '' }, d.overhit && { text: 'Overhit', cls: 'bad' }, d.kmh + ' km/h', d.spin, d.curve]);
         try { navigator.vibrate && navigator.vibrate(18); } catch (e) { /* optional */ }
       }
       hintForState();
@@ -480,7 +527,7 @@
     } else if (type === 'net') {
       if (zenOn()) realSfx('net', d); else blip(90, 0.12, 'sawtooth', 0.05, 0, soundAt(d));
     } else if (type === 'whiff') {
-      if (d.side === me) showShot(d.reason);
+      if (d.side === me) showShot([{ text: d.reason, cls: 'bad' }]);
     } else if (type === 'fault') {
       if (boardScore()) CT.showBillboard(renderer, d.text === 'Net' || d.text === 'Serve clock' ? d.text.toUpperCase() : 'FAULT', '#ffc23d', 1.6);
       showMsg(d.text === 'Net' || d.text === 'Serve clock' ? d.text : 'Fault', 'Second serve', 'warn');
@@ -492,7 +539,10 @@
       if (d.result === 'game') sub = names[d.winner] + ' takes the game';
       if (d.result === 'set') sub = names[d.winner] + ' wins the set';
       showMsg(d.text, sub, youWon ? 'good' : 'bad');
-      const word = BOARD_WORDS[d.text];
+      const word = !youWon && (d.text === 'Ace' || d.text === 'Winner') ? BOARD_BEATEN : BOARD_WORDS[d.text];
+      // a tip while the next point is set up, for a new player's first points
+      setGhost(null);
+      if (!seen && !net && d.result !== 'set' && tipNo < TIPS.length * 2) setHint(TIPS[tipNo++ % TIPS.length], true);
       if (word && !lineCallShown) CT.showBillboard(renderer, word[0], word[1], 2.6);
       if (zenOn()) realSfx(youWon ? 'won' : 'lost', d); else blip(youWon ? 520 : 200, 0.25, 'triangle', 0.08, youWon ? 780 : 120);
       updateHud();
@@ -572,8 +622,22 @@
     const m = game.match;
     const w = game.players[winner].ch.name;
     const score = `${m.games[winner]}–${m.games[1 - winner]}` + (m.tiebreak ? ` (${m.points[winner]}–${m.points[1 - winner]})` : '');
+    markSeen();
+    setGhost(null); setHint('');
     $('endTitle').textContent = winner === me ? 'You win the set' : `${w} wins the set`;
+    $('end').classList.toggle('lost', winner !== me);
     $('endScore').textContent = score;
+    // a line of your numbers from the match
+    const t = lastTotals, dl = $('endStats');
+    dl.textContent = '';
+    dl.hidden = !t;
+    if (t) {
+      for (const [k, v] of [['Winners', t.winners || 0], ['Aces', t.aces || 0], ['Rally', t.longestRally || '–'], ['Serve', t.fastestServe ? t.fastestServe : '–']]) {
+        const box = document.createElement('div'), dt = document.createElement('dt'), dd = document.createElement('dd');
+        dt.textContent = k; dd.textContent = v;
+        box.append(dt, dd); dl.append(box);
+      }
+    }
     const fresh = achNew.map((id) => CT.achievement(id).name);
     $('endNote').textContent = fresh.length ? 'Unlocked: ' + fresh.join(', ') : '';
     $('endNote').hidden = !fresh.length;
@@ -771,20 +835,19 @@
     if (it.id === 'resume') setPaused(false);
     else if (it.id === 'rematch') startMatch();
     else if (it.id === 'quit') { leaveFullscreen(); showMenu(); }
-    else if (vr.end) {
-      // to the normal end screen
-      exitVR();
-      setView('chase');
-      layout();
-      leaveFullscreen();
-    } else {
-      // back to the normal screen, still paused, to carry on when ready
-      exitVR();
-      setView('chase');
-      layout();
-      goFullscreen('portrait');
-      setPaused(true);
-    }
+    else leaveVR();
+  }
+  // Out of the headset view and back to the normal screen: the headset
+  // menu's Exit VR, or the Exit VR button a phone held upright shows.
+  function leaveVR() {
+    if (!vr) return;
+    const over = !!vr.end;
+    exitVR();
+    setView('chase');
+    layout();
+    // to the normal end screen, or still paused, to carry on when ready
+    if (over) leaveFullscreen();
+    else { goFullscreen('portrait'); setPaused(true); }
   }
 
   // Straight ahead becomes the way you face: at once (the pad's Recentre,
@@ -831,6 +894,7 @@
     CT.VR.stopHead(vr.head);
     CT.VR.keepAwake(false);
     vr = null;
+    $('vrExit').hidden = true;
     document.body.classList.remove('vr');
     CT.setVR(renderer, null);
     if (game && game.control[me] === 'human') CT.setAutoMove(game, me, autoMove);
@@ -855,10 +919,13 @@
     }
     vr.lastT = hit && hit.reach ? hit.t : null;
     v.prompt = ''; v.sub = '';
+    // held upright it isn't in a headset, so a button on the screen gets you out
+    const upright = window.innerHeight > window.innerWidth;
+    if ($('vrExit').hidden === upright) $('vrExit').hidden = !upright;
     v.menu = vr.end ? { items: VR_END_MENU, sel: vrMenuChoice().id } : paused ? { items: VR_MENU, sel: vrMenuChoice().id } : null;
     if (vr.end) { v.prompt = vr.end.title + ' ' + vr.end.score; v.sub = (vr.end.note ? vr.end.note + ' · ' : '') + 'Turn to choose, press to pick'; }
     else if (paused) { v.prompt = 'PAUSED'; v.sub = 'Turn to choose, press to pick'; }
-    else if (window.innerHeight > window.innerWidth) { v.prompt = 'TURN SIDEWAYS'; v.sub = 'Hold the phone in landscape'; }
+    else if (upright) { v.prompt = 'TURN SIDEWAYS'; v.sub = 'For a VR headset. No headset? Exit VR'; }
     else if (vr.wait) { v.prompt = 'LOOK DOWN THE COURT'; v.sub = pad && pad.linked ? 'Tap the pad to play' : 'Press the button to play'; }
     else if (pose.pitch < CT.VR.PAUSE_PITCH) { v.prompt = 'PAUSE?'; v.sub = 'Press to pause'; }
     else if (pose.pitch > CT.VR.RECENTRE_PITCH) { v.prompt = 'RECENTRE?'; v.sub = 'Press, then look down the court'; }
@@ -900,7 +967,9 @@
     p.link = CT.Net.connect(code, 'host', (m) => onPadMsg(p, m), (st) => {
       if (pad !== p || p.linked || st === 'open') return;
       if (st === 'full') { unlinkPad(); hostPad(); return; }
-      lobby("Couldn't reach the online server. Check your connection and try again.", '', false);
+      unlinkPad();
+      lobbyMode = 'pad';
+      lobby(NO_SERVER, '', false, { err: true, retry: hostPad });
     });
     p.timer = setInterval(() => {
       if (pad !== p || !p.linked) return;
@@ -922,7 +991,7 @@
       if (!p.linked) {
         p.linked = true;
         padStatus();
-        if (lobbyMode === 'pad') { lobbyMode = null; $('lobby').hidden = true; $('menu').hidden = false; }
+        if (lobbyMode === 'pad') { lobbyMode = null; $('lobby').hidden = true; $('menu').hidden = false; $('settings').hidden = false; }
         showMsg('Swipe pad linked', 'Swipe on it to hit', 'neutral');
       }
       return;
@@ -961,20 +1030,20 @@
       s.lastHeard = performance.now();
       if (m.t === 'padok' && !s.linked) { s.linked = true; showPad(); }
       else if (m.t === 'ping') s.link.send({ t: 'pong', at: m.at });
-      else if (m.t === 'bye') { leavePad(); showMenu(); showMsg('Headset phone unlinked', '', 'warn'); }
+      else if (m.t === 'bye') { leavePad(); showMenu('The headset phone unlinked the pad.'); }
     }, (st) => {
       if (padSide !== s || s.linked || st === 'open') return;
-      lobby(st === 'full' ? 'Room ' + code + ' already has a pad.' : "Couldn't reach the online server. Check your connection and try again.", '', true);
+      lobby(st === 'full' ? 'Room ' + code + ' already has a pad.' : NO_SERVER, '', true, { err: true });
     });
     lobbyMode = 'pad';
-    lobby('Linking to room ' + code + '…', '', false);
+    lobby('Linking to room ' + code + '…', '', false, { busy: true });
     const t0 = performance.now();
     s.timer = setInterval(() => {
       if (padSide !== s) return;
       const now = performance.now();
       if (!s.linked) {
         s.link.send({ t: 'hello' });
-        if (now - t0 > 8000) lobby('No answer from room ' + code + '. Check the code on the headset phone.', '', true);
+        if (now - t0 > 8000) lobby('No answer from room ' + code + '. Check the code on the headset phone.', '', true, { err: true });
       } else $('padLost').hidden = now - s.lastHeard < PAD_LOST;
     }, 500);
     s.link.send({ t: 'hello' });
@@ -1055,15 +1124,30 @@
   // gets the match state back about 20 times a second plus every game event.
   function send(m) { if (net) net.link.send(m); }
 
-  function lobby(text, code, joining) {
-    $('lobbyText').textContent = text;
+  // The lobby sheet. opts: err (the text is an error), busy (waiting: a
+  // spinner), retry (a function for a Try again button), friend (offer
+  // Create room and Join room).
+  let lobbyRetry = null;
+  function lobby(text, code, joining, opts) {
+    const o = opts || {};
+    const el = $('lobbyText');
+    el.textContent = text;
+    el.classList.toggle('err', !!o.err);
+    el.classList.toggle('busy', !!o.busy);
+    $('lobbyTitle').textContent = lobbyMode === 'pad' ? 'Swipe pad' : o.friend ? 'Play a friend' : 'Online';
     $('roomCode').textContent = code || '';
     $('roomCode').hidden = !code;
     $('codeInput').hidden = !joining;
+    $('codeInput').classList.remove('bad');
     $('lobbyGo').hidden = !joining;
+    $('friendBtns').hidden = !o.friend;
+    lobbyRetry = o.retry || null;
+    $('lobbyRetry').hidden = !lobbyRetry;
     $('lobby').hidden = false;
     $('menu').hidden = true;
+    $('settings').hidden = true;
   }
+  const NO_SERVER = "Couldn't reach the online server. Check your connection and try again.";
 
   function leaveOnline(tellOther) {
     stopQuick();
@@ -1081,7 +1165,7 @@
   function onNet(m) {
     if (!net) return;
     net.lastHeard = performance.now();
-    if (m.t === 'bye') { retireMatch('opp'); leaveOnline(false); showMenu(); showMsg('Opponent left', 'Back to the menu', 'warn'); return; }
+    if (m.t === 'bye') { retireMatch('opp'); leaveOnline(false); showMenu('Your opponent left the match.'); return; }
     if (m.t === 'ping') { send({ t: 'pong', at: m.at }); return; }
     if (m.t === 'pong') { if (net.lag && Number.isFinite(m.at)) net.lag.answered(m.at, performance.now()); return; }
     if (net.role === 'host') {
@@ -1202,10 +1286,11 @@
     if (status === 'full') {
       // (a host whose new code is somehow taken just picks another)
       if (net.role === 'host') hostRoom();
-      else lobby('Room ' + net.code + ' already has two players.', '', true);
+      else lobby('Room ' + net.code + ' already has two players.', '', true, { err: true });
       return;
     }
-    lobby("Couldn't reach the online server. Check your connection and try again.", '', net.role === 'guest');
+    const code = net.code;
+    lobby(NO_SERVER, '', false, { err: true, retry: net.role === 'guest' ? () => joinRoom(code) : () => hostRoom() });
   }
 
   // A quick match comes with a room code from the relay's queue (quickCode)
@@ -1219,7 +1304,7 @@
     const n = net;
     net.link = CT.Net.connect(code, 'host', onNet, (st) => onLink(n, st));
     if (!quickCode) { lobby('Send this code to a friend. The match starts as soon as they join.', code, false); return; }
-    lobby('Found a player. Starting…', '', false);
+    lobby('Found a player. Starting…', '', false, { busy: true });
     // they never turned up: back in the queue
     net.timer = setTimeout(() => { if (net === n && !n.started) quickMatch(); }, QUICK_WAIT);
   }
@@ -1231,14 +1316,14 @@
     net = { role: 'guest', code, quick: !!quick, started: false, lastHeard: performance.now() };
     const n = net;
     net.link = CT.Net.connect(code, 'guest', onNet, (st) => onLink(n, st));
-    lobby(quick ? 'Found a player. Starting…' : 'Connecting to room ' + code + '…', '', false);
+    lobby(quick ? 'Found a player. Starting…' : 'Connecting to room ' + code + '…', '', false, { busy: true });
     // keep knocking until the host answers
     const t0 = performance.now();
     const hello = () => {
       send({ t: 'hello', char: humanChar, autoMove, profile: CT.Net.cleanProfile(profile) });
       if (performance.now() - t0 < (quick ? QUICK_WAIT : 8000)) return;
       if (quick) quickMatch();
-      else lobby('No answer from room ' + code + '. Check the code, and that your friend is still on the room screen.', '', true);
+      else { clearInterval(net.timer); lobby('No answer from room ' + code + '. Check the code, and that your friend is still on the room screen.', '', true, { err: true }); $('codeInput').value = code; }
     };
     hello();
     net.timer = setInterval(hello, 500);
@@ -1252,14 +1337,14 @@
     ensureAudio();
     leaveOnline(true);
     lobbyMode = null;
-    lobby('Looking for a player…', '', false);
+    lobby('Looking for a player…', '', false, { busy: true });
     const q = (quick = CT.Net.seekMatch((m) => {
       if (quick !== q) return;
       quick = null;
       if (m.role === 'host') hostRoom(m.code); else joinRoom(m.code, true);
     }, (st) => {
       if (quick !== q) return;
-      lobby(st === 'error' ? "Couldn't reach the online server. Still trying…" : 'Looking for a player…', '', false);
+      lobby(st === 'error' ? "Couldn't reach the online server. Still trying…" : 'Looking for a player…', '', false, { busy: true, err: st === 'error' });
     }));
   }
 
@@ -1316,7 +1401,17 @@
   }
 
   // A CPU-vs-CPU rally plays behind the menu.
-  function showMenu() {
+  // note: a line to show on the menu, saying why you're back on it
+  function showMenu(note) {
+    // (only ever a line of text: a tap event handed in by mistake shows nothing)
+    if (typeof note !== 'string') note = '';
+    $('menuNote').textContent = note;
+    $('menuNote').hidden = !note;
+    $('tutBtn').hidden = seen;
+    // nothing from the match is left showing through the menu
+    $('msg').hidden = true; msgTimer = 0;
+    $('shot').hidden = true; shotTimer = 0;
+    setHint(''); setGhost(null);
     exitVR();
     showFull(fullOn);
     if (net) retireMatch('me');
@@ -1430,7 +1525,7 @@
       if (!held) CT.updateGame(game, dt);
       if (net && net.started) {
         if (net.role === 'host' && now - net.sendT > 50) { net.sendT = now; send({ t: 'st', s: CT.snapshot(game), held }); }
-        if (now - net.lastHeard > 6000) { retireMatch('lost'); leaveOnline(false); showMenu(); showMsg('Connection lost', 'Back to the menu', 'warn'); }
+        if (now - net.lastHeard > 6000) { retireMatch('lost'); leaveOnline(false); showMenu('Connection to the other player was lost.'); }
       }
       updateHud();
       if (msgTimer > 0) { msgTimer -= dt; if (msgTimer <= 0) $('msg').hidden = true; }
@@ -1488,9 +1583,6 @@
     autoMove = on;
     try { localStorage.setItem('ct.autoMove', on ? '1' : '0'); } catch (e) { /* storage is optional */ }
     document.querySelectorAll('[data-auto]').forEach((b) => b.setAttribute('aria-pressed', String(on)));
-    const pb = $('autoPause');
-    pb.setAttribute('aria-pressed', String(on));
-    pb.textContent = on ? 'Automove on' : 'Automove off';
     if (game && game.control[me] === 'human') CT.setAutoMove(game, me, on);
     if (isGuest()) send({ t: 'auto', on });
     hintForState();
@@ -1500,9 +1592,6 @@
     musicOn = on;
     try { localStorage.setItem('ct.music', on ? '1' : '0'); } catch (e) { /* storage is optional */ }
     document.querySelectorAll('[data-music]').forEach((b) => b.setAttribute('aria-pressed', String(on)));
-    const pb = $('musicPause');
-    pb.setAttribute('aria-pressed', String(on));
-    pb.textContent = on ? 'Music on' : 'Music off';
     ensureAudio();
     CT.Music.setOn(on);
   }
@@ -1515,9 +1604,6 @@
   // they show the setting.
   function showFull(on) {
     document.querySelectorAll('[data-full]').forEach((b) => b.setAttribute('aria-pressed', String(on)));
-    const pb = $('fullPause');
-    pb.setAttribute('aria-pressed', String(on));
-    pb.textContent = on ? 'Full screen on' : 'Full screen off';
   }
 
   // The game as an app: a service worker keeps it playable offline (sw.js),
@@ -1559,9 +1645,6 @@
     zen = on;
     try { localStorage.setItem('ct.zen', on ? '1' : '0'); } catch (e) { /* storage is optional */ }
     document.querySelectorAll('[data-zen]').forEach((b) => b.setAttribute('aria-pressed', String(on)));
-    const pb = $('zenPause');
-    pb.setAttribute('aria-pressed', String(on));
-    pb.textContent = on ? 'Zen mode on' : 'Zen mode off';
     applyZen();
   }
 
@@ -1575,12 +1658,30 @@
     cb.textContent = v === 'first' ? '3P' : '1P';
     cb.setAttribute('aria-label', v === 'first' ? 'Switch to chase view' : 'Switch to first-person view');
     // the pause menu's camera switch, so zen (no 1P/3P button) can still change view
-    $('camPause').textContent = v === 'first' ? 'Camera: first person' : 'Camera: chase';
+    $('camPause').querySelector('small').textContent = v === 'first' ? 'First person' : 'Chase';
   }
 
+  function setSfx(on) {
+    muted = !on;
+    try { localStorage.setItem('ct.sfx', on ? '1' : '0'); } catch (e) { /* storage is optional */ }
+    document.querySelectorAll('[data-sfx]').forEach((b) => b.setAttribute('aria-pressed', String(on)));
+  }
+
+  let quitArmed = 0;   // when Quit was first tapped in an online match
   function setPaused(v) {
     if (!game || game.phase === 'matchOver') return;
     paused = v;
+    if (v) {
+      // the score, and what Quit will do
+      const m = game.match, o = 1 - me, name = (side) => (side === me ? 'You' : (net && net.opp && net.opp.name) || game.players[side].ch.name);
+      const pts = m.tiebreak || m.points[0] + m.points[1] ? ' · ' + CT.pointLabel(m, me) + '–' + CT.pointLabel(m, o) : '';
+      $('pauseScore').textContent = tut ? `Lesson ${tut.i + 1} of ${LESSONS.length}: ${LESSONS[tut.i].title}` : `${name(me)} ${m.games[me]}–${m.games[o]} ${name(o)}${pts}`;
+      $('pauseTitle').textContent = net ? 'Menu' : 'Paused';
+      $('pauseNote').hidden = !net;
+      quitArmed = 0;
+      $('quit').firstChild.textContent = tut ? 'Quit tutorial' : net ? 'Leave match' : 'Quit to menu';
+      $('quitNote').textContent = tut ? '' : net ? 'This ends the match for both of you' : canSave ? 'This match is saved' : '';
+    }
     $('pauseMenu').hidden = !v;
     // back in the headset: look down the court and press to carry on
     if (vr) { vr.press = null; if (!v) vr.wait = true; }
@@ -1719,6 +1820,8 @@
     $('histEmpty').hidden = rows.length > 0;
   }
 
+  const LEVEL_NOTES = { chill: 'Slower ball, and the CPU covers less court.', club: 'Full pace against a steady CPU.', pro: 'Full pace against a CPU that rarely misses.' };
+
   function init() {
     canvas.addEventListener('pointerdown', onDown, { passive: false });
     canvas.addEventListener('pointermove', onMove, { passive: false });
@@ -1739,31 +1842,31 @@
       level = id;
       try { localStorage.setItem('ct.level', id); } catch (e) { /* storage is optional */ }
       document.querySelectorAll('[data-level]').forEach((x) => x.setAttribute('aria-pressed', String(x.dataset.level === id)));
+      $('levelNote').textContent = LEVEL_NOTES[id] + ' One set, tiebreak at 6–6.';
     };
     document.querySelectorAll('[data-level]').forEach((b) => b.addEventListener('click', () => pickLevel(b.dataset.level)));
+    if (installed) document.body.classList.add('installed');
     pickLevel(level);
     document.querySelectorAll('[data-auto]').forEach((b) => b.addEventListener('click', () => setAutoMove(!autoMove)));
-    $('autoPause').addEventListener('click', () => setAutoMove(!autoMove));
     setAutoMove(autoMove);
     document.querySelectorAll('[data-music]').forEach((b) => b.addEventListener('click', () => setMusic(!musicOn)));
-    $('musicPause').addEventListener('click', () => setMusic(!musicOn));
     document.querySelectorAll('[data-music]').forEach((b) => b.setAttribute('aria-pressed', String(musicOn)));
-    $('musicPause').textContent = musicOn ? 'Music on' : 'Music off';
+    document.querySelectorAll('[data-sfx]').forEach((b) => b.addEventListener('click', () => { ensureAudio(); setSfx(muted); }));
+    setSfx(!muted);
     document.querySelectorAll('[data-zen]').forEach((b) => b.addEventListener('click', () => setZen(!zen)));
-    $('zenPause').addEventListener('click', () => setZen(!zen));
     $('camPause').addEventListener('click', () => setView(view === 'first' ? 'chase' : 'first'));
-    document.querySelectorAll('[data-full]').forEach((b) => b.addEventListener('click', () => setFull(!fullOn)));
-    // the setting does nothing where pages can't go full screen (iPhone)
-    $('fullPause').addEventListener('click', () => setFull($('fullPause').getAttribute('aria-pressed') !== 'true'));
+    // (in a match the button shows whether the page really is full screen, so it flips that)
+    document.querySelectorAll('[data-full]').forEach((b) => b.addEventListener('click', () => setFull(b.getAttribute('aria-pressed') !== 'true')));
     const onFullChange = () => showFull(inMatch() ? isFullscreen() : fullOn);
     document.addEventListener('fullscreenchange', onFullChange);
     document.addEventListener('webkitfullscreenchange', onFullChange);
-    $('fullBtn').hidden = $('fullPause').hidden = !canFull;
+    // the setting does nothing where pages can't go full screen (iPhone)
+    document.querySelectorAll('[data-full]').forEach((b) => { b.hidden = !canFull; });
     setupInstall();
     $('play').addEventListener('click', () => { ensureAudio(); startMatch(); });
     $('resumeMatch').addEventListener('click', () => { ensureAudio(); resumeMatch(); });
     $('rematch').addEventListener('click', startMatch);
-    $('toMenu').addEventListener('click', showMenu);
+    $('toMenu').addEventListener('click', () => showMenu());
     $('pauseBtn').addEventListener('click', () => setPaused(true));
     document.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', () => setView(b.dataset.view)));
     $('camBtn').addEventListener('click', () => setView(view === 'first' ? 'chase' : 'first'));
@@ -1786,8 +1889,24 @@
     document.addEventListener('click', () => { if (view === 'vr') CT.VR.askMotion(); }, true);
     $('resume').addEventListener('click', () => setPaused(false));
     // the match stays saved, so the menu offers to resume it
-    $('quit').addEventListener('click', () => { leaveFullscreen(); showMenu(); });
-    $('howBtn').addEventListener('click', () => { $('help').hidden = false; });
+    // Online it ends the other player's match too, so it takes a second tap.
+    $('quit').addEventListener('click', () => {
+      const now = performance.now();
+      if (net && now - quitArmed > 4000) {
+        quitArmed = now;
+        $('quit').firstChild.textContent = 'Tap again to leave';
+        return;
+      }
+      leaveFullscreen(); showMenu();
+    });
+    $('vrExit').addEventListener('click', leaveVR);
+    const helpTab = (id) => {
+      document.querySelectorAll('[data-help]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.help === id)));
+      document.querySelectorAll('[data-help-part]').forEach((el) => { el.hidden = el.dataset.helpPart !== id; });
+      $('help').scrollTop = 0;
+    };
+    document.querySelectorAll('[data-help]').forEach((b) => b.addEventListener('click', () => helpTab(b.dataset.help)));
+    $('howBtn').addEventListener('click', () => { helpTab('shots'); $('help').hidden = false; });
     $('tutBtn').addEventListener('click', () => { ensureAudio(); startTutorial(); });
     $('helpTut').addEventListener('click', () => { $('help').hidden = true; ensureAudio(); startTutorial(); });
     $('helpClose').addEventListener('click', () => { $('help').hidden = true; });
@@ -1801,6 +1920,8 @@
     $('histNewer').addEventListener('click', () => showHistory(statMode, histPage - 1));
     $('histOlder').addEventListener('click', () => showHistory(statMode, histPage + 1));
     $('quickBtn').addEventListener('click', quickMatch);
+    $('friendBtn').addEventListener('click', () => { leaveOnline(true); lobbyMode = null; lobby('Create a room and send its code to a friend, or join with the code they send you.', '', false, { friend: true }); });
+    $('lobbyRetry').addEventListener('click', () => { const f = lobbyRetry; if (f) f(); });
     showProfile();
     $('nameInput').addEventListener('input', () => {
       profile = { name: $('nameInput').value.slice(0, CT.Net.NAME_MAX), pic: profile.pic };
@@ -1814,8 +1935,15 @@
     $('joinBtn').addEventListener('click', () => { leaveOnline(true); lobbyMode = null; lobby('Enter the 4-letter code your friend sees.', '', true); $('codeInput').value = ''; $('codeInput').focus(); });
     $('lobbyGo').addEventListener('click', () => {
       const code = $('codeInput').value.toUpperCase().replace(/[^A-Z]/g, '');
-      if (code.length === 4) { if (lobbyMode === 'pad') joinPad(code); else joinRoom(code); }
+      if (code.length === 4) { if (lobbyMode === 'pad') joinPad(code); else joinRoom(code); return; }
+      // say why nothing happened
+      const el = $('lobbyText');
+      el.textContent = code.length ? `A code is 4 letters. That's ${code.length}.` : 'Type the 4-letter code first.';
+      el.classList.add('err'); el.classList.remove('busy');
+      $('codeInput').classList.add('bad');
+      $('codeInput').focus();
     });
+    $('codeInput').addEventListener('input', () => $('codeInput').classList.remove('bad'));
     $('codeInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('lobbyGo').click(); });
     $('lobbyCancel').addEventListener('click', () => {
       if (lobbyMode === 'pad') { if (pad && !pad.linked) unlinkPad(); leavePad(); lobbyMode = null; }
@@ -1835,11 +1963,6 @@
     padEl.addEventListener('pointercancel', () => { padTouch = null; padFingers = 0; padTwo = false; });
     padStatus();
     window.addEventListener('pagehide', () => { if (net) retireMatch('me'); leaveOnline(true); unlinkPad(); leavePad(); });
-    $('mute').addEventListener('click', () => {
-      muted = !muted;
-      $('mute').setAttribute('aria-pressed', String(muted));
-      $('mute').textContent = muted ? 'Sound off' : 'Sound on';
-    });
     pickChar('octopus');
     showMenu();
     setZen(zen);
