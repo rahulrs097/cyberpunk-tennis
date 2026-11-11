@@ -21,6 +21,8 @@
   const LOB_EASE = 1.5;
   const OVERHIT = 0.3;          // input.over from which the shot callout says Overhit
   const EASY = 0.6;             // share of the CPU's mistiming that an easy ball takes away
+  // A smart CPU only follows a ball in when it had this much more time (s) to set up for it.
+  const APPROACH_SLACK = 0.3;
   const CPU_EARLY = 0.45;       // share of the CPU's mistimed shots that are early rather than late
   // Auto-moving players still run at a ball landing this far (m) out, and let it go.
   const CHASE_OUT = 1;
@@ -921,7 +923,7 @@
     if (!goFor && !touch && !highDeep) tx *= T.safe * (1 + 0.1 * Math.min(0, mood));
     if (slack < 0.2 && !lob) tx *= 0.5;           // stretched: play it back through the middle
     // A short ball with time to spare: hit an approach and follow it in.
-    const approach = !lob && !touch && T.approach > 0 && fromNet < 11 && slack > 0.15 && b.pos.z > 0.6 &&
+    const approach = !lob && !touch && T.approach > 0 && fromNet < 11 && slack > 0.15 + APPROACH_SLACK * smart && b.pos.z > 0.6 &&
       Math.random() < T.approach;
     if (approach) { pace = Math.max(pace, 0.75); tx = (Math.random() < 0.5 ? weakSide : away) * edge * 0.85; spinDir = 1; depth = 1; }
     const curve = touch ? 0 : rand(-0.25, 0.25);
@@ -1456,7 +1458,7 @@
   // loose player beats Chill, an average one usually beats Club, and Pro
   // takes sharp timing.
   CT.CPU_LEVELS = {
-    chill: { timeScale: 0.75, err: 1.9, react: 0.36, cover: 0.1, speed: 0.8, pace: 0.75, depth: 0.75, attack: 0, smart: 0.15 },
+    chill: { timeScale: 0.75, err: 1.9, react: 0.36, cover: 0.1, speed: 0.8, pace: 1, depth: 1, attack: 0, smart: 0.15 },
     club: { timeScale: 0.88, err: 1.75, react: 0.26, cover: 0.2, speed: 0.9, pace: 0.86, depth: 0.88, attack: 0.15, smart: 0.55 },
     pro: { timeScale: 1, err: 1.3, react: 0.14, cover: 0.38, speed: 1, pace: 1, depth: 1, attack: 0.3, smart: 1 },
   };

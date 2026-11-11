@@ -437,6 +437,20 @@ test('pushing every ball back down the middle is no better than mixing it up aga
   assert.ok(games.push <= games.varied, JSON.stringify(games));
 });
 
+test('the two characters are a fair match as CPU opponents: each wins a fair share of the games at Club and Pro', () => {
+  for (const level of ['club', 'pro']) {
+    const games = { octopus: 0, philosopher: 0 };
+    for (let i = 0; i < 6; i++) {
+      const CT = loadEngine(300 + i);
+      const chars = i % 2 ? ['octopus', 'philosopher'] : ['philosopher', 'octopus'];
+      const r = playSet(CT, { p0: chars[0], p1: chars[1], control: ['cpu', 'cpu'], extra: levelOpts(CT, level) });
+      games[chars[0]] += r.games[0]; games[chars[1]] += r.games[1];
+    }
+    const share = games.octopus / (games.octopus + games.philosopher);
+    assert.ok(share > 0.4 && share < 0.6, level + ' ' + JSON.stringify(games));
+  }
+});
+
 // ---------------- tutorial ----------------
 function drill(CT, d, play) {
   const ends = [];
