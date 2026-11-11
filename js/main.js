@@ -1403,7 +1403,9 @@
   // A CPU-vs-CPU rally plays behind the menu.
   // note: a line to show on the menu, saying why you're back on it
   function showMenu(note) {
-    $('menuNote').textContent = note || '';
+    // (only ever a line of text: a tap event handed in by mistake shows nothing)
+    if (typeof note !== 'string') note = '';
+    $('menuNote').textContent = note;
     $('menuNote').hidden = !note;
     $('tutBtn').hidden = seen;
     // nothing from the match is left showing through the menu
@@ -1864,7 +1866,7 @@
     $('play').addEventListener('click', () => { ensureAudio(); startMatch(); });
     $('resumeMatch').addEventListener('click', () => { ensureAudio(); resumeMatch(); });
     $('rematch').addEventListener('click', startMatch);
-    $('toMenu').addEventListener('click', showMenu);
+    $('toMenu').addEventListener('click', () => showMenu());
     $('pauseBtn').addEventListener('click', () => setPaused(true));
     document.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', () => setView(b.dataset.view)));
     $('camBtn').addEventListener('click', () => setView(view === 'first' ? 'chase' : 'first'));
