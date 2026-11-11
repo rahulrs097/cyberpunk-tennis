@@ -162,19 +162,66 @@
     CT.Music.setOn(musicOn);
     CT.Music.start(audio, master);
   }
-  function blip(freq, dur, type, gain, slide) {
+  function blip(freq, dur, type, gain, slide, at) {
     if (!audio || muted) return;
     try {
       const t = audio.currentTime;
+      const s = placeAt(t, at);
       const o = audio.createOscillator(), gn = audio.createGain();
       o.type = type || 'square';
       o.frequency.setValueAtTime(freq, t);
       if (slide) o.frequency.exponentialRampToValueAtTime(slide, t + dur);
-      gn.gain.setValueAtTime((gain || 0.08) * SFX_GAIN, t);
+      gn.gain.setValueAtTime((gain || 0.08) * SFX_GAIN * (s ? 1 - s.dist * 0.45 : 1), t);
       gn.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-      o.connect(gn).connect(master);
+      o.connect(gn).connect(s ? s.dest : master);
       o.start(t); o.stop(t + dur + 0.02);
     } catch (e) { /* audio is optional */ }
+  }
+
+  // 3D sound: in first person and VR the ball's hits, bounces and net cords
+  // come from where they happen, heard from your head (HRTF, best on
+  // headphones). The chase view keeps the plain mix.
+  function spatialOn() { return !!game && (renderer.view === 'first' || !!renderer.vr); }
+  // game (x across, y down the court, z up) to Web Audio (y up, -z ahead)
+  function setXYZ(node, x, y, z) {
+    if (node.positionX) { node.positionX.value = x; node.positionY.value = z; node.positionZ.value = -y; }
+    else node.setPosition(x, z, -y);
+  }
+  // A panner at p plus the air between: returns { dest, dist } where dist
+  // is 0 within 2 m and 1 at 24 m (the far baseline), or null when the
+  // sound shouldn't be placed. The panner only turns the sound; how loud it
+  // is for its distance stays with each sound, as in the plain mix.
+  function placeAt(t, p) {
+    if (!p || !spatialOn()) return null;
+    const c = renderer.cam;
+    const z = p.z || 0;
+    const d = Math.hypot(p.x - c.x, p.y - c.y, z - c.z);
+    const pn = audio.createPanner();
+    pn.panningModel = 'HRTF';
+    pn.distanceModel = 'linear'; pn.rolloffFactor = 0;
+    setXYZ(pn, p.x, p.y, z);
+    const dist = CT.clamp((d - 2) / 22, 0, 1);
+    pn.connect(distBus(t, dist));
+    return { dest: pn, dist };
+  }
+  // the listener rides on the camera: your head in VR, the eyes in first person
+  function placeListener() {
+    if (!audio || !spatialOn() || !renderer.cam.F) return;
+    const c = renderer.cam, L = audio.listener, F = c.F, U = c.U;
+    try {
+      setXYZ(L, c.x, c.y, c.z);
+      if (L.forwardX) {
+        L.forwardX.value = F.x; L.forwardY.value = F.z; L.forwardZ.value = -F.y;
+        L.upX.value = U.x; L.upY.value = U.z; L.upZ.value = -U.y;
+      } else L.setOrientation(F.x, F.z, -F.y, U.x, U.z, -U.y);
+    } catch (e) { /* audio is optional */ }
+  }
+  // where a ball sound happened: the event's own spot, or the ball now
+  // (events from an older host carry no spot)
+  function soundAt(d, ground) {
+    if (typeof d.x === 'number' && typeof d.y === 'number') return { x: d.x, y: d.y, z: ground ? 0 : d.z || 0 };
+    const b = game && game.ball && game.ball.pos;
+    return b ? { x: b.x, y: b.y, z: ground ? 0 : b.z } : null;
   }
 
   // Zen mode swaps the chiptune blips for sounds closer to a real court: a
@@ -226,23 +273,27 @@
       const t = audio.currentTime;
       if (kind === 'hit') {
         // the striker's end; faster swings crack brighter and louder
-        const dist = d.side === me ? 0 : 1;
+        const s = placeAt(t, soundAt(d));
+        const dist = s ? s.dist : d.side === me ? 0 : 1;
         const pace = Math.max(0, Math.min(1, ((d.kmh || 90) - 60) / 120));
         const v = (1 - dist * 0.55) * (0.6 + pace * 0.5);
-        const bus = distBus(t, dist);
+        const bus = s ? s.dest : distBus(t, dist);
         noisy(t, 0.035 + pace * 0.02, 0.11 * v, 'bandpass', 1500 + pace * 900, 1.2, bus);   // string crack
         noisy(t, 0.012, 0.08 * v, 'highpass', 4000, 0.7, bus);                                // the first click
         thump(t, 320 + pace * 120, 150, 0.06, 0.09 * v, bus);                                 // ball and frame
         if (d.perfect) thump(t, 1150, 1100, 0.09, 0.012 * v, bus);                           // sweet-spot ring
       } else if (kind === 'bounce') {
-        const dist = distFrom(d.y);
+        const s = placeAt(t, soundAt(d, true));
+        const dist = s ? s.dist : distFrom(d.y);
         const v = 1 - dist * 0.6;
-        const bus = distBus(t, dist);
+        const bus = s ? s.dest : distBus(t, dist);
         noisy(t, 0.03, 0.06 * v, 'lowpass', 1400, 0.8, bus);
         thump(t, 170, 90, 0.05, 0.08 * v, bus);
       } else if (kind === 'net') {
-        noisy(t, 0.16, 0.05, 'lowpass', 700, 0.7, master);
-        thump(t, 110, 60, 0.12, 0.06, master);
+        const s = placeAt(t, soundAt(d));
+        const bus = s ? s.dest : master;
+        noisy(t, 0.16, 0.05, 'lowpass', 700, 0.7, bus);
+        thump(t, 110, 60, 0.12, 0.06, bus);
       } else if (kind === 'fault') {
         thump(t, 330, 300, 0.35, 0.03, master);
       } else if (kind === 'won') {
@@ -403,7 +454,7 @@
       lineCallShown = false;
       rallyShots = d.kind === 'serve' ? 1 : rallyShots + 1;
       if (!tut && (rallyShots === LONG_RALLY || (d.perfect && d.side === me && /power|overhead/i.test(d.kind)))) CT.showBillboard(renderer, 'WOW', '#ff3fb4', 1.8);
-      if (zenOn()) realSfx('hit', d); else blip(d.kind === 'overhead' || d.kind === 'serve' ? 220 : 330, 0.07, 'square', 0.09, 140);
+      if (zenOn()) realSfx('hit', d); else blip(d.kind === 'overhead' || d.kind === 'serve' ? 220 : 330, 0.07, 'square', 0.09, 140, soundAt(d));
       if (d.side === me) {
         const kind = { fh: 'Forehand', bh: 'Backhand' }[d.wing];
         const label = d.kind === 'serve' ? 'Serve' : d.kind === 'overhead' ? 'Overhead' : d.kind === 'volley' ? kind + ' volley' : d.kind === 'power' ? 'Power ' + kind.toLowerCase() : d.kind === 'powerVolley' ? 'Power ' + kind.toLowerCase() + ' volley' : kind;
@@ -415,14 +466,14 @@
       }
       hintForState();
     } else if (type === 'bounce') {
-      if (zenOn()) realSfx('bounce', d); else blip(120, 0.05, 'sine', 0.07);
+      if (zenOn()) realSfx('bounce', d); else blip(120, 0.05, 'sine', 0.07, 0, soundAt(d, true));
       if (net && net.role === 'guest') game.marks.push({ x: d.x, y: d.y, age: 0 });
     } else if (type === 'lineCall') {
       if (d.m > CLOSE_OUT || d.m < -CLOSE_IN) return;
       CT.showLineCall(renderer, d, 3);
       lineCallShown = true;
     } else if (type === 'net') {
-      if (zenOn()) realSfx('net', d); else blip(90, 0.12, 'sawtooth', 0.05);
+      if (zenOn()) realSfx('net', d); else blip(90, 0.12, 'sawtooth', 0.05, 0, soundAt(d));
     } else if (type === 'whiff') {
       if (d.side === me) showShot(d.reason);
     } else if (type === 'fault') {
@@ -1386,6 +1437,7 @@
       const land = paused || zenOn() ? null : CT.landingFor(game, me, info);
       game.ball = CT.viewBall(game);
       try { CT.renderGame(renderer, game, me, info, land); } finally { game.ball = ball; }
+      placeListener();
     }
     requestAnimationFrame(frame);
   }
