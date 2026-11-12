@@ -46,8 +46,10 @@
   const VR_GFX = { auto: 'auto', smooth: 0, balanced: 1, sharp: 2 };
   let vrFit = { fov: 'normal', lens: 'normal', gfx: 'auto' };
   // the graphics level outside VR: Auto, or one picked in Settings
+  // (Max, full screen resolution, is offered outside VR only)
+  const GFX = { ...VR_GFX, max: 'max' };
   let gfx = 'auto';
-  try { const v = localStorage.getItem('ct.gfx'); if (v in VR_GFX) gfx = v; } catch (e) { /* storage is optional */ }
+  try { const v = localStorage.getItem('ct.gfx'); if (v in GFX) gfx = v; } catch (e) { /* storage is optional */ }
   try {
     const v = JSON.parse(localStorage.getItem('ct.vrFit'));
     if (v && VR_FOV[v.fov] && VR_LENS[v.lens]) vrFit = { ...vrFit, fov: v.fov, lens: v.lens, gfx: v.gfx in VR_GFX ? v.gfx : 'auto' };
@@ -1777,9 +1779,9 @@
     gfx = value;
     try { localStorage.setItem('ct.gfx', value); } catch (e) { /* storage is optional */ }
     document.querySelectorAll('[data-gfx]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.gfx === value)));
-    const was = renderer.quality;
-    CT.setQuality(renderer, VR_GFX[value]);
-    if (renderer.quality !== was && renderer.args) CT.resizeRenderer(renderer, ...renderer.args);
+    const was = renderer.quality, wasMax = renderer.max;
+    CT.setQuality(renderer, GFX[value]);
+    if ((renderer.quality !== was || renderer.max !== wasMax) && renderer.args) CT.resizeRenderer(renderer, ...renderer.args);
   }
 
   function setVRFit(key, value) {

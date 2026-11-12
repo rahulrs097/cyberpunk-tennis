@@ -272,6 +272,9 @@
   .seg.toggles button[aria-pressed="false"]::after { content: 'Off'; }
   .seg.toggles button[aria-pressed="false"] { color: var(--muted); }
   .seg.tabs button { min-height: 44px; font-size: 12px; letter-spacing: 0.02em; padding: 0 2px; min-width: 0; }
+  /* five graphics levels: each button only as wide as its word */
+  .seg.tabs.gfx { gap: 5px; }
+  .seg.tabs.gfx button { font-size: 11px; letter-spacing: 0; padding: 0 4px; flex: 1 1 auto; }
 
   /* the main menu: who you are, the match against the CPU, online, and a
      bar along the bottom for everything else */
@@ -410,11 +413,12 @@
     </div>
     <div class="opts">
       <div class="label">Graphics</div>
-      <div class="seg tabs">
+      <div class="seg tabs gfx">
         <button data-gfx="auto" aria-pressed="true">Auto</button>
         <button data-gfx="smooth" aria-pressed="false">Smooth</button>
         <button data-gfx="balanced" aria-pressed="false">Balanced</button>
         <button data-gfx="sharp" aria-pressed="false">Sharp</button>
+        <button data-gfx="max" aria-pressed="false">Max</button>
       </div>
       <div class="label">Camera</div>
       <div class="seg">
