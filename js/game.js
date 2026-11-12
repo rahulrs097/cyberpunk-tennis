@@ -108,6 +108,8 @@
       serveWait: 0,
       // scales the CPU's timing errors: lower = a stronger CPU
       cpuErr: opts.cpuErr || 1,
+      // the same for a hard-hit ball (see cpuTimingError); null = cpuErr
+      cpuErrFast: opts.cpuErrFast || null,
       // how fast the CPU reads a shot, and how far it shades its recovery
       // towards the side the opponent can angle it to (both rise with level)
       cpuReact: opts.cpuReact || REACT,
@@ -370,6 +372,18 @@
       prev = rel;
     }
     return null;
+  }
+
+  // Where a swipe `aim` radians off straight sends the ball across the far
+  // court, judged from a first-person view `cam` ({ x, y, yaw }): straight
+  // goes where the middle of the screen looks, not to the middle of the
+  // court, and AIM_FULL off that goes a court's half-width further across.
+  // Undefined if the view isn't facing the far court.
+  function viewAim(cam, fwd, aim) {
+    const dy = Math.cos(cam.yaw) * fwd;
+    if (dy < 0.3) return undefined;
+    const ahead = cam.x + Math.sin(cam.yaw) * (fwd * (COURT.HL - 2) - cam.y) / Math.cos(cam.yaw);
+    return ahead + fwd * (COURT.SW - 0.45) * clamp(aim / AIM_FULL, -1, 1);
   }
 
   // Build launch parameters for p hitting the ball where it is now.
@@ -1077,8 +1091,13 @@
     n += Math.max(0, (v - 16) / 10) * 0.6;
     // an easy ball is timed better, however hard the CPU swings at it
     n = Math.min(n, 1.6) * (1 - EASY * cpuEase(g, c));
-    // g.cpuErr sets the difficulty
-    return n * g.cpuErr * c.ch.tactics.err * windowFor(c, wing);
+    // g.cpuErr sets the difficulty. A level can time hard-hit balls better
+    // (g.cpuErrFast): Pro's cpuErr was raised to make up for cpuEase, which
+    // never helps against pace, so without it hitting every ball hard got
+    // easier against Pro.
+    const fast = clamp((v - 16) / 8, 0, 1);
+    const err = g.cpuErrFast ? g.cpuErr + (g.cpuErrFast - g.cpuErr) * fast : g.cpuErr;
+    return n * err * c.ch.tactics.err * windowFor(c, wing);
   }
 
   // Hit the CPU's chosen shot. A mistimed shot that would miss doesn't
@@ -1520,11 +1539,11 @@
   CT.CPU_LEVELS = {
     chill: { timeScale: 0.75, err: 1.9, react: 0.36, cover: 0.1, speed: 0.8, pace: 1, depth: 1, attack: 0, smart: 0.15 },
     club: { timeScale: 0.88, err: 1.75, react: 0.26, cover: 0.2, speed: 0.9, pace: 0.86, depth: 0.88, attack: 0.15, smart: 0.55 },
-    pro: { timeScale: 1, err: 1.3, react: 0.14, cover: 0.38, speed: 1, pace: 1, depth: 1, attack: 0.3, smart: 1 },
+    pro: { timeScale: 1, err: 1.3, errFast: 1.1, react: 0.14, cover: 0.38, speed: 1, pace: 1, depth: 1, attack: 0.3, smart: 1 },
   };
   CT.levelOpts = (level) => {
     const L = CT.CPU_LEVELS[level];
-    return { timeScale: L.timeScale, cpuErr: L.err, cpuReact: L.react, cpuCover: L.cover, cpuSpeed: L.speed,
+    return { timeScale: L.timeScale, cpuErr: L.err, cpuErrFast: L.errFast, cpuReact: L.react, cpuCover: L.cover, cpuSpeed: L.speed,
       cpuPace: L.pace, cpuDepth: L.depth, cpuAttack: L.attack, cpuSmart: L.smart };
   };
 
@@ -1549,5 +1568,6 @@
   CT.incomingInfo = incomingInfo;
   CT.landingFor = landingFor;
   CT.fwdOf = fwdOf;
+  CT.viewAim = viewAim;
   CT.setAutoMove = (g, side, on) => { g.autoMove[side] = !!on; };
 })();

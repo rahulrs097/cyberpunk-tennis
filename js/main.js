@@ -714,7 +714,16 @@
   // swipe took to get here from a swipe pad.
   function handleSwipe(pts, dim, late) {
     // (a swipe pad's swipe has nothing to do with the view in the headset)
-    playShot(CT.Input.swipeToInput(pts, dim, vr ? null : pointAt), late);
+    const at = (a) => (vr ? undefined : pointAt(a));
+    // In first person the ball's shadow is under or behind you when you
+    // smash, and the far court is a thin strip under a sky full of ball, so
+    // a smash is aimed from the way you're looking instead: straight goes
+    // where the middle of the screen faces, whichever way it was swiped.
+    const smashAt = (a) => {
+      const x = at(a);
+      return x !== undefined || vr || renderer.view !== 'first' ? x : CT.viewAim(renderer.cam, game.players[me].fwd, a);
+    };
+    playShot(CT.Input.swipeToInput(pts, dim, at, smashAt), late);
   }
 
   // Hit `input` (as CT.requestSwipe takes it) now, or as if `late` seconds

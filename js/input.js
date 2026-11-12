@@ -25,8 +25,9 @@
   // swiped.
   // pts: [{ x, y, t (ms) }]; `dim` is the screen's short side in the same
   // units. `at(aim)` gives the spot on the far court a swipe at that angle
-  // points to (or undefined to leave it to the plain angle).
-  function swipeToInput(pts, dim, at) {
+  // points to (or undefined to leave it to the plain angle); `smashAt(aim)`
+  // is the same for a smash, when it's aimed differently (default: `at`).
+  function swipeToInput(pts, dim, at, smashAt) {
     const a0 = pts[0], end = pts[pts.length - 1];
     const dx = end.x - a0.x, dy = end.y - a0.y;
     const chord = Math.hypot(dx, dy), dur = Math.max(1, end.t - a0.t);
@@ -61,12 +62,13 @@
     // A slice is swiped the other way: top-left to bottom-right goes left.
     // But a smash swiped down goes the way the swipe goes, like the racket
     // coming down through the ball: the engine picks that aim (`smash`) if
-    // the ball turns out to be above smash height when it's hit.
+    // the ball turns out to be above smash height when it's hit. (An upward
+    // swipe's smash aim is its plain aim; it gets `smash` too so that it can
+    // be aimed from the view like the downward one.)
     const spot = at || (() => undefined);
-    const smash = spinDir < 0 ? { aim, landX: spot(aim) } : undefined;
+    const smash = { aim, landX: (smashAt || spot)(aim) };
     if (spinDir < 0) aim = -aim;
-    const input = { aim, pace, over, spinDir, curve, depth, landX: spot(aim), lob };
-    if (smash) input.smash = smash;
+    const input = { aim, pace, over, spinDir, curve, depth, landX: spot(aim), lob, smash };
     // A slow swipe is still going when the ball arrives: its timing counts
     // from partway through, not from when the finger lifts.
     // And it always goes deep, however long the swipe: a short lob is just a

@@ -28,7 +28,10 @@ test('input: swipe up is topspin, down is slice with the aim mirrored and a smas
   const up = Input.swipeToInput(path(60, -200, 150), 400);
   assert.equal(up.spinDir, 1);
   assert.ok(up.aim > 0.2, 'up and to the right aims right');
-  assert.equal(up.smash, undefined);
+  assert.equal(up.smash.aim, up.aim, 'an upward swipe smashes where it points');
+  const view = Input.swipeToInput(path(0, -200, 100), 400, () => undefined, (a) => a + 7);
+  assert.equal(view.landX, undefined);
+  assert.equal(view.smash.landX, view.smash.aim + 7, 'a smash can be aimed its own way');
   const down = Input.swipeToInput(path(60, 200, 150), 400);
   assert.equal(down.spinDir, -1);
   assert.ok(down.aim < -0.2, 'a slice swiped down-right goes left');
