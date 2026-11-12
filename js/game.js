@@ -342,6 +342,18 @@
     return null;
   }
 
+  // Where a swipe `aim` radians off straight sends the ball across the far
+  // court, judged from a first-person view `cam` ({ x, y, yaw }): straight
+  // goes where the middle of the screen looks, not to the middle of the
+  // court, and AIM_FULL off that goes a court's half-width further across.
+  // Undefined if the view isn't facing the far court.
+  function viewAim(cam, fwd, aim) {
+    const dy = Math.cos(cam.yaw) * fwd;
+    if (dy < 0.3) return undefined;
+    const ahead = cam.x + Math.sin(cam.yaw) * (fwd * (COURT.HL - 2) - cam.y) / Math.cos(cam.yaw);
+    return ahead + fwd * (COURT.SW - 0.45) * clamp(aim / AIM_FULL, -1, 1);
+  }
+
   // Build launch parameters for p hitting the ball where it is now.
   // input: { aim (rad, + = hitter's right), pace 0..1, over 0..1, spinDir ±1, curve -1..1,
   //          depth 0..1, landX (world x to aim at; the CPU's alternative to aim),
@@ -1489,5 +1501,6 @@
   CT.incomingInfo = incomingInfo;
   CT.landingFor = landingFor;
   CT.fwdOf = fwdOf;
+  CT.viewAim = viewAim;
   CT.setAutoMove = (g, side, on) => { g.autoMove[side] = !!on; };
 })();

@@ -505,6 +505,25 @@ test('a smash swiped down aims the way it was swiped, a slice is mirrored', () =
   assert.ok(slice.every((x) => x < -1), 'down-right slice goes left ' + JSON.stringify(slice));
 });
 
+test('in first person a smash is aimed from the way you look, not from the middle of the court', () => {
+  const CT = loadEngine();
+  const near = (a, b, msg) => assert.ok(Math.abs(a - b) < 0.05, `${msg}: ${a} vs ${b}`);
+  // facing straight down the middle it's the old mapping
+  near(CT.viewAim({ x: 0, y: -7.5, yaw: 0 }, 1, 0), 0, 'straight from the middle');
+  near(CT.viewAim({ x: 0, y: -7.5, yaw: 0 }, 1, 0.6), 3.665, 'full right');
+  // standing out wide, straight goes straight on, not back to the middle
+  near(CT.viewAim({ x: -3, y: -7.5, yaw: 0 }, 1, 0), -3, 'straight from the left');
+  // head turned right towards the ball: straight goes where the screen faces
+  const ahead = Math.tan(0.2) * (CT.COURT.HL - 2 + 7.5);
+  near(CT.viewAim({ x: 0, y: -7.5, yaw: 0.2 }, 1, 0), ahead, 'turned right');
+  assert.ok(CT.viewAim({ x: 0, y: -7.5, yaw: 0.2 }, 1, -0.3) < ahead - 1, 'swiped left of that goes left of it');
+  // from the far end (yaw near pi), the hitter's right is -x
+  near(CT.viewAim({ x: 1, y: 7.5, yaw: Math.PI }, -1, 0), 1, 'far end straight');
+  assert.ok(CT.viewAim({ x: 0, y: 7.5, yaw: Math.PI }, -1, 0.4) < -1, 'far end swiped right');
+  // looking back over your shoulder: no answer
+  assert.equal(CT.viewAim({ x: 0, y: -7.5, yaw: Math.PI }, 1, 0), undefined);
+});
+
 test('tutorial automove takes the lesson ball on the lesson wing, for both characters', () => {
   for (const p0 of ['octopus', 'philosopher']) {
     for (const d of [{ wing: 'fh' }, { wing: 'bh' }, { feed: 'volley', wing: 'fh' }]) {
