@@ -1,8 +1,7 @@
 # Cyberpunk Tennis
 
 Mobile-first tennis on an HTML canvas. Plain HTML and JavaScript, no build step:
-open `index.html` through any static web server (or `_test.html` straight from disk,
-which only adds the doctype and viewport tags the artifact host normally supplies).
+open `index.html` through any static web server (for example `python3 -m http.server`).
 
 ## Files
 
@@ -16,6 +15,7 @@ which only adds the doctype and viewport tags the artifact host normally supplie
 | `js/achievements.js` | Achievements and stats: what counts, the per-match tracker, the record saved in localStorage |
 | `js/render.js` | Perspective camera (chase or first person) and neon arena. A phone that can't keep up steps down a quality level (`watchFrameRate`): frames slower than ~40 fps while drawing one takes most of a 60 fps frame, or slower than ~22 fps. A steady 30 fps that draws quickly (an iPhone in Low Power Mode) keeps the full look |
 | `js/vr.js` | Cardboard VR: head tracking from the motion sensor, and the one-button auto shots |
+| `js/input.js` | What a finger path means (`swipeToInput`: aim, pace, spin, lob), and the checks the host runs on everything an online guest sends |
 | `js/main.js` | Touch input, HUD, sound effects (realistic hits and bounces in zen mode), frame loop, tutorial lessons |
 | `js/music.js` | Synthesised music: the chiptune match track, and zen mode's slow ambient track |
 | `js/net.js`, `server/relay.js` | Online link: the Cloudflare Worker relay (one Durable Object per room code), its client, and the lag meter |

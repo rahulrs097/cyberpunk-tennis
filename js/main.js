@@ -153,7 +153,7 @@
     markSeen();
     // the practice point's match stops here, as a finished match would:
     // otherwise the CPU could go on serving behind this screen
-    game.phase = 'matchOver';
+    CT.stopGame(game);
     $('endTitle').textContent = 'Tutorial done';
     $('endScore').textContent = '';
     $('endStats').hidden = true;

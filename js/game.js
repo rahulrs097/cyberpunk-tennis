@@ -1236,30 +1236,44 @@
     }
   }
 
-  function checkCrossings(g) {
+  // The ball reaching the contact plane of a player it's heading to: note
+  // where it was (the spot a swing is judged against), then `onCross`
+  // decides what happens; it returns true once the ball has been hit.
+  function checkCrossings(g, onCross) {
     const b = g.ball;
     for (const p of g.players) {
       if (!incomingTo(g, p) || p.fwd * b.pos.y > 0) { p.prevRel = null; continue; }
       const rel = p.fwd * b.pos.y - (p.fwd * p.y + CONTACT_AHEAD);
       if (p.prevRel !== null && p.prevRel > 0 && rel <= 0) {
         p.cross = { t: g.time, x: b.pos.x, y: b.pos.y, z: b.pos.z, ball: CT.cloneBall(b), px: p.x, py: p.y };
-        if (g.control[p.side] === 'cpu') {
-          if (c_hasPlan(p) && canReach(g, p)) {
-            cpuHit(g, p);
-            return;
-          }
-          // got there a step too late: lunge for it anyway
-          if (c_hasPlan(p) && Math.abs(b.pos.x - p.x) <= p.ch.reach + 1.2 && b.pos.z <= p.ch.maxZ + 0.5) swingMiss(g, p, 'Out of reach');
-        } else if (p.pending) {
-          const err = p.pending.err !== undefined ? p.pending.err : p.pending.t - g.time;
-          const input = p.pending.input;
-          p.pending = null;
-          tryHit(g, p, input, err);
-          return;
-        }
+        if (onCross(g, p)) return;
       }
       p.prevRel = rel;
     }
+  }
+  // in a real match: the CPU swings, or a player's early swipe is played
+  function crossPlay(g, p) {
+    const b = g.ball;
+    if (g.control[p.side] === 'cpu') {
+      if (c_hasPlan(p) && canReach(g, p)) { cpuHit(g, p); return true; }
+      // got there a step too late: lunge for it anyway
+      if (c_hasPlan(p) && Math.abs(b.pos.x - p.x) <= p.ch.reach + 1.2 && b.pos.z <= p.ch.maxZ + 0.5) swingMiss(g, p, 'Out of reach');
+    } else if (p.pending) {
+      const err = p.pending.err !== undefined ? p.pending.err : p.pending.t - g.time;
+      const input = p.pending.input;
+      p.pending = null;
+      tryHit(g, p, input, err);
+      return true;
+    }
+    return false;
+  }
+  // on the guest's copy: only its own early swipe, shown at once
+  function crossRemote(g, p) {
+    if (!p.pending) return false;
+    const pd = p.pending;
+    p.pending = null;
+    predictHit(g, p, pd.input, pd.err);
+    return true;
   }
   function c_hasPlan(p) { return !!p.plan && !p.leaving; }
 
@@ -1276,16 +1290,7 @@
     const ev = CT.stepBall(b, dt);
     if (g.phase === 'toss' && vz > 0 && b.vel.z <= 0) g.peakT = g.time;
     if (ev === 'bounce' && g.phase === 'rally') b.bounces++;
-    for (const p of g.players) {
-      if (!incomingTo(g, p) || p.fwd * b.pos.y > 0) { p.prevRel = null; continue; }
-      const rel = p.fwd * b.pos.y - (p.fwd * p.y + CONTACT_AHEAD);
-      if (p.prevRel !== null && p.prevRel > 0 && rel <= 0) {
-        p.cross = { t: g.time, x: b.pos.x, y: b.pos.y, z: b.pos.z, ball: CT.cloneBall(b), px: p.x };
-        // an early swipe, waiting for the ball
-        if (p.pending) { const pd = p.pending; p.pending = null; predictHit(g, p, pd.input, pd.err); return; }
-      }
-      p.prevRel = rel;
-    }
+    checkCrossings(g, crossRemote);
   }
 
   function stepOnce(g, dt) {
@@ -1314,7 +1319,7 @@
       }
       if (ev === 'net') { emit(g, 'net', netAt(g)); easeOff(g); }
       if (ev === 'bounce') onBounce(g);
-      if (g.phase === 'rally') checkCrossings(g);
+      if (g.phase === 'rally') checkCrossings(g, crossPlay);
       if (Math.abs(b.pos.y) > 40 || Math.abs(b.pos.x) > 25) b.active = false;
     }
     if (g.held && g.phase === 'rally' && g.time >= g.held.until) pointTo(g, g.held.w, g.held.text);
@@ -1535,6 +1540,8 @@
   CT._cpuPlan = cpuPlan;
   CT.updateGame = update;
   CT.saveGameState = saveState;
+  // Stop a game where it is (the tutorial's practice point): nothing more is served or played.
+  CT.stopGame = (g) => { g.phase = 'matchOver'; };
   CT.validSave = validSave;
   CT.requestMove = requestMove;
   CT.requestToss = requestToss;
