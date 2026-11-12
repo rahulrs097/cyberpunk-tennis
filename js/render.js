@@ -325,13 +325,15 @@
   // metres between the two eyes
   const IPD = 0.064;
 
-  // Pick the graphics level (0 smooth, 1 balanced, 2 sharp) or 'auto'.
+  // Pick the graphics level (0 smooth, 1 balanced, 2 sharp, 3 cinematic:
+  // sharp plus the rain-wet, lit look of drawWet) or 'auto'.
   // Auto starts at AUTO_START and steps down while the phone can't keep up.
   // In VR the VR graphics setting applies instead, and this one comes back
   // after it. Call resizeRenderer after.
   function setQuality(r, level) {
     r.auto = level === 'auto';
-    const q = r.auto ? AUTO_START : level;
+    r.cine = level === 3;
+    const q = r.auto ? AUTO_START : Math.min(2, level);
     if (r.vr) r.qualityWas = q; else r.quality = q;
     r.frames.length = 0; r.tried = []; r.trial = null;
   }
@@ -392,6 +394,10 @@
     ctx.fillRect(0, 0, 64, 64);
     return (r.glow[key] = cv);
   }
+
+  // Cinematic look on? (Never picked by Auto, and not in VR, where two eyes
+  // leave no time to spare.)
+  function cine(r) { return r.cine && !r.vr && r.quality === 2; }
 
   // deterministic hash for scenery (not gameplay)
   function hash(n) { const s = Math.sin(n * 127.1) * 43758.5453; return s - Math.floor(s); }
@@ -487,7 +493,7 @@
     const horizon = c.cy + c.f * Math.tan(c.pitch);   // screen y of the horizon
     const oy = horizon - r.skyHz;
     if (oy > 0) { ctx.fillStyle = '#02030a'; ctx.fillRect(0, 0, r.W, oy + 1); }
-    if (oy + r.skyH < r.H) { ctx.fillStyle = '#15161e'; ctx.fillRect(0, oy + r.skyH - 1, r.W, r.H); }
+    if (oy + r.skyH < r.H) { ctx.fillStyle = cine(r) ? WET : '#15161e'; ctx.fillRect(0, oy + r.skyH - 1, r.W, r.H); }
     // (the sky is far away, so in VR both eyes see it at the same place around their centre)
     const sw = r.skyW, pan = -c.yaw * c.f + c.cx - r.W / 2;
     let ox = ((pan - r.W) % sw + sw) % sw - sw;
@@ -1104,9 +1110,11 @@
     return cars;
   })();
 
+  const WET = '#0b0c13';   // rain-dark asphalt (cinematic)
+
   function drawLot(ctx, r) {
     // asphalt deck
-    fillPoly(ctx, r, [[-45, LOT_EDGE], [45, LOT_EDGE], [45, LOT_BACK], [-45, LOT_BACK]], '#15161e');
+    fillPoly(ctx, r, [[-45, LOT_EDGE], [45, LOT_EDGE], [45, LOT_BACK], [-45, LOT_BACK]], cine(r) ? WET : '#15161e');
     // roof edges: a low parapet with strip lights at both ends
     for (const y of [LOT_EDGE, LOT_BACK]) {
       fillPoly(ctx, r, [[-45, y, 1], [45, y, 1], [45, y, 0], [-45, y, 0]], '#1c1b2a');
@@ -1141,8 +1149,8 @@
   function drawCourt(ctx, r) {
     const D = COURT.DW, L = COURT.HL, S = COURT.SW;
     // opaque paint (pre-blended over the asphalt) is much cheaper to fill
-    fillPoly(ctx, r, [[-D - 1.2, -L - 2.5], [D + 1.2, -L - 2.5], [D + 1.2, L + 2.5], [-D - 1.2, L + 2.5]], '#17294a');
-    fillPoly(ctx, r, [[-S, -L], [S, -L], [S, L], [-S, L]], '#1b3a66');
+    fillPoly(ctx, r, [[-D - 1.2, -L - 2.5], [D + 1.2, -L - 2.5], [D + 1.2, L + 2.5], [-D - 1.2, L + 2.5]], cine(r) ? '#11203e' : '#17294a');
+    fillPoly(ctx, r, [[-S, -L], [S, -L], [S, L], [-S, L]], cine(r) ? '#153058' : '#1b3a66');
     const lines = [
       [-D, -L, D, -L], [-D, L, D, L],
       [-D, -L, -D, L], [D, -L, D, L],
@@ -1282,7 +1290,7 @@
     strokeSeg(ctx, r, [x, y, 7.5], [x * 0.75, y, 7.5]);
     const head = proj(r, x * 0.75, y, 7.5);
     if (head.behind) return;
-    const gr = Math.max(10, 0.9 * head.s);
+    const gr = Math.max(10, (cine(r) ? 1.7 : 0.9) * head.s);
     ctx.drawImage(glowSprite(r, col, 0.7), head.x - gr, head.y + 1 - gr * 0.6, gr * 2, gr * 1.2);
     ctx.fillStyle = col;
     ctx.beginPath(); ctx.ellipse(head.x, head.y + 1, Math.max(3, 0.35 * head.s), Math.max(1.5, 0.12 * head.s), 0, 0, Math.PI * 2); ctx.fill();
@@ -1325,18 +1333,9 @@
     return a;
   }
 
-  function drawPlayer(ctx, r, g, p) {
-    const pos = proj(r, p.x, p.y, 0);
-    if (pos.behind) return;
-    drawShadow(ctx, r, p.x, p.y, 0.55, 0.45);
-    ctx.save();
-    ctx.strokeStyle = p.ch.colors.glow;
-    ctx.globalAlpha = 0.5;
-    ctx.lineWidth = 1.5;
-    if (groundEllipse(ctx, r, p.x, p.y, 0.6)) ctx.stroke();
-    ctx.restore();
+  function playerPose(r, g, p, pos) {
     const a = playerAnim(r, g, p, pos);
-    const pose = {
+    return {
       t: p.anim,
       facing: p.side === r.human ? 'back' : 'front',
       swing: p.swing,
@@ -1347,6 +1346,19 @@
       prep: a.prep, prepWing: a.prepWing,
       lod: r.quality,
     };
+  }
+
+  function drawPlayer(ctx, r, g, p) {
+    const pos = proj(r, p.x, p.y, 0);
+    if (pos.behind) return;
+    drawShadow(ctx, r, p.x, p.y, 0.55, 0.45);
+    ctx.save();
+    ctx.strokeStyle = p.ch.colors.glow;
+    ctx.globalAlpha = 0.5;
+    ctx.lineWidth = 1.5;
+    if (groundEllipse(ctx, r, p.x, p.y, 0.6)) ctx.stroke();
+    ctx.restore();
+    const pose = playerPose(r, g, p, pos);
     ctx.save();
     ctx.translate(pos.x, pos.y);
     ctx.scale(pos.s * SPRITE_SCALE, pos.s * SPRITE_SCALE);
@@ -1815,11 +1827,130 @@
     ctx.restore();
   }
 
+  // ---------------- cinematic: a rain-wet rooftop ----------------
+  // Everything here lies on the ground, under the cars, players and net:
+  // washes of coloured light, and what the wet asphalt mirrors. A mirror
+  // image of a point at height z is that point at -z, so each reflection is
+  // drawn towards its upside-down twin and smeared, as a wet road does.
+  // All cheap: stretched copies of the cached glow sprites, no blur.
+  function streak(ctx, r, col, a, top, bottom, halfW) {
+    const s = segment(r, top, bottom);
+    if (!s) return;
+    const dx = s[1].x - s[0].x, dy = s[1].y - s[0].y, len = Math.hypot(dx, dy);
+    if (len < 2) return;
+    const w = Math.max(3, halfW * sizeAt(r, top[0], top[1], 0));
+    ctx.save();
+    ctx.translate(s[0].x, s[0].y);
+    ctx.rotate(Math.atan2(dy, dx));
+    ctx.drawImage(glowSprite(r, col, a), 0, -w, len, w * 2);
+    ctx.restore();
+  }
+
+  function drawWet(ctx, r, g, human) {
+    const c = r.cam;
+    ctx.save();
+    // keep it all on the rooftop
+    if (!tracePoly(ctx, r, [[-45, LOT_EDGE], [45, LOT_EDGE], [45, LOT_BACK], [-45, LOT_BACK]])) { ctx.restore(); return; }
+    ctx.clip();
+    ctx.globalCompositeOperation = 'lighter';
+    // the far deck picks up the glow of the city at a low angle
+    const hz = c.cy + c.f * Math.tan(c.pitch);
+    if (hz < r.H) {
+      const gr = ctx.createLinearGradient(0, hz, 0, hz + r.H * 0.3);
+      gr.addColorStop(0, 'rgba(120,70,190,0.30)');
+      gr.addColorStop(1, 'rgba(120,70,190,0)');
+      ctx.fillStyle = gr;
+      ctx.fillRect(0, hz, r.W, r.H * 0.3);
+    }
+    // pink light from the left, blue from the right
+    for (const [x, y, col, rad] of [[-8, 5, '#ff3fb4', 15], [8, -5, '#25d9ff', 15]]) {
+      const p = proj(r, x, y, 0);
+      if (p.behind) continue;
+      const s = rad * sizeAt(r, x, y, 0);
+      const squash = Math.max(0.15, c.z / Math.hypot(x - c.x, y - c.y, c.z));
+      ctx.drawImage(glowSprite(r, col, 0.2), p.x - s, p.y - s * squash, s * 2, s * 2 * squash);
+    }
+    // lamps
+    for (const [x, y, col] of LAMPS) streak(ctx, r, col, 0.55, [x * 0.75, y, -1.5], [x * 0.75, y, -13.5], 0.9);
+    // the billboard, in the colour it is showing
+    const B = BOARD, f = r.human === 1 ? -1 : 1;
+    const ca = f * Math.cos(B.turn), sa = f * Math.sin(B.turn);
+    const bc = boardText(r, performance.now() / 1000).color || '#25d9ff';
+    for (let i = 0; i < 5; i++) {
+      const u = (i - 2) / 4.6, x = f * B.x + u * B.w * ca, y = f * B.y + u * B.w * sa;
+      streak(ctx, r, bc, 0.22, [x, y, -B.z], [x, y, -B.z - B.h * 2.2], 2.6);
+    }
+    // car headlights
+    const hl = glowSprite(r, '#fff6d0', 0.3);
+    for (const car of CARS) {
+      const x = car.sx > 0 ? car.x - 2.15 : car.x + 2.15;
+      const v = toCam(c, x, car.y, 0);
+      if (v.z < 1 || v.z > 30) continue;
+      // (short and near enough upright to skip the turn a streak makes)
+      const p = fromCamToScreen(c, v), w = 0.75 * p.s;
+      if (p.x + w < 0 || p.x - w > r.W || p.y > r.H) continue;
+      ctx.drawImage(hl, p.x - w, p.y - 0.2 * p.s, w * 2, 1.6 * p.s);
+    }
+    // the net's tape
+    const X = COURT.POST_X;
+    ctx.strokeStyle = 'rgba(255,63,180,0.13)';
+    ctx.lineWidth = Math.max(2, 0.12 * sizeAt(r, 0, 0, 1));
+    ctx.beginPath();
+    for (let i = 0; i < 12; i++) {
+      const x0 = -X + (2 * X * i) / 12, x1 = -X + (2 * X * (i + 1)) / 12;
+      pathSeg(ctx, r, [x0, 0, -CT.netHeight(x0)], [x1, 0, -CT.netHeight(x1)]);
+    }
+    ctx.stroke();
+    // the ball
+    const b = g.ball;
+    if (b.active) {
+      const p = proj(r, b.pos.x, b.pos.y, -b.pos.z);
+      if (!p.behind) {
+        const rad = Math.max(2.5, 0.14 * p.s);
+        ctx.drawImage(glowSprite(r, '#e4ff4a', 0.55), p.x - rad, p.y - rad * 1.6, rad * 2, rad * 3.2);
+      }
+    }
+    // the players, upside down and dim, with no glow blur (the costly part)
+    ctx.globalCompositeOperation = 'source-over';
+    for (const p of g.players) {
+      if (r.view === 'first' && p.side === human) continue;
+      const pos = proj(r, p.x, p.y, 0);
+      if (pos.behind) continue;
+      const pose = playerPose(r, g, p, pos);
+      pose.lod = 0;
+      ctx.save();
+      ctx.globalAlpha = 0.2;
+      ctx.translate(pos.x, pos.y);
+      ctx.scale(pos.s * SPRITE_SCALE, -pos.s * SPRITE_SCALE * 0.9);
+      CT.drawCharacter(ctx, p.ch.id, pose, 0);
+      ctx.restore();
+    }
+    ctx.restore();
+  }
+
+  // Darkened corners, painted once per screen size.
+  function drawVignette(ctx, r) {
+    let v = r.vig;
+    if (!v || v.w !== r.W || v.h !== r.H) {
+      const cv = document.createElement('canvas');
+      cv.width = Math.max(2, Math.round(r.W / 4)); cv.height = Math.max(2, Math.round(r.H / 4));
+      const x = cv.getContext('2d'), m = Math.hypot(cv.width, cv.height) / 2;
+      const gr = x.createRadialGradient(cv.width / 2, cv.height / 2, m * 0.55, cv.width / 2, cv.height / 2, m);
+      gr.addColorStop(0, 'rgba(2,3,10,0)');
+      gr.addColorStop(1, 'rgba(2,3,10,0.55)');
+      x.fillStyle = gr; x.fillRect(0, 0, cv.width, cv.height);
+      v = r.vig = { cv, w: r.W, h: r.H };
+    }
+    ctx.drawImage(v.cv, 0, 0, r.W, r.H);
+  }
+
   function drawScene(ctx, r, g, human, info, land) {
     drawSky(ctx, r);
     drawBillboard(ctx, r);
     drawLot(ctx, r);
     drawCourt(ctx, r);
+    const wet = cine(r);
+    if (wet) drawWet(ctx, r, g, human);
 
     for (const m of g.marks) {
       ctx.strokeStyle = `rgba(228,255,74,${(1 - m.age / 1.2) * 0.8})`;
@@ -1846,6 +1977,7 @@
     if (g.ball.active) items.push({ d: depth(g.ball.pos.x, g.ball.pos.y) - 0.01, draw: () => drawBall(ctx, r, g) });
     items.sort((a, b) => b.d - a.d);
     for (const it of items) it.draw();
+    if (wet) drawVignette(ctx, r);
     if (r.view === 'first') {
       if (!r.vr) drawRacketView(ctx, r, g, g.players[human]);
       if (!r.zen) drawTimingRing(ctx, r, g, info);
