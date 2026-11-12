@@ -470,15 +470,23 @@
       const along = target - fwd * pos.y;
       // Solve the well-timed shot first: re-aim for sidespin curl, and when
       // clearing the net would carry it past the baseline, take pace off.
+      // (The CPU tries the same shot at several timings in one frame: the
+      // well-timed solve doesn't depend on the timing, so it's kept in
+      // input.memo and worked out once.)
       let aimX = landX, spd = speed, a = 0;
-      for (let i = 0; i < 12; i++) {
-        a = Math.atan2(fwd * (aimX - pos.x), along);
-        sol = isLob ? solveLob(a, along, lobUp) : solve(a, spd, along, minClear);
-        const land = sol.landing.land;
-        let again = false;
-        if (Math.abs(land.x - landX) > 0.25) { aimX -= land.x - landX; again = true; }
-        if (target <= depthLine - 0.3 && fwd * land.y > depthLine - 0.25) { spd *= 0.85; again = true; }
-        if (!again) break;
+      const memo = input.memo;
+      if (memo && memo.sol) { sol = memo.sol; spd = memo.spd; a = memo.a; }
+      else {
+        for (let i = 0; i < 12; i++) {
+          a = Math.atan2(fwd * (aimX - pos.x), along);
+          sol = isLob ? solveLob(a, along, lobUp) : solve(a, spd, along, minClear);
+          const land = sol.landing.land;
+          let again = false;
+          if (Math.abs(land.x - landX) > 0.25) { aimX -= land.x - landX; again = true; }
+          if (target <= depthLine - 0.3 && fwd * land.y > depthLine - 0.25) { spd *= 0.85; again = true; }
+          if (!again) break;
+        }
+        if (memo) { memo.sol = sol; memo.spd = spd; memo.a = a; }
       }
       // Then mistiming costs power and pushes it off line: the ball comes off
       // slower, shorter and a little lower (mostly it misses wide or long).
@@ -948,7 +956,7 @@
     let input = null;
     for (let i = 0; i < 6; i++) {
       // the CPU plays with a safe margin over the net
-      input = { aim: 0, landX: tx, pace, over: 0, spinDir, curve, lob, clear: 0.4, depth, roll: highDeep };
+      input = { aim: 0, landX: tx, pace, over: 0, spinDir, curve, lob, clear: 0.4, depth, roll: highDeep, memo: {} };
       const lands = (err) => {
         const shot = computeShot(g, c, input, err);
         const fl = CT.flight(shot.pos, shot.vel, shot.spin, shot.side), land = fl.land;
@@ -1077,7 +1085,7 @@
       }
       shot.vel = { ...shot.vel, z: lo };
     } else if (r < 0.3) {
-      shot = computeShot(g, c, { ...input, depth: 0.45, pace: input.pace * 0.6, landX: input.landX * 0.3 }, err * 0.3);
+      shot = computeShot(g, c, { ...input, memo: undefined, depth: 0.45, pace: input.pace * 0.6, landX: input.landX * 0.3 }, err * 0.3);
     }
     applyShot(g, c, shot);
   }
