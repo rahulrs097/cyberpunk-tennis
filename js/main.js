@@ -828,17 +828,31 @@
   // at the level shown, the saved match if there is one, the level, or out.
   const VR_MENU = [{ id: 'exit', label: 'EXIT VR', yaw: -0.55 }, { id: 'resume', label: 'RESUME', yaw: 0 }, { id: 'quit', label: 'QUIT', yaw: 0.55 }];
   const VR_END_MENU = [{ id: 'exit', label: 'EXIT VR', yaw: -0.55 }, { id: 'rematch', label: 'REMATCH', yaw: 0 }, { id: 'quit', label: 'MENU', yaw: 0.55 }];
+  // Settings go on a second row below (row 1): look a little down to reach
+  // them. Player and level only between matches, zen and music any time.
   const LEVEL_ORDER = ['chill', 'club', 'pro'];
-  function vrHomeMenu() {
-    const lv = 'LEVEL: ' + level.toUpperCase();
-    if (loadSaved()) return [{ id: 'exit', label: 'EXIT VR', yaw: -0.8 }, { id: 'saved', label: 'RESUME', yaw: -0.27 }, { id: 'play', label: 'NEW MATCH', yaw: 0.27 }, { id: 'level', label: lv, yaw: 0.8 }];
-    return [{ id: 'exit', label: 'EXIT VR', yaw: -0.6 }, { id: 'play', label: 'PLAY', yaw: 0 }, { id: 'level', label: lv, yaw: 0.6 }];
+  const VR_ROW_PITCH = -0.22;   // looking further down than this picks from row 1
+  const onOff = (on) => (on ? 'ON' : 'OFF');
+  function vrSettingsRow(all) {
+    const sound = [{ id: 'zen', label: 'ZEN: ' + onOff(zen), row: 1 }, { id: 'music', label: 'MUSIC: ' + onOff(musicOn), row: 1 }];
+    const row = all ? [{ id: 'char', label: CT.CHARACTERS[humanChar].name.toUpperCase(), row: 1 }, { id: 'level', label: 'LEVEL: ' + level.toUpperCase(), row: 1 }, ...sound] : sound;
+    const gap = 0.6;
+    row.forEach((it, i) => { it.yaw = (i - (row.length - 1) / 2) * gap; });
+    return row;
   }
-  const vrMenuItems = () => (vr.home ? vrHomeMenu() : vr.end ? VR_END_MENU : VR_MENU);
+  function vrHomeMenu() {
+    const top = loadSaved()
+      ? [{ id: 'exit', label: 'EXIT VR', yaw: -0.6 }, { id: 'saved', label: 'RESUME', yaw: 0 }, { id: 'play', label: 'NEW MATCH', yaw: 0.6 }]
+      : [{ id: 'exit', label: 'EXIT VR', yaw: -0.55 }, { id: 'play', label: 'PLAY', yaw: 0 }];
+    return top.concat(vrSettingsRow(true));
+  }
+  const vrMenuItems = () => (vr.home ? vrHomeMenu() : vr.end ? VR_END_MENU.concat(vrSettingsRow(!net)) : VR_MENU.concat(vrSettingsRow(false)));
   function vrMenuChoice() {
-    const items = vrMenuItems(), yaw = CT.VR.headPose(vr.head).yaw;
-    let best = items[1];
-    for (const it of items) if (Math.abs(yaw - it.yaw) < Math.abs(yaw - best.yaw)) best = it;
+    const pose = CT.VR.headPose(vr.head), all = vrMenuItems();
+    const row = pose.pitch < VR_ROW_PITCH && all.some((it) => it.row) ? 1 : 0;
+    const items = all.filter((it) => (it.row || 0) === row);
+    let best = items.find((it) => it.yaw === 0) || items[0];
+    for (const it of items) if (Math.abs(pose.yaw - it.yaw) < Math.abs(pose.yaw - best.yaw)) best = it;
     return best;
   }
   function vrMenuPick() {
@@ -847,6 +861,9 @@
     else if (it.id === 'rematch' || it.id === 'play') startMatch();
     else if (it.id === 'saved') resumeMatch();
     else if (it.id === 'level') { pickLevel(LEVEL_ORDER[(LEVEL_ORDER.indexOf(level) + 1) % LEVEL_ORDER.length]); blip(880, 0.08, 'sine', 0.06); }
+    else if (it.id === 'char') { const ids = Object.keys(CT.CHARACTERS); pickChar(ids[(ids.indexOf(humanChar) + 1) % ids.length]); blip(880, 0.08, 'sine', 0.06); }
+    else if (it.id === 'zen') { setZen(!zen); blip(880, 0.08, 'sine', 0.06); }
+    else if (it.id === 'music') { setMusic(!musicOn); blip(880, 0.08, 'sine', 0.06); }
     else if (it.id === 'quit') showMenu('', true);
     else leaveVR();
   }
@@ -938,9 +955,9 @@
     const upright = window.innerHeight > window.innerWidth;
     if ($('vrExit').hidden === upright) $('vrExit').hidden = !upright;
     v.menu = vr.home || vr.end || paused ? { items: vrMenuItems(), sel: vrMenuChoice().id } : null;
-    if (vr.home) { v.prompt = 'CYBERPUNK TENNIS'; v.sub = 'Turn to choose, press to pick'; }
+    if (vr.home) { v.prompt = 'CYBERPUNK TENNIS'; v.sub = 'Turn to choose, press to pick · look down for settings'; }
     else if (vr.end) { v.prompt = vr.end.title + ' ' + vr.end.score; v.sub = (vr.end.note ? vr.end.note + ' · ' : '') + 'Turn to choose, press to pick'; }
-    else if (paused) { v.prompt = 'PAUSED'; v.sub = 'Turn to choose, press to pick'; }
+    else if (paused) { v.prompt = 'PAUSED'; v.sub = 'Turn to choose, press to pick · look down for settings'; }
     else if (upright) { v.prompt = 'TURN SIDEWAYS'; v.sub = 'For a VR headset. No headset? Exit VR'; }
     else if (vr.wait) { v.prompt = 'LOOK DOWN THE COURT'; v.sub = pad && pad.linked ? 'Tap the pad to play · ' + padLinkText() : 'Press the button to play'; }
     else if (pose.pitch < CT.VR.PAUSE_PITCH) { v.prompt = 'PAUSE?'; v.sub = 'Press to pause'; }
