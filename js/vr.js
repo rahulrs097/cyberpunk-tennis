@@ -91,16 +91,75 @@
     return Promise.resolve('granted');
   }
 
-  // Nobody touches the screen during play, so keep it from dimming.
-  let wake = null, wakeWanted = false;
+  // Nobody touches the screen during play (or on the swipe pad between
+  // swipes), so keep it from dimming and locking. Two ways, both on while
+  // wanted:
+  //  - the Screen Wake Lock, where there is one. It goes when the page is
+  //    hidden and Safari may refuse it outside a tap, so it is asked for
+  //    again on the way back and on the next touch.
+  //  - a tiny silent video playing on a loop, muted and inline, which keeps
+  //    an iPhone awake too. iPhones get it always: no Wake Lock before
+  //    iOS 16.4, and from the Home Screen it did nothing before iOS 18.4.
+  //    Elsewhere it is the fallback when the lock is missing or refused.
+  const BLANK_MP4 = 'data:video/mp4;base64,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Y2hyb21hX21lPTEgdHJlbGxpcz0xIDh4OGRjdD0wIGNxbT0wIGRlYWR6b25lPTIxLDExIGZhc3RfcHNraXA9MSBjaHJvbWFfcXBfb2Zmc2V0PS00IHRocmVhZHM9MiBsb29rYWhlYWRfdGhyZWFkcz0xIHNsaWNlZF90aHJlYWRzPTAgbnI9MCBkZWNpbWF0ZT0xIGludGVybGFjZWQ9MCBibHVyYXlfY29tcGF0PTAgY29uc3RyYWluZWRfaW50cmE9MCBiZnJhbWVzPTAgd2VpZ2h0cD0wIGtleWludD0yNTAga2V5aW50X21pbj0xIHNjZW5lY3V0PTQwIGludHJhX3JlZnJlc2g9MCByY19sb29rYWhlYWQ9NDAgcmM9Y3JmIG1idHJlZT0xIGNyZj0yMy4wIHFjb21wPTAuNjAgcXBtaW49MCBxcG1heD02OSBxcHN0ZXA9NCBpcF9yYXRpbz0xLjQwIGFxPTE6MS4yMACAAAAAG2WIhAXzn///D0UAAVefJycnXXXXXXXXXXXXgAEYIAcBGCAHARggBwEYIAcBGCAHARggBwEYIAcBGCAHAAAAB0GaOAvnOEYBGCAHARggBwEYIAcBGCAHARggBwEYIAcBGCAHARggBw==';
+  let wake = null, wakeWanted = false, wakeAsking = false, wakeFailed = false, keepVideo = null;
+  const isIOS = () => typeof navigator !== 'undefined' &&
+    (/iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
+
+  function awakeVideo() {
+    if (keepVideo || typeof document === 'undefined' || !document.body) return keepVideo;
+    const v = document.createElement('video');
+    v.muted = true; v.defaultMuted = true; v.loop = true; v.playsInline = true;
+    for (const a of ['muted', 'loop', 'playsinline', 'webkit-playsinline']) v.setAttribute(a, '');
+    v.setAttribute('aria-hidden', 'true');
+    v.src = BLANK_MP4;
+    // on the page (a hidden video may not play) but out of sight and out of the way
+    v.style.cssText = 'position:fixed;left:0;top:0;width:2px;height:2px;opacity:0.01;pointer-events:none;z-index:-1';
+    document.body.appendChild(v);
+    keepVideo = v;
+    return v;
+  }
+
+  function lockScreen() {
+    if (wake || wakeAsking || typeof navigator === 'undefined' || !navigator.wakeLock) return;
+    wakeAsking = true;
+    try {
+      navigator.wakeLock.request('screen').then((l) => {
+        wakeAsking = false; wakeFailed = false;
+        if (!wakeWanted) { l.release().catch(() => {}); return; }
+        wake = l;
+        l.addEventListener('release', () => { if (wake === l) wake = null; });
+      }).catch(() => { wakeAsking = false; wakeFailed = true; playVideo(); });
+    } catch (e) { wakeAsking = false; wakeFailed = true; }
+  }
+
+  function playVideo() {
+    if (!wakeWanted) return;
+    const hasLock = typeof navigator !== 'undefined' && navigator.wakeLock;
+    if (!isIOS() && hasLock && !wakeFailed) return;
+    const v = awakeVideo();
+    if (v && v.paused) { try { const p = v.play(); if (p && p.catch) p.catch(() => {}); } catch (e) { /* optional */ } }
+  }
+
   function keepAwake(on) {
     wakeWanted = on;
-    if (!on) { if (wake) wake.release().catch(() => {}); wake = null; return; }
-    if (wake || !navigator.wakeLock) return;
-    try { navigator.wakeLock.request('screen').then((l) => { wake = l; l.addEventListener('release', () => { if (wake === l) wake = null; }); }).catch(() => {}); } catch (e) { /* optional */ }
+    if (!on) {
+      if (wake) wake.release().catch(() => {});
+      wake = null;
+      if (keepVideo) keepVideo.pause();
+      return;
+    }
+    lockScreen();
+    playVideo();
   }
-  // the lock goes when the page is hidden; take it again on the way back
-  if (typeof document !== 'undefined') document.addEventListener('visibilitychange', () => { if (wakeWanted && document.visibilityState === 'visible') keepAwake(true); });
+  // the lock goes when the page is hidden; take it again on the way back,
+  // and on any touch in case it was refused for want of one
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', () => { if (wakeWanted && document.visibilityState === 'visible') keepAwake(true); });
+    const nudge = () => { if (wakeWanted && (!wake || (keepVideo && keepVideo.paused))) keepAwake(true); };
+    for (const t of ['touchend', 'pointerup', 'click']) document.addEventListener(t, nudge, true);
+  }
+  const awakeState = () => ({ wanted: wakeWanted, lock: !!wake, video: !!(keepVideo && !keepVideo.paused) });
 
   // ---------------- auto shots ----------------
   // A hold this long (seconds) before letting go makes it a power shot.
@@ -160,7 +219,7 @@
   const RECENTRE_PITCH = 0.95;
 
   CT.VR = {
-    screenPose, createHead, startHead, stopHead, recentre, headPose, askMotion, keepAwake,
+    screenPose, createHead, startHead, stopHead, recentre, headPose, askMotion, keepAwake, awakeState,
     autoShot, timeToHit, POWER_HOLD, PAUSE_PITCH, RECENTRE_PITCH,
   };
 })();
