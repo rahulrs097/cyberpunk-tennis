@@ -44,9 +44,11 @@
       W: 0, H: 0, dpr: 1, top: 92, bottom: 24, hudBottom: 0,
       sky: document.createElement('canvas'),
       glow: {},
-      // phones with few cores or little memory start one level down
-      quality: (navigator.hardwareConcurrency || 8) <= 4 || (navigator.deviceMemory || 8) <= 3 ? 1 : 2,
+      quality: AUTO_START,
+      auto: true,      // false once the player picks a Graphics level (setQuality)
       frames: [],
+      tried: [],       // quality levels whose trial step down didn't help (watchFrameRate)
+      trial: null,
       lastT: 0,
       anim: [],
     };
@@ -316,29 +318,65 @@
     buildSky(r);
   }
 
+  // phones with few cores or little memory start one level down
+  const AUTO_START = (navigator.hardwareConcurrency || 8) <= 4 || (navigator.deviceMemory || 8) <= 3 ? 1 : 2;
+
   // Phone screens show about this many millimetres per CSS pixel; it places
   // each eye's view under its lens.
   const MM_PER_PX = 0.17;
   // metres between the two eyes
   const IPD = 0.064;
 
+  // Pick the graphics level (0 smooth, 1 balanced, 2 sharp) or 'auto'.
+  // Auto starts at AUTO_START and steps down while the phone can't keep up.
+  // In VR the VR graphics setting applies instead, and this one comes back
+  // after it. Call resizeRenderer after.
+  function setQuality(r, level) {
+    r.auto = level === 'auto';
+    const q = r.auto ? AUTO_START : level;
+    if (r.vr) r.qualityWas = q; else r.quality = q;
+    r.frames.length = 0; r.tried = []; r.trial = null;
+  }
+
   // Quality levels, highest first. A phone that can't keep up steps down:
   // fewer pixels, no lamp pools, no glow blur on the players.
   const DPR_CAP = [1, 1.25, 1.5];
 
-  // Drop a quality level when the phone can't keep up: frames average
-  // slower than ~40 fps while drawing one takes most of a 60 fps frame
-  // (`work`, seconds), or slower than ~22 fps whatever the reason. A phone
-  // that only shows 30 frames a second but draws each one quickly (an
-  // iPhone in Low Power Mode) keeps the full look.
+  // Auto graphics: drop a quality level when the phone can't keep up.
+  // Frames average slower than ~40 fps while drawing one takes most of a
+  // 60 fps frame (`work`, seconds), or slower than ~22 fps whatever the
+  // reason: step down for good.
+  //
+  // `work` only times our drawing calls. Chrome on Android just records
+  // them, and its GPU does the real drawing (the glow blur most of all)
+  // afterwards, so a struggling phone there looks quick. So frames slower
+  // than ~45 fps with quick drawing get a trial step down: if the frame
+  // rate then rises, the lighter look stays; if not, the screen itself is
+  // what's slow (an iPhone in Low Power Mode shows 30 frames a second),
+  // and the full look comes back and isn't tried again.
   function watchFrameRate(r, dt, work) {
-    if (!dt || dt >= 0.1 || r.quality === 0 || r.vr) return;   // skip pauses and tab switches
+    if (!r.auto || !dt || dt >= 0.1 || r.vr) return;   // skip pauses and tab switches
+    if (r.quality === 0 && !r.trial) return;
     r.frames.push([dt, work]);
     if (r.frames.length < 90) return;
     const avg = (i) => r.frames.reduce((a, f) => a + f[i], 0) / r.frames.length;
     const gap = avg(0), busy = avg(1);
     r.frames.length = 0;
-    if ((gap > 0.025 && busy > 0.012) || gap > 0.045) { r.quality--; resize(r, ...r.args); }
+    const t = r.trial;
+    if (t) {
+      r.trial = null;
+      if (gap < t.gap * 0.85) return;   // it helped: keep the lighter look
+      r.tried.push(t.from);
+      r.quality = t.from;
+      resize(r, ...r.args);
+      return;
+    }
+    if ((gap > 0.025 && busy > 0.012) || gap > 0.045) { r.quality--; resize(r, ...r.args); return; }
+    if (gap > 0.022 && !r.tried.includes(r.quality)) {
+      r.trial = { from: r.quality, gap };
+      r.quality--;
+      resize(r, ...r.args);
+    }
   }
 
   // A soft radial glow, rendered once per colour and size.
@@ -997,9 +1035,15 @@
   // Flash a word on the billboard for `secs` seconds. With `anim` (an id in
   // BOARD_ANIMS) the sign plays that animation instead of the word.
   // `data` is anything the animation shows, such as Rocket Serve's { kmh }.
-  function showBillboard(r, text, color, secs, anim, data) {
-    r.board = { text, color: color || '#e4ff4a', from: performance.now() / 1000, until: performance.now() / 1000 + (secs || 2.5), anim: BOARD_ANIMS[anim] ? anim : null, data };
+  // With `hold` (an achievement) nothing without it can replace the sign
+  // until it's done: Parallel Parking goes up mid-rally, so the point's
+  // OOPS or OMG would otherwise cut it off.
+  function showBillboard(r, text, color, secs, anim, data, hold) {
+    if (!hold && boardHeld(r)) return;
+    const now = performance.now() / 1000;
+    r.board = { text, color: color || '#e4ff4a', from: now, until: now + (secs || 2.5), anim: BOARD_ANIMS[anim] ? anim : null, data, hold: !!hold };
   }
+  function boardHeld(r) { return !!(r.board && r.board.hold && performance.now() / 1000 < r.board.until); }
 
   // Zen mode's score for the billboard: { text, label, server } (server 0 is
   // you, 1 the other player, -1 nobody), or null to go back to the tag.
@@ -1035,6 +1079,7 @@
   // Put a close line call up on the billboard for `secs` seconds (the
   // engine's lineCall event).
   function showLineCall(r, call, secs) {
+    if (boardHeld(r)) return;
     const now = performance.now() / 1000;
     r.board = { call, from: now, until: now + (secs || 3) };
   }
@@ -1325,13 +1370,25 @@
         const s = segment(r, [g.trail[i - 1].x, g.trail[i - 1].y, g.trail[i - 1].z], [g.trail[i].x, g.trail[i].y, g.trail[i].z]);
         if (!s) continue;
         ctx.strokeStyle = `rgba(228,255,74,${(i / g.trail.length) * 0.45})`;
-        ctx.lineWidth = Math.max(1.5, 0.08 * s[1].s) * (i / g.trail.length);
+        ctx.lineWidth = Math.max(r.vr ? 0.6 : 1.5, 0.08 * s[1].s) * (i / g.trail.length);
         ctx.beginPath(); ctx.moveTo(s[0].x, s[0].y); ctx.lineTo(s[1].x, s[1].y); ctx.stroke();
       }
       ctx.restore();
     }
-    const rad = Math.min(r.H * 0.04, Math.max(2.8, 0.075 * p.s));   // capped when it flies past your face
-    const gr = rad * 4;
+    let rad, gr;
+    if (r.vr) {
+      // In a headset the ball keeps its true size all the way to the far
+      // baseline. A flat-screen floor (2.8 px, glow 4x that) stops it shrinking
+      // past ~7 m, and with both eyes saying "far" the brain reads a ball
+      // that stops shrinking as one that grows. Sized by straight-line
+      // distance so it doesn't swell at the edge of the view either.
+      const t = 0.075 * sizeAt(r, b.pos.x, b.pos.y, b.pos.z);
+      rad = Math.min(r.H * 0.04, Math.max(0.9, t));
+      gr = Math.max(rad * 1.6, t * 4);
+    } else {
+      rad = Math.min(r.H * 0.04, Math.max(2.8, 0.075 * p.s));   // capped when it flies past your face
+      gr = rad * 4;
+    }
     ctx.drawImage(glowSprite(r, PAL.ballGlow, 0.8), p.x - gr, p.y - gr, gr * 2, gr * 2);
     ctx.fillStyle = PAL.ball;
     ctx.beginPath(); ctx.arc(p.x, p.y, rad, 0, Math.PI * 2); ctx.fill();
@@ -1716,18 +1773,26 @@
     // the pause menu: choices fixed around you, the one you face lit up
     if (v.menu) {
       const u = Math.min(r.W, r.H);
+      ctx.save();
+      ctx.beginPath(); ctx.rect(0, 0, r.W, r.H); ctx.clip();
       ctx.textAlign = 'center';
       for (const it of v.menu.items) {
-        const x = c.cx + c.f * Math.tan(CT.clamp(it.yaw - v.yaw, -1.2, 1.2)), y = c.cy + u * 0.03;
+        // row 1 (settings) sits under the main row, a little smaller
+        const r1 = it.row === 1;
+        const x0 = c.cx + c.f * Math.tan(CT.clamp(it.yaw - v.yaw, -1.2, 1.2)), y = c.cy + u * (r1 ? 0.17 : 0.03);
         const on = it.id === v.menu.sel;
-        ctx.font = `900 ${Math.round(u * (on ? 0.06 : 0.048))}px Tektur, sans-serif`;
-        const w = ctx.measureText(it.label).width + u * 0.06, h = u * 0.11;
+        ctx.font = `900 ${Math.round(u * (on ? 0.06 : 0.048) * (r1 ? 0.8 : 1))}px Tektur, sans-serif`;
+        const w = ctx.measureText(it.label).width + u * 0.06, h = u * (r1 ? 0.09 : 0.11);
+        // the one you face is kept inside the eye; the rest run off its
+        // edge (clipped), so labels never pile up there
+        const x = on ? CT.clamp(x0, w / 2 + 4, r.W - w / 2 - 4) : x0;
         ctx.fillStyle = on ? 'rgba(255,63,180,0.25)' : 'rgba(10,8,30,0.7)';
         ctx.strokeStyle = on ? PAL.net : 'rgba(157,149,201,0.6)'; ctx.lineWidth = on ? 2 : 1;
         ctx.beginPath(); ctx.rect(x - w / 2, y - h * 0.68, w, h); ctx.fill(); ctx.stroke();
         ctx.fillStyle = on ? '#ffffff' : '#9d95c9';
         ctx.fillText(it.label, x, y);
       }
+      ctx.restore();
     }
     if (v.prompt) {
       const u = Math.min(r.W, r.H);
@@ -1746,7 +1811,8 @@
       if (v.sub) {
         ctx.shadowBlur = 0;
         ctx.fillStyle = '#9d95c9';
-        line(v.sub, 500, u * 0.045, c.cy + u * 0.16);
+        // below the settings row when there is one
+        line(v.sub, 500, u * 0.045, c.cy + u * (v.menu && v.menu.items.some((it) => it.row === 1) ? 0.28 : 0.16));
       }
     }
     ctx.restore();
@@ -1793,6 +1859,7 @@
   CT.resizeRenderer = resize;
   CT.setView = setView;
   CT.setVR = setVR;
+  CT.setQuality = setQuality;
   CT.renderGame = render;
   CT.showBillboard = showBillboard;
   CT.BOARD_ANIMS = Object.keys(BOARD_ANIMS);

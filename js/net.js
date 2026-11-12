@@ -61,7 +61,36 @@
   // before. Add ?relay to the page URL to never try.
   const STUN = [{ urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.l.google.com:19302'] }];
   const DIRECT_WAIT = 8000;   // ms to wait for the direct link to open
+  // While messages go through the relay, the guest keeps asking for another
+  // try at a direct link, this long after each one that didn't open (then
+  // every 20 s). Phones on the same wifi don't always find each other the
+  // first time, and the relay's round trip is far slower than the wifi's.
+  const RETRY = [2000, 5000, 10000, 20000];
   const tryDirect = typeof RTCPeerConnection === 'function' && !/[?&]relay\b/.test(location.search);
+  // A phone's wifi naps when it has nothing to send, and the router then
+  // holds what comes for it until it wakes (a beacon, every 100-300 ms). On
+  // a direct link each phone therefore sends something at least this often,
+  // a two-letter note ('ka') if it has nothing else, so neither radio
+  // dozes. The host's snapshots already do it for the host; this keeps the
+  // guest awake too. Through the relay the gap is small next to the trip, and
+  // every message costs the free plan, so it's only done on the direct link.
+  const KEEP_AWAKE = 50;
+  // With ?ping in the page URL the link also times the trip to the relay's
+  // room and back, and to the nearest Cloudflare data centre and back, and
+  // keeps notes on why a direct link did or didn't open (see diag below).
+  const measure = /[?&]ping\b/.test(location.search);
+
+  // What kind of address a WebRTC candidate offers: 'lan' (an address on the
+  // home network), 'mdns' (the same, hidden behind a made-up name the other
+  // phone has to look up on the network), 'srflx' (the router's address on
+  // the internet), or 'relay'; with '/tcp' when it isn't UDP.
+  function candidateKind(c) {
+    const text = (c && c.candidate) || '';
+    const typ = (/ typ (\w+)/.exec(text) || [])[1] || '?';
+    const addr = text.split(' ')[4] || '';
+    const kind = typ === 'host' ? (/\.local$/.test(addr) ? 'mdns' : 'lan') : typ;
+    return / tcp /i.test(text) ? kind + '/tcp' : kind;
+  }
 
   // role: 'host' | 'guest'. onMessage gets parsed objects; onStatus gets
   // 'open' | 'closed' | 'error', or 'full' when the room already has
@@ -70,9 +99,13 @@
   function connect(code, role, onMessage, onStatus) {
     const status = onStatus || (() => {});
     const parse = (text) => { try { return JSON.parse(text); } catch (e) { return null; } };
-    const deliver = (m) => { if (m && m.t !== 'rtc') onMessage(m); };
+    const deliver = (m) => { if (m && m.t !== 'rtc' && m.t !== 'ka') onMessage(m); };
     let pc = null, dc = null, direct = false, closed = false;
-    let offerId = 0, waitTimer = 0, askTimer = 0;
+    let offerId = 0, waitTimer = 0, askTimer = 0, awakeTimer = 0, lastSent = 0;
+    let retryTimer = 0, retries = 0;
+    // why the direct link is or isn't up: how many offers this phone made or
+    // got, what each phone offered, and how the last try ended
+    const notes = { offers: 0, mine: new Set(), theirs: new Set(), state: tryDirect ? 'waiting' : 'off', relayMs: null, edgeMs: null, colo: '' };
     // The other phone's first messages over the direct link wait here until
     // its last one through the room ('via') has arrived, so nothing is
     // taken out of order at the switch.
@@ -81,7 +114,8 @@
 
     const room = openRoom(code, role, (text) => {
       const m = parse(text);
-      if (m && m.t === 'rtc' && m.k === 'via') { if (m.id === offerId) { viaSeen = true; release(); } }
+      if (m && m.t === 'echo') { if (Number.isFinite(m.at)) notes.relayMs = smooth(notes.relayMs, performance.now() - m.at); }
+      else if (m && m.t === 'rtc' && m.k === 'via') { if (m.id === offerId) { viaSeen = true; release(); } }
       else if (m && m.t === 'rtc') signals = signals.then(() => onSignal(m)).catch(() => { /* no direct link this time */ });
       else deliver(m);
     }, (st) => {
@@ -96,17 +130,44 @@
       let n = 0;
       clearInterval(askTimer);
       signal({ k: 'ready' });
-      askTimer = setInterval(() => { if (pc || ++n > 5) clearInterval(askTimer); else signal({ k: 'ready' }); }, 2000);
+      askTimer = setInterval(() => {
+        if (pc) clearInterval(askTimer);
+        else if (++n > 5) { clearInterval(askTimer); retryLater(); }
+        else signal({ k: 'ready' });
+      }, 2000);
+    }
+
+    // A try that didn't open, or a direct link that dropped: back through
+    // the room, and the guest asks again a little later.
+    function lost() {
+      dropPeer();
+      retryLater();
+    }
+    function retryLater() {
+      if (closed || !tryDirect || role !== 'guest') return;
+      clearTimeout(retryTimer);
+      retryTimer = setTimeout(() => { if (!closed && !pc) askForOffer(); }, RETRY[Math.min(retries++, RETRY.length - 1)]);
     }
 
     function newPeer(id) {
       dropPeer();
+      clearTimeout(retryTimer);
       offerId = id;
       viaSeen = false;
       const p = (pc = new RTCPeerConnection({ iceServers: STUN }));
-      p.onicecandidate = (e) => { if (e.candidate && pc === p) signal({ k: 'ice', id, c: e.candidate.toJSON() }); };
-      p.onconnectionstatechange = () => { if (pc === p && p.connectionState === 'failed') dropPeer(); };
-      waitTimer = setTimeout(() => { if (pc === p && !direct) dropPeer(); }, DIRECT_WAIT);
+      notes.offers++;
+      notes.mine.clear();
+      notes.theirs.clear();
+      notes.state = 'trying';
+      p.onicecandidate = (e) => {
+        if (e.candidate && pc === p) { notes.mine.add(candidateKind(e.candidate)); signal({ k: 'ice', id, c: e.candidate.toJSON() }); }
+      };
+      p.onconnectionstatechange = () => {
+        if (pc !== p) return;
+        notes.state = p.connectionState;
+        if (p.connectionState === 'failed') lost();
+      };
+      waitTimer = setTimeout(() => { if (pc === p && !direct) { notes.state = 'timed out'; lost(); } }, DIRECT_WAIT);
       return p;
     }
 
@@ -117,7 +178,12 @@
         if (dc !== ch || closed) return;
         signal({ k: 'via', id: offerId });   // the last message through the room
         direct = true;
+        retries = 0;
         clearTimeout(waitTimer);
+        clearInterval(awakeTimer);
+        awakeTimer = setInterval(() => {
+          if (dc === ch && isDirect() && performance.now() - lastSent >= KEEP_AWAKE - 5) post('{"t":"ka"}');
+        }, KEEP_AWAKE);
         // in case the other phone's 'via' is lost
         setTimeout(() => { if (dc === ch) release(); }, 2000);
       };
@@ -126,7 +192,7 @@
         const m = parse(e.data);
         if (held) held.push(m); else deliver(m);
       };
-      ch.onclose = () => { if (dc === ch) dropPeer(); };
+      ch.onclose = () => { if (dc === ch) lost(); };
     }
 
     function release() {
@@ -138,6 +204,7 @@
     // back through the room
     function dropPeer() {
       clearTimeout(waitTimer);
+      clearInterval(awakeTimer);
       const p = pc, ch = dc;
       pc = dc = null;
       direct = false;
@@ -166,26 +233,50 @@
       } else if (m.k === 'answer' && role === 'host' && pc.signalingState === 'have-local-offer') {
         await pc.setRemoteDescription({ type: 'answer', sdp: m.sdp });
       } else if (m.k === 'ice' && m.c) {
+        notes.theirs.add(candidateKind(m.c));
         await pc.addIceCandidate(m.c);
       }
     }
 
-    // CT.Net.lag (?lag= in the page URL) holds each message back that many
+    const smooth = (was, ms) => (was === null ? ms : was + (ms - was) * 0.4);
+
+  // CT.Net.lag (?lag= in the page URL) holds each message back that many
     // ms, in order, to try the game on a slow link
     let due = 0;
     const isDirect = () => direct && dc.readyState === 'open';
-    const post = (text) => { if (isDirect()) dc.send(text); else room.send(text); };
+    const post = (text) => {
+      if (isDirect()) { lastSent = performance.now(); dc.send(text); } else room.send(text);
+    };
     const later = (text) => {
       if (!CT.Net.lag) { post(text); return; }
       const now = performance.now();
       due = Math.max(due, now + CT.Net.lag);
       setTimeout(() => post(text), due - now);
     };
+    // ?ping: time the room (through the relay's WebSocket, which answers
+    // echoes itself) and the nearest data centre every two seconds
+    let measureTimer = 0;
+    if (measure && CT.RELAY_URL) {
+      const where = CT.RELAY_URL.replace(/^ws/, 'http') + '/where';
+      let n = 0;
+      measureTimer = setInterval(() => {
+        room.send(JSON.stringify({ t: 'echo', at: performance.now() }));
+        if (n++ % 2) return;
+        const t0 = performance.now();
+        fetch(where, { cache: 'no-store' }).then((r) => r.json()).then((w) => {
+          notes.edgeMs = smooth(notes.edgeMs, performance.now() - t0);
+          notes.colo = String(w.colo || '').slice(0, 8);
+        }).catch(() => { /* try again next time */ });
+      }, 2000);
+    }
+
     return {
       send: (m) => later(JSON.stringify(m)),
       // true while messages go straight to the other phone
       direct: isDirect,
-      close: () => { closed = true; clearInterval(askTimer); dropPeer(); room.close(); },
+      // the notes above, as plain values
+      diag: () => ({ ...notes, mine: [...notes.mine].sort().join(' ') || '-', theirs: [...notes.theirs].sort().join(' ') || '-' }),
+      close: () => { closed = true; clearInterval(askTimer); clearTimeout(retryTimer); clearInterval(measureTimer); dropPeer(); room.close(); },
     };
   }
 

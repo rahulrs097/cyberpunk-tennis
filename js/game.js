@@ -520,6 +520,8 @@
     const kmh = Math.round(Math.hypot(b.vel.x, b.vel.y, b.vel.z) * 3.6);
     const info = {
       side: p.side, kind: shot.kind, wing: shot.wing, kmh,
+      // where the racket met it (for 3D sound)
+      x: +b.pos.x.toFixed(2), y: +b.pos.y.toFixed(2), z: +b.pos.z.toFixed(2),
       spin: shot.lob ? 'Lob' : shot.spin > 0.35 ? 'Topspin' : shot.spin < 0 ? 'Slice' : 'Flat',
       curve: Math.abs(shot.side) > 0.2 ? (shot.side * p.fwd > 0 ? 'curls right' : 'curls left') : '',
       errMs: Math.round(shot.err * 1000),
@@ -670,7 +672,7 @@
     dt = Math.min(dt, 1);
     for (let t = PHYS.DT; t <= dt + 1e-9 && g.phase === 'rally' && g.ball.active; t += PHYS.DT) {
       const ev = CT.stepBall(g.ball, PHYS.DT);
-      if (ev === 'net') emit(g, 'net', {});
+      if (ev === 'net') emit(g, 'net', netAt(g));
       if (ev === 'bounce') onBounce(g);
     }
   }
@@ -1120,6 +1122,9 @@
     }
   }
 
+  // where the ball met the net (for 3D sound)
+  function netAt(g) { const b = g.ball.pos; return { x: +b.x.toFixed(2), y: 0, z: +b.z.toFixed(2) }; }
+
   function onBounce(g) {
     const b = g.ball;
     g.marks.push({ x: b.pos.x, y: b.pos.y, age: 0 });
@@ -1280,7 +1285,7 @@
         }
         return;
       }
-      if (ev === 'net') { emit(g, 'net', {}); easeOff(g); }
+      if (ev === 'net') { emit(g, 'net', netAt(g)); easeOff(g); }
       if (ev === 'bounce') onBounce(g);
       if (g.phase === 'rally') checkCrossings(g);
       if (Math.abs(b.pos.y) > 40 || Math.abs(b.pos.x) > 25) b.active = false;
