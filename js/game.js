@@ -154,6 +154,25 @@
     };
   }
 
+  // Is this (from storage, so it could be anything: an older build's, cut
+  // short, or edited) a saved CPU match that can be picked up? `s` is
+  // { p0, p1, level, game: saveState(), tracker }.
+  function validSave(s) {
+    const int = (v, lo, hi) => Number.isInteger(v) && v >= lo && v <= hi;
+    const pair = (a, ok) => Array.isArray(a) && a.length === 2 && a.every(ok);
+    const wing = (w) => !!w && Number.isFinite(w.n) && Number.isFinite(w.err);
+    if (!s || typeof s !== 'object' || !s.game || typeof s.game !== 'object') return false;
+    if (!own(CT.CHARACTERS, s.p0) || !own(CT.CHARACTERS, s.p1) || !own(CT.CPU_LEVELS, s.level)) return false;
+    const m = s.game.match;
+    if (!m || typeof m !== 'object' || m.over !== false) return false;
+    if (!pair(m.games, (v) => int(v, 0, 7)) || !pair(m.points, (v) => int(v, 0, 999))) return false;
+    if (!int(m.server, 0, 1) || !int(m.tbFirstServer, 0, 1) || typeof m.tiebreak !== 'boolean' || !Array.isArray(m.log)) return false;
+    if (!pair(s.game.stamina, (p) => pair(p, (v) => Number.isFinite(v) && v >= 0 && v <= 100))) return false;
+    if (!pair(s.game.scout, (sc) => !!sc && wing(sc.fh) && wing(sc.bh) && Number.isFinite(sc.points) && Number.isFinite(sc.net))) return false;
+    return s.game.lastGames == null || Number.isFinite(s.game.lastGames);
+  }
+  const own = (o, k) => typeof k === 'string' && Object.prototype.hasOwnProperty.call(o, k);
+
   // CPU sides always run themselves; a human side does when automove is on.
   // A tap still overrides the run until the next shot.
   function autoMoves(g, side) { return g.control[side] === 'cpu' || !!g.autoMove[side]; }
@@ -1516,6 +1535,7 @@
   CT._cpuPlan = cpuPlan;
   CT.updateGame = update;
   CT.saveGameState = saveState;
+  CT.validSave = validSave;
   CT.requestMove = requestMove;
   CT.requestToss = requestToss;
   CT.requestSwipe = requestSwipe;

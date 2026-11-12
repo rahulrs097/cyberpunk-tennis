@@ -592,9 +592,7 @@
   function loadSaved() {
     try {
       const s = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null');
-      const m = s && s.game && s.game.match;
-      if (m && !m.over && CT.CHARACTERS[s.p0] && CT.CHARACTERS[s.p1] && CT.CPU_LEVELS[s.level]
-        && Array.isArray(m.games) && Array.isArray(m.points) && Array.isArray(s.game.stamina)) return s;
+      if (CT.validSave(s)) return s;
     } catch (e) { /* storage is optional */ }
     return null;
   }
