@@ -117,23 +117,45 @@
   }
 
   // Same, added to the current path (to fill many shapes in one go).
-  function addPoly(ctx, r, pts) {
-    const c = r.cam;
-    const v = pts.map((p) => toCam(c, p[0], p[1], p[2] || 0));
-    const out = [];
-    for (let i = 0; i < v.length; i++) {
-      const a = v[i], b = v[(i + 1) % v.length];
-      const ain = a.z >= NEAR, bin = b.z >= NEAR;
-      if (ain) out.push(a);
+  // The court's lines alone are a few hundred of these a frame, so the
+  // corners go through fixed scratch arrays rather than new objects.
+  const polyX = [], polyY = [], polyZ = [], outX = [], outY = [];
+  function camPoint(c, i, x, y, z) {
+    const dx = x - c.x, dy = y - c.y, dz = z - c.z;
+    polyX[i] = dx * c.R.x + dy * c.R.y;
+    polyY[i] = dx * c.U.x + dy * c.U.y + dz * c.U.z;
+    polyZ[i] = dx * c.F.x + dy * c.F.y + dz * c.F.z;
+  }
+  // clip the n scratch corners against the near plane and add them to the path
+  function clipToPath(ctx, c, n) {
+    let m = 0;
+    for (let i = 0; i < n; i++) {
+      const k = i + 1 === n ? 0 : i + 1;
+      const az = polyZ[i], bz = polyZ[k];
+      const ain = az >= NEAR, bin = bz >= NEAR;
+      if (ain) { const s = c.f / az; outX[m] = c.cx + polyX[i] * s; outY[m++] = c.cy - polyY[i] * s; }
       if (ain !== bin) {
-        const t = (NEAR - a.z) / (b.z - a.z);
-        out.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, z: NEAR });
+        const t = (NEAR - az) / (bz - az), s = c.f / NEAR;
+        outX[m] = c.cx + (polyX[i] + (polyX[k] - polyX[i]) * t) * s;
+        outY[m++] = c.cy - (polyY[i] + (polyY[k] - polyY[i]) * t) * s;
       }
     }
-    if (out.length < 3) return false;
-    out.forEach((p, i) => { const s = fromCamToScreen(c, p); i ? ctx.lineTo(s.x, s.y) : ctx.moveTo(s.x, s.y); });
+    if (m < 3) return false;
+    ctx.moveTo(outX[0], outY[0]);
+    for (let i = 1; i < m; i++) ctx.lineTo(outX[i], outY[i]);
     ctx.closePath();
     return true;
+  }
+  function addPoly(ctx, r, pts) {
+    const c = r.cam, n = pts.length;
+    for (let i = 0; i < n; i++) { const p = pts[i]; camPoint(c, i, p[0], p[1], p[2] || 0); }
+    return clipToPath(ctx, c, n);
+  }
+  // a four-cornered patch of ground, corners given as plain numbers
+  function addGroundQuad(ctx, r, x0, y0, x1, y1, x2, y2, x3, y3) {
+    const c = r.cam;
+    camPoint(c, 0, x0, y0, 0); camPoint(c, 1, x1, y1, 0); camPoint(c, 2, x2, y2, 0); camPoint(c, 3, x3, y3, 0);
+    return clipToPath(ctx, c, 4);
   }
 
   function fillPoly(ctx, r, pts, style) {
@@ -1170,7 +1192,7 @@
         let ax = x1, ay = y1, aw = hw(ax, ay);
         for (let i = 1; i <= n; i++) {
           const bx = x1 + ((x2 - x1) * i) / n, by = y1 + ((y2 - y1) * i) / n, bw = hw(bx, by);
-          addPoly(ctx, r, [[ax + nx * aw, ay + ny * aw], [bx + nx * bw, by + ny * bw], [bx - nx * bw, by - ny * bw], [ax - nx * aw, ay - ny * aw]]);
+          addGroundQuad(ctx, r, ax + nx * aw, ay + ny * aw, bx + nx * bw, by + ny * bw, bx - nx * bw, by - ny * bw, ax - nx * aw, ay - ny * aw);
           ax = bx; ay = by; aw = bw;
         }
       }
@@ -1818,6 +1840,15 @@
     ctx.restore();
   }
 
+  const CAR = 0, LAMP = 1, PLAYER = 2, RACKET = 3, NET = 4, BALL = 5;
+  const scene = [];
+  let sceneN = 0;
+  function sceneItem(d, kind, o) {
+    const it = scene[sceneN] || (scene[sceneN] = { d: 0, kind: 0, o: null });
+    it.d = d; it.kind = kind; it.o = o;
+    sceneN++;
+  }
+
   function drawScene(ctx, r, g, human, info, land) {
     drawSky(ctx, r);
     drawBillboard(ctx, r);
@@ -1834,21 +1865,37 @@
     // everything that stands up, sorted far to near along the view direction
     const c = r.cam;
     const depth = (x, y) => (x - c.x) * c.F.x + (y - c.y) * c.F.y;
-    const items = [];
-    for (const car of CARS) items.push({ d: depth(car.x, car.y), draw: () => drawCar(ctx, r, car) });
-    for (const lamp of LAMPS) items.push({ d: depth(lamp[0], lamp[1]), draw: () => drawLamp(ctx, r, lamp) });
+    // (the list and its entries are reused from frame to frame)
+    sceneN = 0;
+    for (const car of CARS) sceneItem(depth(car.x, car.y), CAR, car);
+    for (const lamp of LAMPS) sceneItem(depth(lamp[0], lamp[1]), LAMP, lamp);
     if (r.vr) {
-      const me = g.players[human], head = racketHead(r, g, me);
-      items.push({ d: depth(head.x, head.y), draw: () => drawRacketWorld(ctx, r, g, me, head) });
+      const head = racketHead(r, g, g.players[human]);
+      sceneItem(depth(head.x, head.y), RACKET, head);
     }
     for (const p of g.players) {
       if (r.view === 'first' && p.side === human) continue;   // you are the camera
-      items.push({ d: depth(p.x, p.y), draw: () => drawPlayer(ctx, r, g, p) });
+      sceneItem(depth(p.x, p.y), PLAYER, p);
     }
-    items.push({ d: depth(0, 0), draw: () => drawNet(ctx, r) });
-    if (g.ball.active) items.push({ d: depth(g.ball.pos.x, g.ball.pos.y) - 0.01, draw: () => drawBall(ctx, r, g) });
-    items.sort((a, b) => b.d - a.d);
-    for (const it of items) it.draw();
+    sceneItem(depth(0, 0), NET, null);
+    if (g.ball.active) sceneItem(depth(g.ball.pos.x, g.ball.pos.y) - 0.01, BALL, null);
+    // far to near; ties keep the order they were added in
+    for (let i = 1; i < sceneN; i++) {
+      const it = scene[i];
+      let k = i - 1;
+      while (k >= 0 && scene[k].d < it.d) { scene[k + 1] = scene[k]; k--; }
+      scene[k + 1] = it;
+    }
+    for (let i = 0; i < sceneN; i++) {
+      const it = scene[i], o = it.o;
+      if (it.kind === CAR) drawCar(ctx, r, o);
+      else if (it.kind === LAMP) drawLamp(ctx, r, o);
+      else if (it.kind === PLAYER) drawPlayer(ctx, r, g, o);
+      else if (it.kind === RACKET) drawRacketWorld(ctx, r, g, g.players[human], o);
+      else if (it.kind === NET) drawNet(ctx, r);
+      else drawBall(ctx, r, g);
+      it.o = null;
+    }
     if (r.view === 'first') {
       if (!r.vr) drawRacketView(ctx, r, g, g.players[human]);
       if (!r.zen) drawTimingRing(ctx, r, g, info);
