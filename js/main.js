@@ -835,7 +835,7 @@
   const onOff = (on) => (on ? 'ON' : 'OFF');
   function vrSettingsRow(all) {
     const sound = [{ id: 'zen', label: 'ZEN: ' + onOff(zen), row: 1 }, { id: 'music', label: 'MUSIC: ' + onOff(musicOn), row: 1 }];
-    const row = all ? [{ id: 'char', label: CT.CHARACTERS[humanChar].name.toUpperCase(), row: 1 }, { id: 'level', label: 'LEVEL: ' + level.toUpperCase(), row: 1 }, ...sound] : sound;
+    const row = all ? [{ id: 'char', label: 'PLAYER: ' + CT.CHARACTERS[humanChar].name.toUpperCase(), row: 1 }, { id: 'level', label: 'LEVEL: ' + level.toUpperCase(), row: 1 }, ...sound] : sound;
     const gap = 0.6;
     row.forEach((it, i) => { it.yaw = (i - (row.length - 1) / 2) * gap; });
     return row;
