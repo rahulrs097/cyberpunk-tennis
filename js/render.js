@@ -1367,13 +1367,25 @@
         const s = segment(r, [g.trail[i - 1].x, g.trail[i - 1].y, g.trail[i - 1].z], [g.trail[i].x, g.trail[i].y, g.trail[i].z]);
         if (!s) continue;
         ctx.strokeStyle = `rgba(228,255,74,${(i / g.trail.length) * 0.45})`;
-        ctx.lineWidth = Math.max(1.5, 0.08 * s[1].s) * (i / g.trail.length);
+        ctx.lineWidth = Math.max(r.vr ? 0.6 : 1.5, 0.08 * s[1].s) * (i / g.trail.length);
         ctx.beginPath(); ctx.moveTo(s[0].x, s[0].y); ctx.lineTo(s[1].x, s[1].y); ctx.stroke();
       }
       ctx.restore();
     }
-    const rad = Math.min(r.H * 0.04, Math.max(2.8, 0.075 * p.s));   // capped when it flies past your face
-    const gr = rad * 4;
+    let rad, gr;
+    if (r.vr) {
+      // In a headset the ball keeps its true size all the way to the far
+      // baseline. A flat-screen floor (2.8 px, glow 4x that) stops it shrinking
+      // past ~7 m, and with both eyes saying "far" the brain reads a ball
+      // that stops shrinking as one that grows. Sized by straight-line
+      // distance so it doesn't swell at the edge of the view either.
+      const t = 0.075 * sizeAt(r, b.pos.x, b.pos.y, b.pos.z);
+      rad = Math.min(r.H * 0.04, Math.max(0.9, t));
+      gr = Math.max(rad * 1.6, t * 4);
+    } else {
+      rad = Math.min(r.H * 0.04, Math.max(2.8, 0.075 * p.s));   // capped when it flies past your face
+      gr = rad * 4;
+    }
     ctx.drawImage(glowSprite(r, PAL.ballGlow, 0.8), p.x - gr, p.y - gr, gr * 2, gr * 2);
     ctx.fillStyle = PAL.ball;
     ctx.beginPath(); ctx.arc(p.x, p.y, rad, 0, Math.PI * 2); ctx.fill();
