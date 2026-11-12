@@ -31,7 +31,10 @@
     // while the ball can still come to you the head turns at most this far
     // off straight ahead, so swipes keep aiming down the court; once it's
     // past you the head is free to turn right round after it
-    maxTurn: 0.6, pastFrom: -0.3, minPitch: -0.35, ballPitch: 0.7, maxSpin: 4 };
+    maxTurn: 0.6, pastFrom: -0.3, minPitch: -0.35, ballPitch: 0.7, maxSpin: 4,
+    // a ball above smashFrom metres and closer than smashNear metres ahead
+    // (fading in over the 0.6 m and 2 m before) doesn't turn the head
+    smashFrom: 2.0, smashNear: 4 };
 
   function createRenderer(canvas) {
     return {
@@ -225,7 +228,14 @@
         // follow the ball's height only part way, so bounces don't bob the view
         pitch = courtPitch + (ballPitch - courtPitch) * EYE.ballPitch;
         if (!past) {
-          yaw = ahead + CT.clamp(angleDiff(yaw, ahead), -EYE.maxTurn, EYE.maxTurn);
+          // A ball dropping onto you from above, to smash: keep facing down
+          // the court instead of swinging round to it as it comes in beside
+          // your head, so the screen's straight up is straight down the
+          // court while you swipe (its ring stays on screen at the edge).
+          const high = CT.clamp((b.pos.z - EYE.smashFrom) / 0.6, 0, 1);
+          const close = CT.clamp((EYE.smashNear - fwd * (b.pos.y - p.y)) / 2, 0, 1);
+          const turn = 1 - high * close * (b.lastHitter !== human ? 1 : 0);
+          yaw = ahead + CT.clamp(angleDiff(yaw, ahead), -EYE.maxTurn, EYE.maxTurn) * turn;
           pitch = Math.max(EYE.minPitch, pitch);
         }
       }

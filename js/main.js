@@ -758,13 +758,22 @@
     // A slice is swiped the other way: top-left to bottom-right goes left.
     // But a smash swiped down goes the way the swipe goes, like the racket
     // coming down through the ball: the engine picks that aim (`smash`) if
-    // the ball turns out to be above smash height when it's hit.
+    // the ball turns out to be above smash height when it's hit. (An upward
+    // swipe's smash aim is its plain aim; it gets `smash` too so that in
+    // first person it's aimed from the view like the downward one.)
     // (a swipe pad's swipe has nothing to do with the view in the headset)
     const at = (a) => (vr ? undefined : pointAt(a));
-    const smash = spinDir < 0 ? { aim, landX: at(aim) } : undefined;
+    // In first person the ball's shadow is under or behind you when you
+    // smash, and the far court is a thin strip under a sky full of ball, so
+    // a smash is aimed from the way you're looking instead: straight goes
+    // where the middle of the screen faces, whichever way it was swiped.
+    const smashAt = (a) => {
+      const x = at(a);
+      return x !== undefined || vr || renderer.view !== 'first' ? x : CT.viewAim(renderer.cam, game.players[me].fwd, a);
+    };
+    const smash = { aim, landX: smashAt(aim) };
     if (spinDir < 0) aim = -aim;
-    const input = { aim, pace, over, spinDir, curve, depth, landX: at(aim), lob };
-    if (smash) input.smash = smash;
+    const input = { aim, pace, over, spinDir, curve, depth, landX: at(aim), lob, smash };
     // A slow swipe is still going when the ball arrives: its timing counts
     // from partway through, not from when the finger lifts.
     // And it always goes deep, however long the swipe: a short lob is just a
