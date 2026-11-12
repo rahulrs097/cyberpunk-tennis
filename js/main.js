@@ -17,6 +17,7 @@
   // Chill / Club / Pro: ball speed and how well the CPU plays (CT.CPU_LEVELS)
   // (a new player starts on Chill, as the tutorial advises)
   let level = 'chill';
+  let pickLevel = () => {};   // set up with the menu's level buttons
   try { const v = localStorage.getItem('ct.level'); if (CT.CPU_LEVELS[v]) level = v; } catch (e) { /* storage is optional */ }
   let tut = null;      // the tutorial in progress: { i: lesson index, done: reps passed }
   const SERVE_CLOCK = 20;   // seconds to start a serve in an online match
@@ -798,7 +799,7 @@
   // Otherwise letting go hits, and a long enough hold makes it a power shot;
   // where it goes is picked for you.
   function vrPress() {
-    if (game && (paused || vr.end)) { vr.ignoreUp = true; vrMenuPick(); return; }
+    if (vr.home || (game && (paused || vr.end))) { vr.ignoreUp = true; vrMenuPick(); return; }
     if (!game || vr.press !== null) return;
     vr.ignoreUp = true;
     if (vr.wait) {
@@ -822,10 +823,20 @@
   // The pause menu in the headset: three choices around you, picked by
   // turning to one and pressing.
   // The same at the end of a match, with Rematch in the middle.
+  // Quit or Menu in the headset leads to the headset's own menu (not the
+  // phone's, which can't be used with the phone in a headset): a new match
+  // at the level shown, the saved match if there is one, the level, or out.
   const VR_MENU = [{ id: 'exit', label: 'EXIT VR', yaw: -0.55 }, { id: 'resume', label: 'RESUME', yaw: 0 }, { id: 'quit', label: 'QUIT', yaw: 0.55 }];
   const VR_END_MENU = [{ id: 'exit', label: 'EXIT VR', yaw: -0.55 }, { id: 'rematch', label: 'REMATCH', yaw: 0 }, { id: 'quit', label: 'MENU', yaw: 0.55 }];
+  const LEVEL_ORDER = ['chill', 'club', 'pro'];
+  function vrHomeMenu() {
+    const lv = 'LEVEL: ' + level.toUpperCase();
+    if (loadSaved()) return [{ id: 'exit', label: 'EXIT VR', yaw: -0.8 }, { id: 'saved', label: 'RESUME', yaw: -0.27 }, { id: 'play', label: 'NEW MATCH', yaw: 0.27 }, { id: 'level', label: lv, yaw: 0.8 }];
+    return [{ id: 'exit', label: 'EXIT VR', yaw: -0.6 }, { id: 'play', label: 'PLAY', yaw: 0 }, { id: 'level', label: lv, yaw: 0.6 }];
+  }
+  const vrMenuItems = () => (vr.home ? vrHomeMenu() : vr.end ? VR_END_MENU : VR_MENU);
   function vrMenuChoice() {
-    const items = vr.end ? VR_END_MENU : VR_MENU, yaw = CT.VR.headPose(vr.head).yaw;
+    const items = vrMenuItems(), yaw = CT.VR.headPose(vr.head).yaw;
     let best = items[1];
     for (const it of items) if (Math.abs(yaw - it.yaw) < Math.abs(yaw - best.yaw)) best = it;
     return best;
@@ -833,14 +844,18 @@
   function vrMenuPick() {
     const it = vrMenuChoice();
     if (it.id === 'resume') setPaused(false);
-    else if (it.id === 'rematch') startMatch();
-    else if (it.id === 'quit') { leaveFullscreen(); showMenu(); }
+    else if (it.id === 'rematch' || it.id === 'play') startMatch();
+    else if (it.id === 'saved') resumeMatch();
+    else if (it.id === 'level') { pickLevel(LEVEL_ORDER[(LEVEL_ORDER.indexOf(level) + 1) % LEVEL_ORDER.length]); blip(880, 0.08, 'sine', 0.06); }
+    else if (it.id === 'quit') showMenu('', true);
     else leaveVR();
   }
   // Out of the headset view and back to the normal screen: the headset
   // menu's Exit VR, or the Exit VR button a phone held upright shows.
   function leaveVR() {
     if (!vr) return;
+    // from the headset's menu: the phone's menu is already underneath
+    if (vr.home) { exitVR(); setView('chase'); layout(); leaveFullscreen(); return; }
     const over = !!vr.end;
     exitVR();
     setView('chase');
@@ -882,7 +897,7 @@
       CT.VR.keepAwake(true);
       document.body.classList.add('vr');
     }
-    vr.wait = true; vr.press = null; vr.end = null;
+    vr.wait = true; vr.press = null; vr.end = null; vr.home = false;
     CT.setVR(renderer, { fov: VR_FOV[vrFit.fov], lens: VR_LENS[vrFit.lens], gfx: VR_GFX[vrFit.gfx] });
     // in a headset you can only look and press, so automove always runs
     if (game.control[me] === 'human') CT.setAutoMove(game, me, true);
@@ -913,7 +928,7 @@
     v.charge = vr.press === null ? 0 : Math.min(1, (performance.now() - vr.press) / 1000 / CT.VR.POWER_HOLD);
     // a countdown you can hear wherever you're looking: two ticks, then a
     // higher one on the moment to let go
-    const hit = !paused && !vr.wait ? CT.VR.timeToHit(game, me, CT.incomingInfo(game, me)) : null;
+    const hit = !paused && !vr.wait && !vr.home ? CT.VR.timeToHit(game, me, CT.incomingInfo(game, me)) : null;
     if (hit && hit.reach && vr.lastT !== null) {
       for (const [at, freq] of VR_TICKS) if (vr.lastT > at && hit.t <= at) blip(freq, 0.06, 'sine', 0.06);
     }
@@ -922,8 +937,9 @@
     // held upright it isn't in a headset, so a button on the screen gets you out
     const upright = window.innerHeight > window.innerWidth;
     if ($('vrExit').hidden === upright) $('vrExit').hidden = !upright;
-    v.menu = vr.end ? { items: VR_END_MENU, sel: vrMenuChoice().id } : paused ? { items: VR_MENU, sel: vrMenuChoice().id } : null;
-    if (vr.end) { v.prompt = vr.end.title + ' ' + vr.end.score; v.sub = (vr.end.note ? vr.end.note + ' · ' : '') + 'Turn to choose, press to pick'; }
+    v.menu = vr.home || vr.end || paused ? { items: vrMenuItems(), sel: vrMenuChoice().id } : null;
+    if (vr.home) { v.prompt = 'CYBERPUNK TENNIS'; v.sub = 'Turn to choose, press to pick'; }
+    else if (vr.end) { v.prompt = vr.end.title + ' ' + vr.end.score; v.sub = (vr.end.note ? vr.end.note + ' · ' : '') + 'Turn to choose, press to pick'; }
     else if (paused) { v.prompt = 'PAUSED'; v.sub = 'Turn to choose, press to pick'; }
     else if (upright) { v.prompt = 'TURN SIDEWAYS'; v.sub = 'For a VR headset. No headset? Exit VR'; }
     else if (vr.wait) { v.prompt = 'LOOK DOWN THE COURT'; v.sub = pad && pad.linked ? 'Tap the pad to play · ' + padLinkText() : 'Press the button to play'; }
@@ -1018,7 +1034,7 @@
       return;
     }
     if (m.t === 'swipe' && Array.isArray(m.pts) && m.pts.length >= 2 && m.pts.length <= 64) {
-      if (paused || vr.wait || (net && net.held)) return;
+      if (paused || vr.wait || vr.home || (net && net.held)) return;
       const pts = m.pts.map((q) => ({ x: +q[0], y: +q[1], t: +q[2] }));
       if (!pts.every((q) => Number.isFinite(q.x) && Number.isFinite(q.y) && Number.isFinite(q.t))) return;
       const a = pts[0], b = pts[pts.length - 1];
@@ -1442,7 +1458,8 @@
 
   // A CPU-vs-CPU rally plays behind the menu.
   // note: a line to show on the menu, saying why you're back on it
-  function showMenu(note) {
+  // keepVR (Quit or Menu picked in the headset): stay in the headset, at its menu
+  function showMenu(note, keepVR) {
     // (only ever a line of text: a tap event handed in by mistake shows nothing)
     if (typeof note !== 'string') note = '';
     $('menuNote').textContent = note;
@@ -1452,8 +1469,8 @@
     $('msg').hidden = true; msgTimer = 0;
     $('shot').hidden = true; shotTimer = 0;
     setHint(''); setGhost(null);
-    exitVR();
-    showFull(fullOn);
+    keepVR = keepVR === true && !!vr;
+    if (!keepVR) { exitVR(); showFull(fullOn); }
     if (net) retireMatch('me');
     leaveOnline(true);
     tut = null;
@@ -1468,6 +1485,9 @@
     paused = false;
     $('menu').hidden = false;
     game = CT.createGame({ p0: 'octopus', p1: 'philosopher', timeScale: 0.6, control: ['cpu', 'cpu'], onEvent: () => {} });
+    // (the court stands still behind the headset's menu: a rally seen through
+    // a moving player's eyes, with nobody moving you, makes you feel sick)
+    if (keepVR) { vr.home = true; vr.end = null; vr.wait = false; vr.press = null; vr.lastT = null; }
     applyZen();
     reloadIfNewBuild();
   }
@@ -1560,7 +1580,7 @@
     // It does stop while the link is too slow to play on.
     if (vr && game) vrFrame();
     // (in VR a match waits for its first press, except online, where it can't wait)
-    if (game && (!paused || net) && !(vr && vr.wait && !net)) {
+    if (game && (!paused || net) && !(vr && vr.wait && !net) && !(vr && vr.home)) {
       const held = !!(net && net.started && net.lag) && checkLag(now);
       if (!held) CT.updateGame(game, dt);
       if (net && net.started) {
@@ -1878,7 +1898,7 @@
     // closing the trophies or help sheet lands back on the menu
     for (const id of ['trophies', 'help', 'settings']) new MutationObserver(reloadIfNewBuild).observe($(id), { attributes: true, attributeFilter: ['hidden'] });
     document.querySelectorAll('.pick').forEach((b) => b.addEventListener('click', () => pickChar(b.dataset.char)));
-    const pickLevel = (id) => {
+    pickLevel = (id) => {
       level = id;
       try { localStorage.setItem('ct.level', id); } catch (e) { /* storage is optional */ }
       document.querySelectorAll('[data-level]').forEach((x) => x.setAttribute('aria-pressed', String(x.dataset.level === id)));
