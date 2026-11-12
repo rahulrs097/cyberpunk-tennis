@@ -46,7 +46,7 @@
   const VR_GFX = { auto: 'auto', smooth: 0, balanced: 1, sharp: 2 };
   let vrFit = { fov: 'normal', lens: 'normal', gfx: 'auto' };
   // the graphics level outside VR: Auto, or one picked in Settings
-  // the flat-screen levels add Cinematic: Sharp plus a rain-wet, lit rooftop (a trial; Auto never picks it)
+  // the flat-screen levels add Cinematic: Sharp plus coloured light on the rooftop (a trial; Auto never picks it)
   const GFX = { ...VR_GFX, cinematic: 3 };
   let gfx = 'auto';
   try { const v = localStorage.getItem('ct.gfx'); if (v in GFX) gfx = v; } catch (e) { /* storage is optional */ }

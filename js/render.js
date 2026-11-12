@@ -326,7 +326,7 @@
   const IPD = 0.064;
 
   // Pick the graphics level (0 smooth, 1 balanced, 2 sharp, 3 cinematic:
-  // sharp plus the rain-wet, lit look of drawWet) or 'auto'.
+  // sharp plus the coloured light of drawWash) or 'auto'.
   // Auto starts at AUTO_START and steps down while the phone can't keep up.
   // In VR the VR graphics setting applies instead, and this one comes back
   // after it. Call resizeRenderer after.
@@ -1110,7 +1110,7 @@
     return cars;
   })();
 
-  const WET = '#0b0c13';   // rain-dark asphalt (cinematic)
+  const WET = '#0f1018';   // darker asphalt, so the coloured light shows (cinematic)
 
   function drawLot(ctx, r) {
     // asphalt deck
@@ -1827,26 +1827,11 @@
     ctx.restore();
   }
 
-  // ---------------- cinematic: a rain-wet rooftop ----------------
-  // Everything here lies on the ground, under the cars, players and net:
-  // washes of coloured light, and what the wet asphalt mirrors. A mirror
-  // image of a point at height z is that point at -z, so each reflection is
-  // drawn towards its upside-down twin and smeared, as a wet road does.
-  // All cheap: stretched copies of the cached glow sprites, no blur.
-  function streak(ctx, r, col, a, top, bottom, halfW) {
-    const s = segment(r, top, bottom);
-    if (!s) return;
-    const dx = s[1].x - s[0].x, dy = s[1].y - s[0].y, len = Math.hypot(dx, dy);
-    if (len < 2) return;
-    const w = Math.max(3, halfW * sizeAt(r, top[0], top[1], 0));
-    ctx.save();
-    ctx.translate(s[0].x, s[0].y);
-    ctx.rotate(Math.atan2(dy, dx));
-    ctx.drawImage(glowSprite(r, col, a), 0, -w, len, w * 2);
-    ctx.restore();
-  }
-
-  function drawWet(ctx, r, g, human) {
+  // ---------------- cinematic: a lit rooftop ----------------
+  // Coloured light lying on the ground, under the cars, players and net.
+  // (A first try also mirrored the lamps, billboard and players in a wet
+  // deck; it read as a glass floor and clashed with the flat look.)
+  function drawWash(ctx, r) {
     const c = r.cam;
     ctx.save();
     // keep it all on the rooftop
@@ -1857,7 +1842,7 @@
     const hz = c.cy + c.f * Math.tan(c.pitch);
     if (hz < r.H) {
       const gr = ctx.createLinearGradient(0, hz, 0, hz + r.H * 0.3);
-      gr.addColorStop(0, 'rgba(120,70,190,0.30)');
+      gr.addColorStop(0, 'rgba(120,70,190,0.18)');
       gr.addColorStop(1, 'rgba(120,70,190,0)');
       ctx.fillStyle = gr;
       ctx.fillRect(0, hz, r.W, r.H * 0.3);
@@ -1869,61 +1854,6 @@
       const s = rad * sizeAt(r, x, y, 0);
       const squash = Math.max(0.15, c.z / Math.hypot(x - c.x, y - c.y, c.z));
       ctx.drawImage(glowSprite(r, col, 0.2), p.x - s, p.y - s * squash, s * 2, s * 2 * squash);
-    }
-    // lamps
-    for (const [x, y, col] of LAMPS) streak(ctx, r, col, 0.55, [x * 0.75, y, -1.5], [x * 0.75, y, -13.5], 0.9);
-    // the billboard, in the colour it is showing
-    const B = BOARD, f = r.human === 1 ? -1 : 1;
-    const ca = f * Math.cos(B.turn), sa = f * Math.sin(B.turn);
-    const bc = boardText(r, performance.now() / 1000).color || '#25d9ff';
-    for (let i = 0; i < 5; i++) {
-      const u = (i - 2) / 4.6, x = f * B.x + u * B.w * ca, y = f * B.y + u * B.w * sa;
-      streak(ctx, r, bc, 0.22, [x, y, -B.z], [x, y, -B.z - B.h * 2.2], 2.6);
-    }
-    // car headlights
-    const hl = glowSprite(r, '#fff6d0', 0.3);
-    for (const car of CARS) {
-      const x = car.sx > 0 ? car.x - 2.15 : car.x + 2.15;
-      const v = toCam(c, x, car.y, 0);
-      if (v.z < 1 || v.z > 30) continue;
-      // (short and near enough upright to skip the turn a streak makes)
-      const p = fromCamToScreen(c, v), w = 0.75 * p.s;
-      if (p.x + w < 0 || p.x - w > r.W || p.y > r.H) continue;
-      ctx.drawImage(hl, p.x - w, p.y - 0.2 * p.s, w * 2, 1.6 * p.s);
-    }
-    // the net's tape
-    const X = COURT.POST_X;
-    ctx.strokeStyle = 'rgba(255,63,180,0.13)';
-    ctx.lineWidth = Math.max(2, 0.12 * sizeAt(r, 0, 0, 1));
-    ctx.beginPath();
-    for (let i = 0; i < 12; i++) {
-      const x0 = -X + (2 * X * i) / 12, x1 = -X + (2 * X * (i + 1)) / 12;
-      pathSeg(ctx, r, [x0, 0, -CT.netHeight(x0)], [x1, 0, -CT.netHeight(x1)]);
-    }
-    ctx.stroke();
-    // the ball
-    const b = g.ball;
-    if (b.active) {
-      const p = proj(r, b.pos.x, b.pos.y, -b.pos.z);
-      if (!p.behind) {
-        const rad = Math.max(2.5, 0.14 * p.s);
-        ctx.drawImage(glowSprite(r, '#e4ff4a', 0.55), p.x - rad, p.y - rad * 1.6, rad * 2, rad * 3.2);
-      }
-    }
-    // the players, upside down and dim, with no glow blur (the costly part)
-    ctx.globalCompositeOperation = 'source-over';
-    for (const p of g.players) {
-      if (r.view === 'first' && p.side === human) continue;
-      const pos = proj(r, p.x, p.y, 0);
-      if (pos.behind) continue;
-      const pose = playerPose(r, g, p, pos);
-      pose.lod = 0;
-      ctx.save();
-      ctx.globalAlpha = 0.2;
-      ctx.translate(pos.x, pos.y);
-      ctx.scale(pos.s * SPRITE_SCALE, -pos.s * SPRITE_SCALE * 0.9);
-      CT.drawCharacter(ctx, p.ch.id, pose, 0);
-      ctx.restore();
     }
     ctx.restore();
   }
@@ -1950,7 +1880,7 @@
     drawLot(ctx, r);
     drawCourt(ctx, r);
     const wet = cine(r);
-    if (wet) drawWet(ctx, r, g, human);
+    if (wet) drawWash(ctx, r);
 
     for (const m of g.marks) {
       ctx.strokeStyle = `rgba(228,255,74,${(1 - m.age / 1.2) * 0.8})`;
