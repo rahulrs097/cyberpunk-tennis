@@ -926,7 +926,7 @@
     if (vr.end) { v.prompt = vr.end.title + ' ' + vr.end.score; v.sub = (vr.end.note ? vr.end.note + ' · ' : '') + 'Turn to choose, press to pick'; }
     else if (paused) { v.prompt = 'PAUSED'; v.sub = 'Turn to choose, press to pick'; }
     else if (upright) { v.prompt = 'TURN SIDEWAYS'; v.sub = 'For a VR headset. No headset? Exit VR'; }
-    else if (vr.wait) { v.prompt = 'LOOK DOWN THE COURT'; v.sub = pad && pad.linked ? 'Tap the pad to play' : 'Press the button to play'; }
+    else if (vr.wait) { v.prompt = 'LOOK DOWN THE COURT'; v.sub = pad && pad.linked ? 'Tap the pad to play · ' + padLinkText() : 'Press the button to play'; }
     else if (pose.pitch < CT.VR.PAUSE_PITCH) { v.prompt = 'PAUSE?'; v.sub = 'Press to pause'; }
     else if (pose.pitch > CT.VR.RECENTRE_PITCH) { v.prompt = 'RECENTRE?'; v.sub = 'Press, then look down the court'; }
   }
@@ -946,7 +946,15 @@
   function padStatus() {
     const on = !!(pad && pad.linked);
     $('padHost').textContent = on ? 'Unlink pad' : 'Link a phone';
-    $('padState').textContent = on ? `Swipe pad linked (room ${pad.code}). Swipe on it to hit, tap it for the button.` : pad ? 'Waiting for the pad phone…' : 'Optional: a second phone in your hand as a swipe pad.';
+    $('padState').textContent = on ? `Swipe pad linked (room ${pad.code}, ${padLinkText()}). Swipe on it to hit, tap it for the button.` : pad ? 'Waiting for the pad phone…' : 'Optional: a second phone in your hand as a swipe pad.';
+  }
+  // The link to the pad as a few words: direct (over the wifi) or through
+  // the relay, and the round trip, e.g. 'direct 12 ms'.
+  function linkText(direct, ms) {
+    return (direct ? 'direct ' : 'relay ') + (Number.isFinite(ms) ? Math.round(ms) + ' ms' : '…');
+  }
+  function padLinkText() {
+    return 'pad ' + linkText(pad.link.direct(), pad.ms);
   }
 
   function unlinkPad() {
@@ -975,7 +983,11 @@
       if (pad !== p || !p.linked) return;
       const now = performance.now();
       p.lag.sent(now);
-      p.link.send({ t: 'ping', at: now });
+      // the pad shows the round trip too, so it can be read before the
+      // headset goes on
+      p.ms = p.lastPong ? p.lag.state(now).ms : null;
+      p.link.send({ t: 'ping', at: now, ms: p.ms === null ? null : Math.round(p.ms), d: p.link.direct() });
+      if (!$('settings').hidden) padStatus();
       if (now - p.lastHeard > PAD_LOST) { p.linked = false; padStatus(); showMsg('Swipe pad lost', 'Use the headset button', 'warn'); }
     }, CT.Net.PING_EVERY);
     lobbyMode = 'pad';
@@ -997,7 +1009,7 @@
       return;
     }
     if (m.t === 'ping') { p.link.send({ t: 'pong', at: m.at }); return; }
-    if (m.t === 'pong') { if (Number.isFinite(m.at)) p.lag.answered(m.at, performance.now()); return; }
+    if (m.t === 'pong') { if (Number.isFinite(m.at)) { p.lag.answered(m.at, performance.now()); p.lastPong = true; } return; }
     if (m.t === 'bye') { p.linked = false; padStatus(); return; }
     if (!p.linked || !vr || !game) return;
     if (m.t === 'recentre') { vrRecentre(true); return; }
@@ -1029,7 +1041,11 @@
       if (padSide !== s || !m) return;
       s.lastHeard = performance.now();
       if (m.t === 'padok' && !s.linked) { s.linked = true; showPad(); }
-      else if (m.t === 'ping') s.link.send({ t: 'pong', at: m.at });
+      else if (m.t === 'ping') {
+        s.link.send({ t: 'pong', at: m.at });
+        $('padLink').textContent = 'Link to the headset: ' + linkText(!!m.d, Number.isFinite(m.ms) ? m.ms : NaN)
+          + (m.d ? '' : ' (trying for a direct link over the wifi)');
+      }
       else if (m.t === 'bye') { leavePad(); showMenu('The headset phone unlinked the pad.'); }
     }, (st) => {
       if (padSide !== s || s.linked || st === 'open') return;

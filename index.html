@@ -149,6 +149,7 @@
   #pad .pad-title { font: 900 28px var(--display); letter-spacing: 0.18em; text-transform: uppercase; color: var(--cyan); opacity: 0.6; }
   #pad .lede { max-width: 300px; color: var(--ink); opacity: 0.85; }
   #pad .warn { color: var(--ball); }
+  #pad .pad-link { font: 12px monospace; opacity: 0.6; }
   #pad .pad-btns { display: flex; gap: 10px; position: absolute; bottom: calc(env(safe-area-inset-bottom, 0px) + 20px); }
   body.vr #pauseMenu, body.vr #end { background: transparent; backdrop-filter: none; }
   body.vr #pauseMenu .sheet, body.vr #end .sheet { display: none; }
@@ -552,6 +553,7 @@
 <div id="pad" hidden>
   <div class="pad-title">Swipe pad</div>
   <p class="lede">Swipe up to hit, as on the game screen. Tap to start, serve, carry on after a pause, or pause while you look at your feet. Tap with two fingers to recentre: the way you face becomes straight ahead.</p>
+  <p class="lede pad-link" id="padLink">Link to the headset: …</p>
   <p class="lede warn" id="padLost" hidden>Lost the headset phone. Check it's still in the match.</p>
   <div class="pad-btns">
     <button class="btn" id="padLeave">Leave</button>

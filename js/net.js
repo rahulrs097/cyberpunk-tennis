@@ -61,6 +61,11 @@
   // before. Add ?relay to the page URL to never try.
   const STUN = [{ urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.l.google.com:19302'] }];
   const DIRECT_WAIT = 8000;   // ms to wait for the direct link to open
+  // While messages go through the relay, the guest keeps asking for another
+  // try at a direct link, this long after each one that didn't open (then
+  // every 20 s). Phones on the same wifi don't always find each other the
+  // first time, and the relay's round trip is far slower than the wifi's.
+  const RETRY = [2000, 5000, 10000, 20000];
   const tryDirect = typeof RTCPeerConnection === 'function' && !/[?&]relay\b/.test(location.search);
   // A phone's wifi naps when it has nothing to send, and the router then
   // holds what comes for it until it wakes (a beacon, every 100-300 ms). On
@@ -97,6 +102,7 @@
     const deliver = (m) => { if (m && m.t !== 'rtc' && m.t !== 'ka') onMessage(m); };
     let pc = null, dc = null, direct = false, closed = false;
     let offerId = 0, waitTimer = 0, askTimer = 0, awakeTimer = 0, lastSent = 0;
+    let retryTimer = 0, retries = 0;
     // why the direct link is or isn't up: how many offers this phone made or
     // got, what each phone offered, and how the last try ended
     const notes = { offers: 0, mine: new Set(), theirs: new Set(), state: tryDirect ? 'waiting' : 'off', relayMs: null, edgeMs: null, colo: '' };
@@ -124,11 +130,28 @@
       let n = 0;
       clearInterval(askTimer);
       signal({ k: 'ready' });
-      askTimer = setInterval(() => { if (pc || ++n > 5) clearInterval(askTimer); else signal({ k: 'ready' }); }, 2000);
+      askTimer = setInterval(() => {
+        if (pc) clearInterval(askTimer);
+        else if (++n > 5) { clearInterval(askTimer); retryLater(); }
+        else signal({ k: 'ready' });
+      }, 2000);
+    }
+
+    // A try that didn't open, or a direct link that dropped: back through
+    // the room, and the guest asks again a little later.
+    function lost() {
+      dropPeer();
+      retryLater();
+    }
+    function retryLater() {
+      if (closed || !tryDirect || role !== 'guest') return;
+      clearTimeout(retryTimer);
+      retryTimer = setTimeout(() => { if (!closed && !pc) askForOffer(); }, RETRY[Math.min(retries++, RETRY.length - 1)]);
     }
 
     function newPeer(id) {
       dropPeer();
+      clearTimeout(retryTimer);
       offerId = id;
       viaSeen = false;
       const p = (pc = new RTCPeerConnection({ iceServers: STUN }));
@@ -142,9 +165,9 @@
       p.onconnectionstatechange = () => {
         if (pc !== p) return;
         notes.state = p.connectionState;
-        if (p.connectionState === 'failed') dropPeer();
+        if (p.connectionState === 'failed') lost();
       };
-      waitTimer = setTimeout(() => { if (pc === p && !direct) { notes.state = 'timed out'; dropPeer(); } }, DIRECT_WAIT);
+      waitTimer = setTimeout(() => { if (pc === p && !direct) { notes.state = 'timed out'; lost(); } }, DIRECT_WAIT);
       return p;
     }
 
@@ -155,6 +178,7 @@
         if (dc !== ch || closed) return;
         signal({ k: 'via', id: offerId });   // the last message through the room
         direct = true;
+        retries = 0;
         clearTimeout(waitTimer);
         clearInterval(awakeTimer);
         awakeTimer = setInterval(() => {
@@ -168,7 +192,7 @@
         const m = parse(e.data);
         if (held) held.push(m); else deliver(m);
       };
-      ch.onclose = () => { if (dc === ch) dropPeer(); };
+      ch.onclose = () => { if (dc === ch) lost(); };
     }
 
     function release() {
@@ -252,7 +276,7 @@
       direct: isDirect,
       // the notes above, as plain values
       diag: () => ({ ...notes, mine: [...notes.mine].sort().join(' ') || '-', theirs: [...notes.theirs].sort().join(' ') || '-' }),
-      close: () => { closed = true; clearInterval(askTimer); clearInterval(measureTimer); dropPeer(); room.close(); },
+      close: () => { closed = true; clearInterval(askTimer); clearTimeout(retryTimer); clearInterval(measureTimer); dropPeer(); room.close(); },
     };
   }
 

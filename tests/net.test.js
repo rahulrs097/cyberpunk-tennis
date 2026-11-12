@@ -24,8 +24,9 @@ function fakeBroadcast() {
 // Just enough of RTCPeerConnection: an offer and answer pair the two ends up
 // (by a made-up SDP), and the data channel opens once both are set. `wire`
 // counts every message each end sends on it.
-function fakeRTC(wire) {
+function fakeRTC(wire, opts = {}) {
   const byId = {};
+  let fails = opts.fail || 0;   // this many tries never connect
   let next = 0;
   return class {
     constructor() { this.id = ++next; this.connectionState = 'new'; this.signalingState = 'stable'; byId[this.id] = this; }
@@ -57,6 +58,13 @@ function fakeRTC(wire) {
         this.ch = this.makeChannel();
         this.other.other = this;
         setTimeout(() => { this.ondatachannel && this.ondatachannel({ channel: this.ch }); }, 0);
+      } else if (fails > 0) {
+        fails--;
+        this.signalingState = 'stable';
+        // the phones couldn't reach each other: both ends give up
+        setTimeout(() => {
+          for (const pc of [this, this.other]) { pc.connectionState = 'failed'; pc.onconnectionstatechange && pc.onconnectionstatechange(); }
+        }, 0);
       } else {
         this.signalingState = 'stable';
         // both ends set: open
@@ -68,13 +76,13 @@ function fakeRTC(wire) {
   };
 }
 
-function loadNet(wire) {
+function loadNet(wire, opts) {
   const store = {};
   const sandbox = {
     location: { search: '?local', hostname: 'localhost', host: 'localhost' },
     localStorage: { getItem: (k) => store[k] || null, setItem: (k, v) => { store[k] = v; } },
     performance, setTimeout, clearTimeout, setInterval, clearInterval, Math, JSON, Promise,
-    BroadcastChannel: fakeBroadcast(), RTCPeerConnection: fakeRTC(wire),
+    BroadcastChannel: fakeBroadcast(), RTCPeerConnection: fakeRTC(wire, opts),
   };
   sandbox.window = sandbox;
   vm.createContext(sandbox);
@@ -120,4 +128,22 @@ test('direct link: a quiet phone keeps its wifi awake, and the notes never reach
   wire.length = 0;
   await wait(150);
   assert.equal(wire.length, 0, 'nothing more once the link is closed');
+});
+
+test('direct link: after a try that fails, the phones try again instead of staying on the relay', async (t) => {
+  const Net = loadNet([], { fail: 1 });
+  const got = [];
+  const host = Net.connect('WXYZ', 'host', (m) => got.push(m));
+  const guest = Net.connect('WXYZ', 'guest', () => {});
+  t.after(() => { host.close(); guest.close(); });
+  await wait(300);
+  assert.ok(!host.direct() && !guest.direct(), 'the first try failed');
+  assert.equal(guest.diag().state, 'failed');
+  guest.send({ t: 'in', k: 'a' });   // still gets there, through the room
+  for (let i = 0; i < 400 && !(host.direct() && guest.direct()); i++) await wait(10);
+  assert.ok(host.direct() && guest.direct(), 'the second try opened the direct link');
+  assert.equal(guest.diag().offers, 2);
+  guest.send({ t: 'in', k: 'b' });
+  await wait(30);
+  assert.deepEqual(got.map((m) => m.k), ['a', 'b'], 'every message arrived, in order');
 });
