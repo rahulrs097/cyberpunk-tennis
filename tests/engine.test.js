@@ -389,6 +389,20 @@ test('a match saved between points resumes at the same score, server and stamina
   assert.ok(r.match.over, 'the resumed set finished');
 });
 
+test('a CPU that came to the net reads each ball afresh afterwards: its net spot lasts one shot', () => {
+  const CT = loadEngine(11);
+  let rushes = 0, stale = 0;
+  const g = CT.createGame({ p0: 'philosopher', p1: 'philosopher', control: ['cpu', 'cpu'], ...levelOpts(CT, 'club'), onEvent: (t, d) => {
+    if (t !== 'hit') return;
+    const p = g.players[d.side];
+    if (p.atNet && -p.fwd * p.y > 6) rushes++;
+    if (p.netSpot) stale++;
+  } });
+  for (let i = 0; i < 60 * 60 * 30 && !g.match.over; i++) CT.updateGame(g, 1 / 60);
+  assert.ok(rushes > 3, 'the CPU did come in');
+  assert.equal(stale, 0, 'and never kept running back to the same spot');
+});
+
 test('only a sound saved match is offered to resume: a broken, finished or made-up one is refused', () => {
   const CT = loadEngine(3);
   const opts = { p0: 'octopus', p1: 'philosopher', control: ['human', 'cpu'], ...levelOpts(CT, 'club') };

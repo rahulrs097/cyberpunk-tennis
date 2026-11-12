@@ -759,6 +759,11 @@
     if (c.netSpot) {
       c.atNet = true;
       c.tx = c.netSpot.x; c.ty = c.netSpot.y;
+      // The CPU's net spot is for the shot it just hit (an approach, or a
+      // serve it follows in). After that it reads each ball afresh: at the
+      // net it covers the line of its last volley, and lobbed back to the
+      // baseline it stays there instead of running in again.
+      if (g.control[c.side] === 'cpu') c.netSpot = null;
       return;
     }
     // Once in the front half of the court, hold the net instead of
