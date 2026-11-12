@@ -9,7 +9,7 @@ compatibility_date = "2026-09-01"
 [assets]
 directory = "."
 binding = "ASSETS"
-run_worker_first = ["/room/*", "/quick", "/version"]
+run_worker_first = ["/room/*", "/quick", "/version", "/where"]
 
 # The deployment's id, served at /version so open games spot a new build
 [version_metadata]

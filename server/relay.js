@@ -4,6 +4,8 @@
 // host's phone; this only forwards.
 //
 // GET /version answers { v: <this deployment's id> }.
+// GET /where answers { colo: <the Cloudflare data centre that took the
+// request> }, for the ?ping readout.
 //
 // Clients connect to wss://<worker>/room/<CODE>?role=host|guest&id=<phone>,
 // where id is a random id each phone keeps.
@@ -28,6 +30,9 @@ export default {
     if (url.pathname === '/version') {
       const v = env.CF_VERSION_METADATA ? env.CF_VERSION_METADATA.id : '';
       return new Response(JSON.stringify({ v }), { headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
+    }
+    if (url.pathname === '/where') {
+      return new Response(JSON.stringify({ colo: (request.cf && request.cf.colo) || '' }), { headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
     }
     const quick = url.pathname === '/quick';
     const m = url.pathname.match(/^\/room\/([A-Z]{4})$/);
@@ -96,6 +101,8 @@ export class Room {
     if (typeof message !== 'string' || message.length > 16384) return;
     const role = this.state.getTags(ws)[0];
     if (role === 'seek') return;   // nothing to pass on in the queue
+    // the ?ping readout timing the trip to this room and back
+    if (message.startsWith('{"t":"echo"')) { try { ws.send(message); } catch (e) { /* gone */ } return; }
     const other = role === 'host' ? 'guest' : 'host';
     for (const peer of this.state.getWebSockets(other)) {
       try { peer.send(message); } catch (e) { /* peer gone */ }
