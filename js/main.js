@@ -153,7 +153,7 @@
     markSeen();
     // the practice point's match stops here, as a finished match would:
     // otherwise the CPU could go on serving behind this screen
-    game.phase = 'matchOver';
+    CT.stopGame(game);
     $('endTitle').textContent = 'Tutorial done';
     $('endScore').textContent = '';
     $('endStats').hidden = true;
@@ -592,9 +592,7 @@
   function loadSaved() {
     try {
       const s = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null');
-      const m = s && s.game && s.game.match;
-      if (m && !m.over && CT.CHARACTERS[s.p0] && CT.CHARACTERS[s.p1] && CT.CPU_LEVELS[s.level]
-        && Array.isArray(m.games) && Array.isArray(m.points) && Array.isArray(s.game.stamina)) return s;
+      if (CT.validSave(s)) return s;
     } catch (e) { /* storage is optional */ }
     return null;
   }
@@ -676,13 +674,9 @@
     e.preventDefault();
     if (net && net.held) return;   // paused for lag
     const a = pts[0], b = pts[pts.length - 1];
-    const dx = b.x - a.x, dy = b.y - a.y;
-    const chord = Math.hypot(dx, dy);
-    const dur = Math.max(1, b.t - a.t);
-    // A quick touch that barely moved is a tap. One held still for longer is
-    // a swipe the player thought better of, so it does nothing.
-    if (chord < 30) { if (dur < 400) handleTap(b.x, b.y); return; }
-    handleSwipe(pts, dx, dy, chord, dur, Math.min(window.innerWidth, window.innerHeight));
+    const kind = CT.Input.gesture(Math.hypot(b.x - a.x, b.y - a.y), b.t - a.t);
+    if (kind === 'tap') handleTap(b.x, b.y);
+    else if (kind === 'swipe') handleSwipe(pts, Math.min(window.innerWidth, window.innerHeight));
   }
 
   const isGuest = () => !!(net && net.role === 'guest' && game && game.remote);
@@ -715,52 +709,10 @@
     return Number.isFinite(x) ? x : undefined;
   }
 
-  // Turn a finger path into a shot: direction = aim, speed = pace vs spin,
-  // up = topspin, down = slice, a bowed path = sidespin. On a ball above
-  // the player's overheadZ either way is a smash, so swiping down like a real
-  // overhead works too, and aims the way it's swiped.
-  // A lob: an upward swipe at least LOB_LEN screens long, averaging under
-  // LOB_SPEED screens a second.
-  const LOB_LEN = 0.22, LOB_SPEED = 1.4;
-
-  // `dim` is the screen's short side in the same units as `pts`. `late`
-  // (seconds) is how long the swipe took to get here from a swipe pad.
-  function handleSwipe(pts, dx, dy, chord, dur, dim, late) {
-    const end = pts[pts.length - 1];
-    let k = pts.length - 1;
-    while (k > 0 && end.t - pts[k].t < 110) k--;
-    const tail = Math.hypot(end.x - pts[k].x, end.y - pts[k].y) / Math.max(16, end.t - pts[k].t);
-    const v = Math.max(tail, chord / dur) * 1000;                // px per second
-    const u = v / dim;  // screens per second
-    // A normal phone flick (about half the screen in ~150 ms) is close to full pace.
-    const pace = CT.clamp((u - 0.7) / (3.8 - 0.7), 0, 1);
-    // Swipe length sets depth: a short swipe drops the ball short, a swipe
-    // of about 40% of the screen or more goes to the baseline.
-    const depth = CT.clamp((chord / dim - 0.1) / 0.3, 0, 1);
-    const over = CT.clamp((u - 7) / 4, 0, 1);
-    const spinDir = dy < 0 ? 1 : -1;
-    // A slow, long upward swipe lofts a topspin lob. Judged on the whole
-    // swipe, not its tail: fingers speed up as they let go, so a deliberate
-    // slow swipe still ends with a flick.
-    const lob = spinDir > 0 && (chord / dur) * 1000 / dim < LOB_SPEED && chord / dim >= LOB_LEN;
-    let aim = Math.atan2(dx, Math.abs(dy));
-    // bow of the path, measured towards screen-right
-    let nx = -dy / chord, ny = dx / chord;
-    if (nx < 0) { nx = -nx; ny = -ny; }
-    let bulge = 0;
-    for (const p of pts) {
-      const d = ((p.x - pts[0].x) * nx + (p.y - pts[0].y) * ny) / chord;
-      if (Math.abs(d) > Math.abs(bulge)) bulge = d;
-    }
-    if (Math.abs(bulge) < 0.04) bulge = 0;
-    const curve = -CT.clamp(bulge * 5, -1, 1);
-    aim += CT.clamp(bulge * 0.45, -0.12, 0.12);
-    // A slice is swiped the other way: top-left to bottom-right goes left.
-    // But a smash swiped down goes the way the swipe goes, like the racket
-    // coming down through the ball: the engine picks that aim (`smash`) if
-    // the ball turns out to be above smash height when it's hit. (An upward
-    // swipe's smash aim is its plain aim; it gets `smash` too so that in
-    // first person it's aimed from the view like the downward one.)
+  // A swipe becomes a shot (CT.Input.swipeToInput). `dim` is the screen's
+  // short side in the same units as `pts`. `late` (seconds) is how long the
+  // swipe took to get here from a swipe pad.
+  function handleSwipe(pts, dim, late) {
     // (a swipe pad's swipe has nothing to do with the view in the headset)
     const at = (a) => (vr ? undefined : pointAt(a));
     // In first person the ball's shadow is under or behind you when you
@@ -771,15 +723,7 @@
       const x = at(a);
       return x !== undefined || vr || renderer.view !== 'first' ? x : CT.viewAim(renderer.cam, game.players[me].fwd, a);
     };
-    const smash = { aim, landX: smashAt(aim) };
-    if (spinDir < 0) aim = -aim;
-    const input = { aim, pace, over, spinDir, curve, depth, landX: at(aim), lob, smash };
-    // A slow swipe is still going when the ball arrives: its timing counts
-    // from partway through, not from when the finger lifts.
-    // And it always goes deep, however long the swipe: a short lob is just a
-    // smash for them.
-    if (lob) { input.lead = dur / 2000; input.depth = 1; }
-    playShot(input, late);
+    playShot(CT.Input.swipeToInput(pts, dim, at, smashAt), late);
   }
 
   // Hit `input` (as CT.requestSwipe takes it) now, or as if `late` seconds
@@ -1064,11 +1008,10 @@
       const pts = m.pts.map((q) => ({ x: +q[0], y: +q[1], t: +q[2] }));
       if (!pts.every((q) => Number.isFinite(q.x) && Number.isFinite(q.y) && Number.isFinite(q.t))) return;
       const a = pts[0], b = pts[pts.length - 1];
-      const dx = b.x - a.x, dy = b.y - a.y, chord = Math.hypot(dx, dy);
-      if (chord <= 0) return;
+      if (Math.hypot(b.x - a.x, b.y - a.y) <= 0) return;
       // half the round trip is the trip here (capped, in case of a spike)
       const late = Math.min(0.2, p.lag.state(performance.now()).ms / 2000);
-      handleSwipe(pts, dx, dy, chord, Math.max(1, b.t - a.t), 1, late);
+      handleSwipe(pts, 1, late);
     }
   }
 
@@ -1162,10 +1105,10 @@
     if (!padSide || !padSide.linked) return;
     const a = pts[0], b = pts[pts.length - 1];
     const dim = Math.min(window.innerWidth, window.innerHeight);
-    const chord = Math.hypot(b.x - a.x, b.y - a.y);
     // the same tap-or-swipe rule as the game screen
-    if (chord < 30) {
-      if (b.t - a.t < 400) { padSide.link.send({ t: 'tap' }); buzz(15); }
+    const kind = CT.Input.gesture(Math.hypot(b.x - a.x, b.y - a.y), b.t - a.t);
+    if (kind !== 'swipe') {
+      if (kind === 'tap') { padSide.link.send({ t: 'tap' }); buzz(15); }
       return;
     }
     // at most 64 points: keep every nth, and always the last
@@ -1221,7 +1164,12 @@
     CT.showOpponent(renderer, null);
   }
 
+  // (a message that makes no sense is dropped, not allowed to stop the match)
   function onNet(m) {
+    if (!m || typeof m !== 'object') return;
+    try { handleNet(m); } catch (e) { console.warn('bad message', m && m.t, e); }
+  }
+  function handleNet(m) {
     if (!net) return;
     net.lastHeard = performance.now();
     if (m.t === 'bye') { retireMatch('opp'); leaveOnline(false); showMenu('Your opponent left the match.'); return; }
@@ -1234,22 +1182,28 @@
         meetOpponent(m.profile);
         hostStart();
       } else if (m.t === 'in' && game && net.started) {
-        if (m.k === 'move') CT.requestMove(game, 1, +m.x, +m.y);
+        // the guest's phone is someone else's: nothing it sends is trusted
+        if (m.k === 'move') { const at = CT.Input.cleanSpot(m); if (at) CT.requestMove(game, 1, at.x, at.y); }
         else if (m.k === 'toss') CT.requestToss(game, 1);
-        else if (m.k === 'swipe') CT.requestSwipe(game, 1, m.input, +m.err);
+        else if (m.k === 'swipe') {
+          const input = CT.Input.cleanInput(m.input), err = CT.Input.cleanErr(m.err);
+          if (input && err !== null) CT.requestSwipe(game, 1, input, err);
+        }
       } else if (m.t === 'auto' && game && net.started) {
         net.guestAuto = !!m.on;
         CT.setAutoMove(game, 1, net.guestAuto);
-      } else if (m.t === 'rematch' && game && game.phase === 'matchOver') hostStart();
+      } else if (m.t === 'rematch' && game && game.phase === 'matchOver') wantRematch(1);
     } else {
-      if (m.t === 'start') {
+      if (m.t === 'rematch' && game && game.phase === 'matchOver') wantRematch(0);
+      else if (m.t === 'start') {
         net.started = true;
         net.lastSnap = performance.now();
         startPings();
         me = 1;
         meetOpponent(m.profile);
         $('lobby').hidden = true;
-        beginMatch({ p0: m.p0, p1: m.p1, timeScale: m.timeScale, control: ['remote', 'human'], remote: true, serveClock: m.serveClock });
+        net.again = [false, false];
+        beginMatch({ p0: m.p0, p1: m.p1, timeScale: m.timeScale, control: ['remote', 'human'], remote: true, serveClock: m.serveClock, firstServer: m.firstServer });
       } else if (m.t === 'st' && game && game.remote) {
         net.lastSnap = performance.now();
         net.hostHeld = !!m.held;
@@ -1442,8 +1396,12 @@
     startPings();
     me = 0;
     // online matches always use Pro ball speed, with a serve clock
-    const cfg = { p0: humanChar, p1: net.guestChar, timeScale: 1, control: ['human', 'remote'], autoMove: [autoMove, net.guestAuto], serveClock: SERVE_CLOCK };
-    send({ t: 'start', p0: cfg.p0, p1: cfg.p1, timeScale: cfg.timeScale, serveClock: cfg.serveClock, profile: CT.Net.cleanProfile(profile) });
+    // the host serves first in the first match, then they take turns
+    net.matches = (net.matches || 0) + 1;
+    net.again = [false, false];
+    const cfg = { p0: humanChar, p1: net.guestChar, timeScale: 1, control: ['human', 'remote'], autoMove: [autoMove, net.guestAuto], serveClock: SERVE_CLOCK,
+      firstServer: (net.matches - 1) % 2 };
+    send({ t: 'start', p0: cfg.p0, p1: cfg.p1, timeScale: cfg.timeScale, serveClock: cfg.serveClock, firstServer: cfg.firstServer, profile: CT.Net.cleanProfile(profile) });
     $('lobby').hidden = true;
     beginMatch(cfg);
   }
@@ -1541,15 +1499,28 @@
   function reloadIfNewBuild() {
     if (!newBuild || document.hidden) return;
     const quiet = ['lobby', 'pad', 'trophies', 'help', 'settings', 'end', 'pauseMenu'].every((id) => $(id).hidden);
-    if (!$('menu').hidden && quiet) location.reload();
+    // (not while a name or room code is being typed)
+    const el = document.activeElement, typing = !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA');
+    if (!$('menu').hidden && quiet && !typing) location.reload();
   }
 
-  // Play vs CPU, or Rematch (online, the host restarts for both).
-  function startMatch() {
-    if (net) {
-      if (net.role === 'host') hostStart(); else send({ t: 'rematch' });
-      return;
+  // An online rematch starts once both players have asked for it. `side`
+  // is who just asked (0 = the host).
+  function wantRematch(side) {
+    if (!net || !net.again || !game || game.phase !== 'matchOver') return;
+    net.again[side] = true;
+    if (side === me) { send({ t: 'rematch' }); $('rematch').textContent = 'Waiting for opponent…'; }
+    else if (!net.again[me]) {
+      const el = $('endNote'), was = el.hidden ? '' : el.textContent;
+      el.textContent = (was ? was + ' · ' : '') + 'Opponent wants a rematch';
+      el.hidden = false;
     }
+    if (net.role === 'host' && net.again[0] && net.again[1]) hostStart();
+  }
+
+  // Play vs CPU, or Rematch (online, both players have to ask).
+  function startMatch() {
+    if (net) { wantRematch(me); return; }
     me = 0;
     tut = null;
     retireSaved();
@@ -1557,7 +1528,10 @@
     savedLevel = level;
     canSave = true;
     const cpuChar = humanChar === 'octopus' ? 'philosopher' : 'octopus';
-    beginMatch({ p0: humanChar, p1: cpuChar, control: ['human', 'cpu'], autoMove: [autoMove, false], ...CT.levelOpts(level) });
+    // you serve first in your first match, then you and the CPU take turns
+    let first = 0;
+    try { first = localStorage.getItem('ct.first') === '0' ? 1 : 0; localStorage.setItem('ct.first', String(first)); } catch (e) { /* storage is optional */ }
+    beginMatch({ p0: humanChar, p1: cpuChar, control: ['human', 'cpu'], autoMove: [autoMove, false], firstServer: first, ...CT.levelOpts(level) });
   }
 
   function beginMatch(cfg) {
@@ -1573,7 +1547,7 @@
     let g = null;
     tracker = tut || cfg.drill ? null : CT.createAchievementTracker(me, net ? 'online' : cfg.mode || level, cfg.trackerState, cfg['p' + me]);
     achQueue = []; achNew = [];
-    g = CT.createGame({ ...cfg, firstServer: 0, onEvent: (t, d) => {
+    g = CT.createGame({ ...cfg, firstServer: cfg.firstServer === 1 ? 1 : 0, onEvent: (t, d) => {
       if (!g || game !== g) return;
       onEvent(t, d);
       if (net && net.role === 'host') send({ t: 'ev', type: t, d });
@@ -2049,6 +2023,7 @@
     padEl.addEventListener('pointercancel', () => { padTouch = null; padFingers = 0; padTwo = false; });
     padStatus();
     window.addEventListener('pagehide', () => { if (net) retireMatch('me'); leaveOnline(true); unlinkPad(); leavePad(); });
+    document.addEventListener('focusout', () => setTimeout(reloadIfNewBuild, 0));
     pickChar('octopus');
     showMenu();
     setZen(zen);

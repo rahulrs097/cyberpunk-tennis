@@ -389,6 +389,63 @@ test('a match saved between points resumes at the same score, server and stamina
   assert.ok(r.match.over, 'the resumed set finished');
 });
 
+test('a CPU that came to the net reads each ball afresh afterwards: its net spot lasts one shot', () => {
+  const CT = loadEngine(11);
+  let rushes = 0, stale = 0;
+  const g = CT.createGame({ p0: 'philosopher', p1: 'philosopher', control: ['cpu', 'cpu'], ...levelOpts(CT, 'club'), onEvent: (t, d) => {
+    if (t !== 'hit') return;
+    const p = g.players[d.side];
+    if (p.atNet && -p.fwd * p.y > 6) rushes++;
+    if (p.netSpot) stale++;
+  } });
+  for (let i = 0; i < 60 * 60 * 30 && !g.match.over; i++) CT.updateGame(g, 1 / 60);
+  assert.ok(rushes > 3, 'the CPU did come in');
+  assert.equal(stale, 0, 'and never kept running back to the same spot');
+});
+
+test('only a sound saved match is offered to resume: a broken, finished or made-up one is refused', () => {
+  const CT = loadEngine(3);
+  const opts = { p0: 'octopus', p1: 'philosopher', control: ['human', 'cpu'], ...levelOpts(CT, 'club') };
+  const g = CT.createGame({ ...opts, control: ['cpu', 'cpu'] });
+  for (let i = 0; i < 60 * 60 * 20 && g.match.games[0] + g.match.games[1] < 2; i++) CT.updateGame(g, 1 / 60);
+  const good = () => JSON.parse(JSON.stringify({ p0: 'octopus', p1: 'philosopher', level: 'club', game: CT.saveGameState(g), tracker: null }));
+  assert.equal(CT.validSave(good()), true, 'a real save');
+  // one from before serves were scouted still resumes, and plays
+  const old = good();
+  old.game.scout.forEach((sc) => delete sc.serve);
+  assert.equal(CT.validSave(old), true, 'an older save');
+  const r = CT.createGame({ ...opts, control: ['cpu', 'cpu'], resume: old.game });
+  for (let i = 0; i < 60 * 60 * 30 && !r.match.over; i++) CT.updateGame(r, 1 / 60);
+  assert.ok(r.match.over, 'the older save played to the end');
+  const bad = {
+    'nothing': () => null,
+    'not an object': () => 'saved',
+    'no game': (s) => { delete s.game; },
+    'unknown player': (s) => { s.p0 = 'robot'; },
+    'a player named after a built-in': (s) => { s.p1 = 'constructor'; },
+    'unknown level': (s) => { s.level = 'toString'; },
+    'finished match': (s) => { s.game.match.over = true; },
+    'no match': (s) => { s.game.match = null; },
+    'games not a pair': (s) => { s.game.match.games = [3]; },
+    'impossible games': (s) => { s.game.match.games = [40, 0]; },
+    'points not numbers': (s) => { s.game.match.points = ['1', 0]; },
+    'negative points': (s) => { s.game.match.points = [-1, 0]; },
+    'no server': (s) => { s.game.match.server = 2; },
+    'no log': (s) => { delete s.game.match.log; },
+    'stamina missing': (s) => { delete s.game.stamina; },
+    'stamina one-sided': (s) => { s.game.stamina = [[50, 100]]; },
+    'stamina not a number': (s) => { s.game.stamina[1] = [null, 100]; },
+    'stamina out of range': (s) => { s.game.stamina[0] = [900, 100]; },
+    'scouting missing': (s) => { delete s.game.scout; },
+    'scouting broken': (s) => { s.game.scout[1].bh = null; },
+    'games counter broken': (s) => { s.game.lastGames = 'two'; },
+  };
+  for (const [name, breakIt] of Object.entries(bad)) {
+    const s = good(), out = breakIt(s);
+    assert.equal(CT.validSave(out === undefined ? s : out), false, name);
+  }
+});
+
 test('the achievement tracker picks up a resumed match where it left off', () => {
   const CT = loadEngine();
   // a love game of aces, interrupted after the third ace: still a tetra ace
@@ -435,6 +492,20 @@ test('pushing every ball back down the middle is no better than mixing it up aga
     games[style || 'varied'] = r.games[0] - r.games[1];
   }
   assert.ok(games.push <= games.varied, JSON.stringify(games));
+});
+
+test('the two characters are a fair match as CPU opponents: each wins a fair share of the games at Club and Pro', () => {
+  for (const level of ['club', 'pro']) {
+    const games = { octopus: 0, philosopher: 0 };
+    for (let i = 0; i < 6; i++) {
+      const CT = loadEngine(300 + i);
+      const chars = i % 2 ? ['octopus', 'philosopher'] : ['philosopher', 'octopus'];
+      const r = playSet(CT, { p0: chars[0], p1: chars[1], control: ['cpu', 'cpu'], extra: levelOpts(CT, level) });
+      games[chars[0]] += r.games[0]; games[chars[1]] += r.games[1];
+    }
+    const share = games.octopus / (games.octopus + games.philosopher);
+    assert.ok(share > 0.4 && share < 0.6, level + ' ' + JSON.stringify(games));
+  }
 });
 
 // ---------------- tutorial ----------------

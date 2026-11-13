@@ -11,7 +11,7 @@
       blurb: 'Lives deep behind the baseline. Long tentacles, a flat backhand, and stamina for days.',
       height: 1.98,
       speed: 5.0,          // top running speed, m/s
-      reach: 1.9,          // lateral reach from the body
+      reach: 2.1,          // lateral reach from the body
       overheadZ: 2.45,     // balls above this are smashed
       maxZ: 3.25,          // highest ball he can touch
       pace: { fh: 34, bh: 35 },      // speed caps, m/s
@@ -31,7 +31,7 @@
         pace: [0.6, 0.8], safe: 0.75, slice: 0.08, weakWing: 0.35, openCourt: 0.4,
         approach: 0, serveVolley: 0, lob: 0.35, fhPref: -0.05, late: 0.05,
         drop: 0.03, angle: 0.08, serveWide: 0.25, cross: 0.85,
-        patterns: ['pressure', 'pressure', 'sideToSide'], attack: 0.6, err: 0.9,
+        patterns: ['pressure', 'pressure', 'sideToSide'], attack: 0.6, err: 0.8,
       },
       colors: { main: '#8f5bff', glow: '#28f0d6', dark: '#2a1257', accent: '#ff3fa4' },
     },
@@ -61,7 +61,7 @@
         pace: [0.55, 0.9], safe: 0.85, slice: 0.12, weakWing: 0.3, openCourt: 0.6,
         approach: 0.7, serveVolley: 0.3, lob: 0.15, fhPref: 0.08, late: 0,
         drop: 0.2, angle: 0.3, serveWide: 0.5, cross: 0.75,
-        patterns: ['behind', 'sideToSide', 'pressure'], attack: 1.4, err: 0.8,
+        patterns: ['behind', 'sideToSide', 'pressure'], attack: 1.4, err: 0.855,
       },
       colors: { main: '#ece6ff', glow: '#ffc23d', dark: '#3a2f63', accent: '#3fd2ff' },
     },

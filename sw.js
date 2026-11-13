@@ -15,6 +15,7 @@ const SHELL = [
   'js/characters.js',
   'js/match.js',
   'js/game.js',
+  'js/input.js',
   'js/achievements.js',
   'js/render.js',
   'js/vr.js',
