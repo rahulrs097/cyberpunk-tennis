@@ -327,7 +327,9 @@
   function resize(r, W, H, top, bottom, hudBottom) {
     r.hudBottom = hudBottom || 0;
     r.args = [W, H, top, bottom, hudBottom];
-    r.dpr = Math.min(DPR_CAP[r.quality], window.devicePixelRatio || 1);
+    // Max draws every screen pixel (up to 3 per CSS pixel); the others draw
+    // fewer and let the browser stretch the picture, which softens the edges
+    r.dpr = Math.min(r.max && r.quality === 2 && !r.vr ? 3 : DPR_CAP[r.quality], window.devicePixelRatio || 1);
     r.glow = {};
     r.W = W; r.H = H; r.top = top; r.bottom = bottom;
     r.canvas.width = Math.round(W * r.dpr); r.canvas.height = Math.round(H * r.dpr);
@@ -359,13 +361,16 @@
   // metres between the two eyes
   const IPD = 0.064;
 
-  // Pick the graphics level (0 smooth, 1 balanced, 2 sharp) or 'auto'.
+  // Pick the graphics level (0 smooth, 1 balanced, 2 sharp, 'max') or 'auto'.
+  // Max is Sharp drawn at the screen's full resolution (crisp, anti-aliased
+  // edges, about 3x the pixels on a 2.6x phone); Auto never picks it.
   // Auto starts at AUTO_START and steps down while the phone can't keep up.
   // In VR the VR graphics setting applies instead, and this one comes back
   // after it. Call resizeRenderer after.
   function setQuality(r, level) {
     r.auto = level === 'auto';
-    const q = r.auto ? AUTO_START : level;
+    r.max = level === 'max';
+    const q = r.auto ? AUTO_START : r.max ? 2 : level;
     if (r.vr) r.qualityWas = q; else r.quality = q;
     r.frames.length = 0; r.tried = []; r.trial = null;
   }
