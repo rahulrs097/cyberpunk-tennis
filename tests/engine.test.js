@@ -403,6 +403,29 @@ test('a CPU that came to the net reads each ball afresh afterwards: its net spot
   assert.equal(stale, 0, 'and never kept running back to the same spot');
 });
 
+test('a CPU coming in keeps coming after a first volley from mid-court, and covers the side its volley went to', () => {
+  const CT = loadEngine(3);
+  const g = CT.createGame({ p0: 'octopus', p1: 'philosopher', control: ['human', 'cpu'], ...levelOpts(CT, 'pro') });
+  const c = g.players[1];
+  g.phase = 'rally';
+  // a volley from 8.5 m off the net, struck towards the opponent's right sideline
+  c.x = 0; c.y = -c.fwd * 8.5; c.atNet = true;
+  const shot = (x) => {
+    g.ball = Object.assign(CT.makeBall(), { active: true, inFlight: true, bounces: 0, lastHitter: 1 });
+    g.predLand = { x, y: c.fwd * 9 };
+    CT._cpuRecover(g, c);
+    return { x: c.tx, fromNet: -c.fwd * c.ty };
+  };
+  const wide = shot(3.5), middle = shot(0), other = shot(-3.5);
+  assert.ok(wide.fromNet < 4, `heads in to the net, not back to the baseline: ${wide.fromNet}`);
+  assert.ok(c.atNet, 'still at the net');
+  assert.ok(wide.x > 1 && Math.abs(middle.x) < 0.1 && other.x < -1, `shades to the side the ball went: ${wide.x} ${middle.x} ${other.x}`);
+  // lobbed right back to the baseline, it stays there
+  c.y = -c.fwd * 11.5;
+  const back = shot(1);
+  assert.ok(!c.atNet && back.fromNet > 10, `back at the baseline: ${back.fromNet}`);
+});
+
 test('only a sound saved match is offered to resume: a broken, finished or made-up one is refused', () => {
   const CT = loadEngine(3);
   const opts = { p0: 'octopus', p1: 'philosopher', control: ['human', 'cpu'], ...levelOpts(CT, 'club') };
