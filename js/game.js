@@ -23,6 +23,9 @@
   const EASY = 0.6;             // share of the CPU's mistiming that an easy ball takes away
   // A smart CPU only follows a ball in when it had this much more time (s) to set up for it.
   const APPROACH_SLACK = 0.3;
+  const NET_COVER = 3.2;        // how far off the net (m) a player at the net stands
+  const LOB_COVER = 1.3;        // how much further back (m) a smart CPU stands against someone who lobs it
+  const NET_COMMIT = 10.5;      // a player coming in keeps coming from inside this far from the net
   const BISECT = 0.12;          // how far past the middle a player recovers, as a share of how wide their shot lands
   const SERVE_READ = 3;         // serves into a box before a CPU returner starts reading where they go
   const CPU_EARLY = 0.45;       // share of the CPU's mistimed shots that are early rather than late
@@ -127,7 +130,7 @@
       cpuSmart: opts.cpuSmart || 0,
       // what each side has shown so far: shots and errors per wing, and
       // points spent at the net (the CPU reads the other side's)
-      scout: [0, 1].map(() => ({ fh: { n: 0, err: 0 }, bh: { n: 0, err: 0 }, points: 0, net: 0, serve: newServeScout() })),
+      scout: [0, 1].map(() => ({ fh: { n: 0, err: 0 }, bh: { n: 0, err: 0 }, points: 0, net: 0, vsNet: 0, lobs: 0, serve: newServeScout() })),
       // Tutorial drills: side 1 is a ball machine ('feeder' control) that feeds
       // side 0 and never returns. Each rep ends at the first bounce with a
       // 'drill' event instead of a point. { serve: true } = side 0 serves.
@@ -547,6 +550,9 @@
     if (shot.kind !== 'serve') {
       g.scout[p.side][shot.wing].n++;
       if (-p.fwd * p.y < NET_ZONE) p.seenAtNet = true;
+      // (for the net player's scouting) how often they lob someone at the net
+      const sc = g.scout[p.side], opp = g.players[1 - p.side];
+      if (opp.atNet && -opp.fwd * opp.y < NET_COMMIT) { sc.vsNet = (sc.vsNet || 0) + 1; if (shot.lob) sc.lobs = (sc.lobs || 0) + 1; }
     }
     // Back-to-back power groundstrokes cost 3, 6, 9... so baseline power
     // can't be spammed. Shots out of the air don't count and break the run:
@@ -753,26 +759,54 @@
   }
 
   // ---------------- CPU ----------------
+  // Where to stand at the net after a shot: on the line that splits the
+  // opponent's passing angle (from where they'll strike the ball to the two
+  // corners behind this player), NET_COVER metres off the net. A ball sent
+  // wide pulls the player across to that side, which is what closes the
+  // down-the-line pass without opening the cross-court one. A weaker CPU
+  // only partly reads it and stays nearer the middle.
+  function netCover(g, c) {
+    const land = g.predLand, b = g.ball;
+    const mine = b.active && b.lastHitter === c.side && b.bounces === 0 && land && c.fwd * land.y > 0;
+    // they meet it a stride or two behind the bounce, a little wider
+    const px = mine ? clamp(land.x * 1.1, -COURT.SW - 1.5, COURT.SW + 1.5) : g.players[1 - c.side].x;
+    const py = mine ? Math.min(c.fwd * land.y + 1.5, COURT.HL + 1.5) : -g.players[1 - c.side].fwd * g.players[1 - c.side].y;
+    let ux = 0, uy = 0;
+    for (const cx of [-COURT.SW, COURT.SW]) {
+      const dx = cx - px, dy = py + COURT.HL, d = Math.hypot(dx, dy);
+      ux += dx / d; uy += dy / d;
+    }
+    const cpu = g.control[c.side] === 'cpu';
+    const read = cpu ? 0.5 + 0.5 * g.cpuSmart : 1;
+    // Lobbed over a few times, a smart CPU gives itself room to get back
+    // for the next one (and gives up some of the angle for it).
+    const sc = g.scout[1 - c.side];
+    const lobRate = (sc.lobs || 0) / ((sc.vsNet || 0) + 6);
+    const d = NET_COVER + (cpu ? LOB_COVER * g.cpuSmart * clamp(lobRate * 3, 0, 1) : 0);
+    const x = px + ux * (py + d) / uy;
+    return { x: clamp(x * read, -2.5, 2.5), y: -c.fwd * d };
+  }
+
   function cpuRecover(g, c) {
     const opp = g.players[1 - c.side];
     c.plan = null;
-    if (c.netSpot) {
+    const cpu = g.control[c.side] === 'cpu';
+    if (c.netSpot && !cpu) {
+      // a spot the player tapped: keep heading there
       c.atNet = true;
       c.tx = c.netSpot.x; c.ty = c.netSpot.y;
-      // The CPU's net spot is for the shot it just hit (an approach, or a
-      // serve it follows in). After that it reads each ball afresh: at the
-      // net it covers the line of its last volley, and lobbed back to the
-      // baseline it stays there instead of running in again.
-      if (g.control[c.side] === 'cpu') c.netSpot = null;
       return;
     }
-    // Once in the front half of the court, hold the net instead of
-    // retreating: cover the line the ball went down, a few metres back.
-    if (-c.fwd * c.y < 7.5) {
+    // Following a shot in (an approach, a serve it follows in), or already
+    // on its way in or in the front of the court: keep coming in to the net
+    // and cover the passing angle, rather than turning back halfway.
+    // Lobbed back past COMMIT, it settles at the baseline instead.
+    const fromNet = -c.fwd * c.y;
+    if (c.netSpot || fromNet < NET_ZONE || (c.atNet && fromNet < NET_COMMIT)) {
+      c.netSpot = null;
       c.atNet = true;
-      const bx = g.ball.active ? g.ball.pos.x : 0;
-      c.tx = clamp(c.x * 0.4 + bx * 0.4, -3, 3);
-      c.ty = -c.fwd * clamp(-c.fwd * c.y, 2.6, 4.2);
+      const s = netCover(g, c);
+      c.tx = s.x; c.ty = s.y;
       return;
     }
     c.atNet = false;
@@ -1016,7 +1050,7 @@
     }
     c.shotN++;
     c.lastTx = tx;
-    if (approach) c.netSpot = { x: clamp(tx * 0.3, -1.5, 1.5), y: -fwd * 3.6 };
+    if (approach) c.netSpot = true;   // where to, once the shot is struck: see netCover
     return input;
   }
 
@@ -1062,7 +1096,7 @@
       pace = Math.max(0.2, pace - 0.1);
     }
     if (!input) input = { aim: 0, pace, over: 0, spinDir, curve };
-    if (first && Math.random() < T.serveVolley) c.netSpot = { x: 0, y: -c.fwd * 4.2 };
+    if (first && Math.random() < T.serveVolley) c.netSpot = true;
     // Timing on the toss, so some serves miss: a big first serve is mistimed
     // more often than a careful second one.
     const W = windowFor(c, 'fh');
@@ -1561,6 +1595,8 @@
   CT.createGame = createGame;
   CT._computeShot = computeShot;   // for tests
   CT._applyShot = applyShot;
+  CT._netCover = netCover;
+  CT._cpuRecover = cpuRecover;
   CT._cpuPlan = cpuPlan;
   CT.updateGame = update;
   CT.saveGameState = saveState;
