@@ -412,10 +412,11 @@ function buildNet(scene, C) {
     const x = pos.getX(i), up = pos.getY(i) > 0;
     pos.setY(i, up ? top(x) : 0);
   }
-  const grid = canvasTex(32, 32, (g) => { g.strokeStyle = '#fff'; g.lineWidth = 2; g.strokeRect(0, 0, 32, 32); }, false);
+  // a faint fill under the cords, so from afar the net reads as a band, as a real one does
+  const grid = canvasTex(32, 32, (g) => { g.fillStyle = '#333'; g.fillRect(0, 0, 32, 32); g.strokeStyle = '#fff'; g.lineWidth = 4; g.strokeRect(0, 0, 32, 32); }, false);
   grid.wrapS = grid.wrapT = THREE.RepeatWrapping;
   grid.repeat.set(2 * X / 0.07, 1 / 0.07);
-  scene.add(new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: new THREE.Color(0.1, 0.1, 0.12), alphaMap: grid, transparent: true, opacity: 0.75, side: THREE.DoubleSide, depthWrite: false })));
+  scene.add(new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: new THREE.Color(0.75, 0.78, 0.82), alphaMap: grid, transparent: true, opacity: 0.45, side: THREE.DoubleSide, depthWrite: false })));
   // the tape along the top and the posts
   const tapeMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.82, 0.86, 0.9) });   // white, like the lines
   const pts = [];
