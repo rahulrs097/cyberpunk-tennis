@@ -35,7 +35,7 @@ const hdr = (hex, k) => new THREE.Color(hex).multiplyScalar(k);
 export function create3d(r, R) {
   const { COURT: C, hash } = R;
   const canvas = document.createElement('canvas');
-  const gl = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance', preserveDrawingBuffer: false });
+  const gl = new THREE.WebGLRenderer({ canvas, antialias: LITE, powerPreference: 'high-performance', preserveDrawingBuffer: false });
   gl.toneMapping = THREE.ACESFilmicToneMapping;
   gl.toneMappingExposure = 0.9;
   gl.shadowMap.enabled = !LITE;
@@ -52,8 +52,8 @@ export function create3d(r, R) {
     pm.dispose();
   }
 
-  buildSky(scene, hash);
-  buildSkyline(scene, hash);
+  const moon = buildSky(scene, hash);
+  const skyline = buildSkyline(scene, hash);
   // the simple lit scenery, until (or unless) the baked rooftop has loaded
   const plain = new THREE.Group();
   scene.add(plain);
@@ -67,7 +67,10 @@ export function create3d(r, R) {
     loadBaked(scene).then(() => {
       scene.remove(plain);
       gl.shadowMap.enabled = false;
+      scene.environment = null;   // (only the plain cars' paint used it)
     }).catch((e) => console.warn('baked rooftop unavailable', e));
+    loadSkyline(scene).then(() => { scene.remove(skyline, moon); })
+      .catch((e) => console.warn('baked skyline unavailable', e));
   }
   const board = buildBoard(scene, R);
   const players = [0, 1].map(() => buildPlayer(scene));
@@ -82,8 +85,8 @@ export function create3d(r, R) {
     composer.setPixelRatio(dpr);
     composer.setSize(w, h);
     composer.addPass(new RenderPass(scene, cam));
-    if (!LITE) {
-      bloom = new UnrealBloomPass(new THREE.Vector2(w / 2, h / 2), 0.5, 0.4, 0.92);
+    {
+      bloom = new UnrealBloomPass(new THREE.Vector2(w / 2, h / 2), 0.32, 0.35, 0.95);
       composer.addPass(bloom);
     }
     composer.addPass(new OutputPass());
@@ -92,9 +95,11 @@ export function create3d(r, R) {
   const self = {
     ready: true, canvas,
     resize(r) {
-      const dpr = LITE ? Math.min(1, r.dpr) : r.dpr;
+      // fewer pixels than the flat view's Sharp: each one costs more here
+      const dpr = Math.min(LITE ? 1 : 1.25, window.devicePixelRatio || 1);
       gl.setPixelRatio(dpr);
-      gl.setSize(r.W, r.H, false);
+      gl.setSize(r.W, r.H);
+      if (LITE) return;   // drawn straight to the screen: no bloom
       if (composer) composer.renderTarget1.dispose(), composer.renderTarget2.dispose();
       makeComposer(r.W, r.H, dpr);
     },
@@ -104,7 +109,7 @@ export function create3d(r, R) {
       board.update(r, f);
       for (const p of g.players) players[p.side].update(r, g, p, r.view === 'first' && p.side === human, cam);
       ball.update(r, g, cam);
-      composer.render();
+      if (LITE) gl.render(scene, cam); else composer.render();
     },
   };
   self.resize(r);
@@ -182,6 +187,9 @@ function buildSky(scene, hash) {
   const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: radial, color: 0x8890c0, transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
   halo.position.copy(moon.position); halo.scale.setScalar(180);
   scene.add(halo);
+  const g = new THREE.Group(); g.add(moon, halo);
+  scene.remove(moon, halo); scene.add(g);
+  return g;
 }
 
 // a soft glow round each lamp head, which bloom can't make on its own on a small screen
@@ -215,7 +223,7 @@ async function loadBaked(scene) {
   const G = GROUND;
   const deck = flat(new THREE.PlaneGeometry(G.x1 - G.x0, G.y1 - G.y0), bakedMaterial(ground, 1.0, 0), (G.x0 + G.x1) / 2, (G.y0 + G.y1) / 2, 0);
   // the roof beyond the baked part, dark
-  const beyond = flat(new THREE.PlaneGeometry(240, 160), new THREE.MeshBasicMaterial({ color: 0x07070b }), 0, 0, -0.01);
+  const beyond = flat(new THREE.PlaneGeometry(90, G.y1 - G.y0), new THREE.MeshBasicMaterial({ color: 0x07070b }), 0, (G.y0 + G.y1) / 2, -0.01);
   const mat = bakedMaterial(atlas);
   gltf.scene.traverse((o) => { if (o.isMesh) o.material = mat; });
   scene.add(beyond, deck, gltf.scene);
@@ -235,6 +243,9 @@ function buildSkyline(scene, hash) {
     return t;
   };
   const box = new THREE.BoxGeometry(1, 1, 1);
+  const grp = new THREE.Group();
+  scene.add(grp);
+  scene = grp;
   for (let s = 0; s < 3; s++) {
     const mat = new THREE.MeshStandardMaterial({ color: 0x0b0819, roughness: 0.6, metalness: 0.3, emissive: 0xffffff, emissiveMap: wtex(s + 1), emissiveIntensity: 0.8, fog: false });
     const n = 70, m = new THREE.InstancedMesh(box, mat, n);
@@ -248,6 +259,38 @@ function buildSkyline(scene, hash) {
     }
     scene.add(m);
   }
+  return grp;
+}
+
+// The baked skyline (tools/rooftop-bake/skyline.py): an equirectangular
+// strip from LAT0 to LAT1 degrees round the court, its centre straight down
+// the court (+y), on a band of a big sphere.
+function loadSkyline(scene) {
+  const LAT0 = -6, LAT1 = 24, R = 1000, NU = 96, NV = 6;
+  return new THREE.TextureLoader().loadAsync(BAKED + 'skyline.png').then((t) => {
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.anisotropy = 4;
+    const pos = [], uv = [], idx = [];
+    for (let j = 0; j <= NV; j++) {
+      const lat = THREE.MathUtils.degToRad(LAT0 + ((LAT1 - LAT0) * j) / NV);
+      for (let i = 0; i <= NU; i++) {
+        const a = (i / NU - 0.5) * Math.PI * 2;   // + is to the right (+x)
+        const p = V(Math.sin(a) * Math.cos(lat) * R, Math.cos(a) * Math.cos(lat) * R, Math.sin(lat) * R + 5);
+        pos.push(p.x, p.y, p.z); uv.push(i / NU, j / NV);
+      }
+    }
+    for (let j = 0; j < NV; j++) for (let i = 0; i < NU; i++) {
+      const a = j * (NU + 1) + i, b = a + NU + 1;
+      idx.push(a, a + 1, b, a + 1, b + 1, b);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    geo.setIndex(idx);
+    const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map: t, color: new THREE.Color(0.8, 0.8, 0.8), transparent: true, fog: false, depthWrite: false, side: THREE.DoubleSide }));
+    m.renderOrder = -1;
+    scene.add(m);
+  });
 }
 
 // ---------------- the roof ----------------
@@ -296,7 +339,7 @@ function buildCourt(scene, C) {
   const D = C.DW, L = C.HL, S = C.SW, B = 2 * C.LW;
   const lines = [[-D, -L, D, -L, B], [-D, L, D, L, B], [-D, -L, -D, L], [D, -L, D, L], [-S, -L, -S, L], [S, -L, S, L],
     [-S, -C.SL, S, -C.SL], [-S, C.SL, S, C.SL], [0, -C.SL, 0, C.SL], [0, -L, 0, -L + 0.3], [0, L, 0, L - 0.3]];
-  const mat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.42, 1.55, 1.85) });
+  const mat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.32, 1.15, 1.4) });
   for (const [x1, y1, x2, y2, w0 = C.LW] of lines) {
     const w = Math.max(w0, 0.07);   // a touch wider than real, so far lines don't break up
     const len = Math.hypot(x2 - x1, y2 - y1) + w;
@@ -320,7 +363,7 @@ function buildNet(scene, C) {
   grid.repeat.set(2 * X / 0.07, 1 / 0.07);
   scene.add(new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: new THREE.Color(1.0, 0.2, 0.7), alphaMap: grid, transparent: true, opacity: 0.5, side: THREE.DoubleSide, depthWrite: false })));
   // the tape along the top and the posts
-  const tapeMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(2.4, 0.35, 1.4) });
+  const tapeMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(1.5, 0.25, 0.9) });
   const pts = [];
   for (let i = 0; i <= N; i++) { const x = -X + (2 * X * i) / N; pts.push(new THREE.Vector3(x, top(x), 0)); }
   scene.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 64, 0.03, 6), tapeMat));
@@ -420,7 +463,7 @@ function buildBoard(scene, R) {
 // Each player is drawn by characters.js onto its own canvas, PPM pixels to
 // the metre, feet at (CW/2, FEET), and shown on a card standing at their
 // feet, turned to face the camera, like the flat view's sprite.
-const PPM = 120, CARD_W = 3.6, CARD_UP = 3.0, CARD_DOWN = 0.4;
+const PPM = 80, CARD_W = 3.6, CARD_UP = 3.0, CARD_DOWN = 0.4;
 function buildPlayer(scene) {
   const cv = document.createElement('canvas');
   cv.width = Math.round(CARD_W * PPM); cv.height = Math.round((CARD_UP + CARD_DOWN) * PPM);
@@ -464,8 +507,8 @@ function buildPlayer(scene) {
 // ---------------- ball ----------------
 const TRAIL_MAX = 40;
 function buildBall(scene) {
-  const ball = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), new THREE.MeshBasicMaterial({ color: new THREE.Color(2.0, 2.6, 0.5) }));
-  const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: radial, color: 0xc6ff2e, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false }));
+  const ball = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), new THREE.MeshBasicMaterial({ color: new THREE.Color(1.15, 1.45, 0.35) }));
+  const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: radial, color: 0xc6ff2e, transparent: true, opacity: 0.4, blending: THREE.AdditiveBlending, depthWrite: false }));
   const shadow = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: blob, transparent: true, opacity: 0.5, depthWrite: false }));
   shadow.rotation.x = -Math.PI / 2;
   // the trail: a ribbon facing the camera, fading towards its tail
@@ -494,7 +537,7 @@ function buildBall(scene) {
       const rad = (px * dist) / f;
       ball.scale.setScalar(rad);
       glow.position.copy(ball.position);
-      glow.scale.setScalar(rad * 8);
+      glow.scale.setScalar(rad * 6);
       shadow.position.copy(V(b.pos.x, b.pos.y, 0.02));
       shadow.scale.setScalar(0.18 * 1.4);
       const T = g.trail, n = Math.min(T.length, TRAIL_MAX);

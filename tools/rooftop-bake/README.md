@@ -33,3 +33,14 @@ python bake.py out 4096 4096 64
 Then convert the two PNGs to JPEG (quality ~85) and copy them with
 `props.glb` into `models/rooftop/` as `ground.jpg`, `props.jpg`, `props.glb`.
 If the ground's extent changes, change `GROUND` in js/render3d.js to match.
+
+## Skyline
+
+`skyline.py` renders the city around the rooftop as a 360° strip
+(`skyline.png`, transparent sky, latitude -6..24°) from the middle of the
+court. render3d.js wraps it on a far cylinder behind everything, so the
+towers and their windows are baked like the rest.
+
+```
+python skyline.py out 4096
+```

@@ -350,7 +350,11 @@
     }
     c.ready = false;
     buildSky(r);
-    if (r.three && r.three.ready) r.three.resize(r);
+    if (r.three && r.three.ready) {
+      r.three.resize(r);
+      r.ov.width = r.canvas.width; r.ov.height = r.canvas.height;
+      r.ov.style.width = W + 'px'; r.ov.style.height = H + 'px';
+    }
   }
 
   // phones with few cores or little memory start one level down
@@ -385,8 +389,24 @@
     if (r.three || r.threeFailed) return;
     r.three = { ready: false };
     import(new URL('js/render3d.js', document.baseURI).href)
-      .then((m) => { r.three = m.create3d(r, CT.R2D); if (r.args) resize(r, ...r.args); })
+      .then((m) => {
+        r.three = m.create3d(r, CT.R2D);
+        // the 3D picture and the clear canvas for the guides sit over the
+        // flat one, and let touches through to it
+        r.ov = document.createElement('canvas');
+        for (const cv of [r.three.canvas, r.ov]) {
+          Object.assign(cv.style, { position: 'fixed', left: '0', top: '0', pointerEvents: 'none', display: 'none' });
+        }
+        r.canvas.after(r.three.canvas, r.ov);
+        if (r.args) resize(r, ...r.args);
+      })
       .catch((e) => { console.warn('3D view unavailable', e); r.three = null; r.threeFailed = true; });
+  }
+
+  function show3d(r, on) {
+    if (!r.ov || r.shown3d === on) return;
+    r.shown3d = on;
+    r.three.canvas.style.display = r.ov.style.display = on ? 'block' : 'none';
   }
 
   // Quality levels, highest first. A phone that can't keep up steps down:
@@ -1730,16 +1750,21 @@
     const ctx = r.ctx;
     ctx.setTransform(r.dpr, 0, 0, r.dpr, 0, 0);
     const d3 = !r.vr && r.want3d && r.three && r.three.ready ? r.three : null;
+    show3d(r, !!d3);
+    let out = ctx;
     if (r.vr) drawStereo(ctx, r, g, human, info, land);
     else if (d3) {
       // 3D (three.js, js/render3d.js): the world is drawn on its own WebGL
-      // canvas from the same camera, copied in, and the touch guides go
-      // over it
+      // canvas, over this one, from the same camera, and the touch guides
+      // on a clear canvas over that (input still goes to this canvas)
       d3.draw(r, g, human, now);
-      ctx.drawImage(d3.canvas, 0, 0, r.W, r.H);
-      drawOverlay(ctx, r, g, human, info, land);
+      out = r.ov.getContext('2d');
+      out.setTransform(1, 0, 0, 1, 0, 0);
+      out.clearRect(0, 0, r.ov.width, r.ov.height);
+      out.setTransform(r.dpr, 0, 0, r.dpr, 0, 0);
+      drawOverlay(out, r, g, human, info, land);
     } else drawScene(ctx, r, g, human, info, land);
-    if (SHOW_FPS) drawFps(ctx, r, dt, d3);
+    if (SHOW_FPS) drawFps(out, r, dt, d3);
     watchFrameRate(r, dt, (performance.now() - now) / 1000);
   }
 
