@@ -268,7 +268,7 @@ async function loadBaked(scene) {
   const grain = concreteTex();
   grain.wrapS = grain.wrapT = THREE.RepeatWrapping;
   grain.anisotropy = 4;
-  const deck = flat(new THREE.PlaneGeometry(G.x1 - G.x0, G.y1 - G.y0), bakedMaterial(ground, 0.85, 0, { map: grain, repeat: [(G.x1 - G.x0) / 2.5, (G.y1 - G.y0) / 2.5], amount: 0.55, desat: 0.22 }), (G.x0 + G.x1) / 2, (G.y0 + G.y1) / 2, 0);
+  const deck = flat(new THREE.PlaneGeometry(G.x1 - G.x0, G.y1 - G.y0), bakedMaterial(ground, 0.85, 0, { map: grain, repeat: [(G.x1 - G.x0) / 2.5, (G.y1 - G.y0) / 2.5], amount: 0.4, desat: 0.15 }), (G.x0 + G.x1) / 2, (G.y0 + G.y1) / 2, 0);
   // the roof beyond the baked part, dark
   const beyond = flat(new THREE.PlaneGeometry(90, G.y1 - G.y0), new THREE.MeshBasicMaterial({ color: 0x07070b }), 0, (G.y0 + G.y1) / 2, -0.01);
   const mat = bakedMaterial(atlas);

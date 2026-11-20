@@ -107,7 +107,19 @@ crackm = math_(N, L, 'MULTIPLY', crackm, math_(N, L, 'GREATER_THAN', node(N, L, 
 base = mix(N, L, srgb("#1b1c24"), srgb("#101117"), grain)
 base = mix(N, L, base, (0.008, 0.008, 0.01, 1), math_(N, L, 'MULTIPLY', wet, 0.3))
 base = mix(N, L, base, (0.002, 0.002, 0.002, 1), crackm)
+# saw-cut joints between the 6 m slabs of a concrete roof deck
+xyz = node(N, L, "ShaderNodeSeparateXYZ", {"Vector": tc})
+def joint(v):
+    f = math_(N, L, 'FRACT', math_(N, L, 'DIVIDE', v, 6.0))
+    return math_(N, L, 'LESS_THAN', math_(N, L, 'MINIMUM', f, math_(N, L, 'SUBTRACT', 1.0, f)), 0.0016)
+jm = math_(N, L, 'MAXIMUM', joint(xyz.outputs["X"]), joint(xyz.outputs["Y"]))
+base = mix(N, L, base, (0.004, 0.004, 0.005, 1), math_(N, L, 'MULTIPLY', jm, 0.8))
+# tyre scuffs and drips: soft darker smears
+smear = node(N, L, "ShaderNodeMapRange", {"Value": node(N, L, "ShaderNodeTexNoise", {"Vector": tc, "Scale": 0.9, "Detail": 3.0}).outputs["Fac"],
+             "From Min": 0.58, "From Max": 0.75, "To Min": 0.0, "To Max": 0.35}).outputs[0]
+base = mix(N, L, base, (0.006, 0.006, 0.007, 1), smear)
 L.new(base, p.inputs["Base Color"])
+ASPHALT_BASE = base
 L.new(node(N, L, "ShaderNodeMapRange", {"Value": wet, "To Min": 0.5, "To Max": 0.05}).outputs[0], p.inputs["Roughness"])
 bh = math_(N, L, 'MULTIPLY', math_(N, L, 'SUBTRACT', 1.0, wet), math_(N, L, 'SUBTRACT', agg.outputs["Distance"], math_(N, L, 'MULTIPLY', crackm, 2.0)))
 L.new(node(N, L, "ShaderNodeBump", {"Height": bh, "Strength": 0.35, "Distance": 0.003}).outputs["Normal"], p.inputs["Normal"])
@@ -155,6 +167,23 @@ def acrylic(name, hexc):
     return m
 # the court is the deck's own concrete (Rahul, 2026-11-20): only the lines mark it
 box("CourtSurround", (-DW - 1.2, -HL - 2.5, 0), (DW + 1.2, HL + 2.5, 0.003), asphalt)
+# inside the lines: a thin coat of blue paint on the concrete, worn through in patches and along the baselines
+paint = asphalt.copy(); paint.name = "CourtPaint"
+N, L = paint.node_tree.nodes, paint.node_tree.links
+p = N["Principled BSDF"]; under = p.inputs["Base Color"].links[0].from_socket
+tc = N.new("ShaderNodeTexCoord").outputs["Object"]
+xyz = node(N, L, "ShaderNodeSeparateXYZ", {"Vector": tc})
+wear = node(N, L, "ShaderNodeTexNoise", {"Vector": tc, "Scale": 0.7, "Detail": 9.0, "Roughness": 0.6}).outputs["Fac"]
+# feet wear the paint most behind the baselines and near the service T
+by = math_(N, L, 'ABSOLUTE', xyz.outputs["Y"])
+foot = node(N, L, "ShaderNodeMapRange", {"Value": by, "From Min": HL - 3.0, "From Max": HL - 0.2, "To Min": 0.0, "To Max": 0.18}).outputs[0]
+cover = node(N, L, "ShaderNodeMapRange", {"Value": math_(N, L, 'SUBTRACT', wear, foot), "From Min": 0.34, "From Max": 0.5, "To Min": 0.0, "To Max": 1.0}).outputs[0]
+fleck = node(N, L, "ShaderNodeTexNoise", {"Vector": tc, "Scale": 60.0, "Detail": 2.0}).outputs["Fac"]
+blue = mix(N, L, srgb("#1a2e4a"), srgb("#213a5e"), fleck)
+painted = node(N, L, "ShaderNodeMix", {"A": under, "B": blue, "Factor": 0.62}, data_type='RGBA', blend_type='MULTIPLY').outputs[2]
+painted = mix(N, L, under, mix(N, L, blue, painted, 0.5), 1.0)
+L.new(mix(N, L, under, painted, math_(N, L, 'MULTIPLY', cover, float(os.environ.get("PAINT", "0.7")))), p.inputs["Base Color"])
+box("CourtPaint", (-DW, -HL, 0.003), (DW, HL, 0.0035), paint)
 line_m, N, L, p = M("CourtLine")
 p.inputs["Base Color"].default_value = (0.85, 0.95, 1.0, 1); p.inputs["Roughness"].default_value = 0.3
 p.inputs["Emission Color"].default_value = srgb("#d8f4ff"); p.inputs["Emission Strength"].default_value = 2.5

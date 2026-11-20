@@ -116,7 +116,7 @@ for m in bpy.data.materials:
                 c = nd.inputs["Base Color"].default_value
                 nd.inputs["Base Color"].default_value = (min(1, c[0] * 2.2), min(1, c[1] * 2.2), min(1, c[2] * 2.2), 1)
 
-GROUND = ("Deck", "CourtSurround", "CourtSingles", "Line", "Lane", "Bay", "Plane", "Sphere")
+GROUND = ("Deck", "CourtSurround", "CourtSingles", "CourtPaint", "Line", "Lane", "Bay", "Plane", "Sphere")
 def is_ground(o): return o.name.split('.')[0] in GROUND
 
 scn.view_settings.view_transform = 'Standard'

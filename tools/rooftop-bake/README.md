@@ -27,7 +27,7 @@ Needs Blender's Python module (`pip install bpy`, Python 3.11).
 
 ```
 python bake.py OUT GROUND_WIDTH_PX PROPS_ATLAS_PX SAMPLES
-python bake.py out 4096 4096 64
+python bake.py out 4096 4096 64   # what models/rooftop uses (about 40 min on 4 cores)
 ```
 
 Then convert the two PNGs to JPEG (quality ~85) and copy them with
