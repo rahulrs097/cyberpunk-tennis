@@ -412,6 +412,11 @@
       <button data-full aria-pressed="true">Full screen</button>
     </div>
     <div class="opts">
+      <div class="label">Theme</div>
+      <div class="seg tabs">
+        <button data-theme="cyberpunk" aria-pressed="true">Cyberpunk</button>
+        <button data-theme="concrete" aria-pressed="false">Concrete 3D</button>
+      </div>
       <div class="label">Graphics</div>
       <div class="seg tabs gfx">
         <button data-gfx="auto" aria-pressed="true">Auto</button>
@@ -615,6 +620,8 @@
   </div>
 </div>
 
+<!-- three.js, for the 3D graphics level (js/render3d.js, loaded only when it's picked) -->
+<script type="importmap">{ "imports": { "three": "./vendor/three/three.module.min.js", "three/addons/": "./vendor/three/addons/" } }</script>
 <script src="js/physics.js"></script>
 <script src="js/characters.js"></script>
 <script src="js/match.js"></script>

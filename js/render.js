@@ -350,6 +350,11 @@
     }
     c.ready = false;
     buildSky(r);
+    if (r.three && r.three.ready) {
+      r.three.resize(r);
+      r.ov.width = r.canvas.width; r.ov.height = r.canvas.height;
+      r.ov.style.width = W + 'px'; r.ov.style.height = H + 'px';
+    }
   }
 
   // phones with few cores or little memory start one level down
@@ -373,6 +378,43 @@
     const q = r.auto ? AUTO_START : r.max ? 2 : level;
     if (r.vr) r.qualityWas = q; else r.quality = q;
     r.frames.length = 0; r.tried = []; r.trial = null;
+  }
+
+  // Theme: 'cyberpunk' is the flat neon view drawn here; 'concrete' is the
+  // 3D rooftop (js/render3d.js). Graphics levels apply to both.
+  function setTheme(r, theme) {
+    r.want3d = theme === 'concrete';
+    if (r.want3d) load3d(r);
+  }
+
+  // The 3D view is a separate module (and three.js), fetched the first time
+  // it's picked. Until it's ready, or if the phone has no WebGL, the flat
+  // view carries on.
+  function load3d(r) {
+    if (r.three || r.threeFailed) return;
+    r.three = { ready: false };
+    import(new URL('js/render3d.js', document.baseURI).href)
+      .then((m) => {
+        r.three = m.create3d(r, CT.R2D);
+        // the 3D picture and the clear canvas for the guides sit over the
+        // flat one, and let touches through to it
+        r.ov = document.createElement('canvas');
+        for (const cv of [r.three.canvas, r.ov]) {
+          Object.assign(cv.style, { position: 'fixed', left: '0', top: '0', pointerEvents: 'none', display: 'none' });
+        }
+        r.canvas.after(r.three.canvas, r.ov);
+        if (r.args) resize(r, ...r.args);
+      })
+      .catch((e) => { console.warn('3D view unavailable', e); r.three = null; r.threeFailed = true; });
+  }
+
+  function show3d(r, on) {
+    if (!r.ov || r.shown3d === on) return;
+    r.shown3d = on;
+    r.three.canvas.style.display = r.ov.style.display = on ? 'block' : 'none';
+    // the flat canvas still takes the touches, but hidden under the 3D one it
+    // needn't be blended into every frame (fully clear layers are skipped)
+    r.canvas.style.opacity = on ? '0' : '';
   }
 
   // Quality levels, highest first. A phone that can't keep up steps down:
@@ -1024,16 +1066,37 @@
     const tl = at(0, z1), tr = at(1, z1);
     if (tl.behind || tr.behind) return;
     if (Math.max(tl.x, tr.x) < 0 || Math.min(tl.x, tr.x) > r.W) return;
+    // the pylon it stands on, down into the skyline
+    const pb = at(0.5, 0), pt = at(0.5, B.z);
+    ctx.strokeStyle = '#1c1b2a'; ctx.lineWidth = Math.max(2, (pt.s || 0) * 0.5);
+    ctx.beginPath(); ctx.moveTo(pb.x, pb.y); ctx.lineTo(pt.x, pt.y); ctx.stroke();
+    const { src, on } = boardSource(r);
+    const W = BOARD_TEX.w, H = BOARD_TEX.h, N = 10, sw = W / N;
+    const base = ctx.getTransform();   // (in VR: one eye's half of the screen, turned with your head)
+    ctx.save();
+    ctx.globalAlpha = on;
+    ctx.imageSmoothingQuality = 'high';
+    // The sign is turned, so its near end looks taller than its far end.
+    // Drawn as thin vertical strips, each mapped from its own corners.
+    for (let i = 0; i < N; i++) {
+      const a0 = at(i / N, z1), a1 = at((i + 1) / N, z1), b0 = at(i / N, B.z);
+      ctx.setTransform(base);
+      ctx.transform((a1.x - a0.x) / sw, (a1.y - a0.y) / sw, (b0.x - a0.x) / H, (b0.y - a0.y) / H, a0.x, a0.y);
+      ctx.drawImage(src, i * sw, 0, Math.min(sw + 1, W - i * sw), H, 0, 0, Math.min(sw + 1, W - i * sw), H);
+    }
+    ctx.restore();
+  }
+
+  // What the sign shows this frame: its picture (a canvas BOARD_TEX in size,
+  // whose `key` changes when it's redrawn, or is null while it's redrawn
+  // every frame) and how bright it is (`on`, 0-1: a new word flickers on).
+  function boardSource(r) {
     const now = performance.now() / 1000;
     const cur = boardText(r, now);
     // a new word flickers on, then hums
     const age = now - cur.from;
     // (no flicker for someone who has asked their phone for less motion)
     const on = cur.anim ? 1 : age < 0.35 && !CALM ? (Math.floor(age * 24) % 2 ? 0.25 : 1) : 0.88 + 0.12 * Math.sin(now * 3);
-    // the pylon it stands on, down into the skyline
-    const pb = at(0.5, 0), pt = at(0.5, B.z);
-    ctx.strokeStyle = '#1c1b2a'; ctx.lineWidth = Math.max(2, (pt.s || 0) * 0.5);
-    ctx.beginPath(); ctx.moveTo(pb.x, pb.y); ctx.lineTo(pt.x, pt.y); ctx.stroke();
     let src;
     if (cur.photo || cur.score || cur.call !== undefined || cur.anim) {
       src = r.boardPhotoTex || (r.boardPhotoTex = document.createElement('canvas'));
@@ -1053,20 +1116,7 @@
         else drawBoardCall(src.getContext('2d'), r, cur.call, age);
       }
     } else src = boardTexture(r, cur.text, cur.color);
-    const W = BOARD_TEX.w, H = BOARD_TEX.h, N = 10, sw = W / N;
-    const base = ctx.getTransform();   // (in VR: one eye's half of the screen, turned with your head)
-    ctx.save();
-    ctx.globalAlpha = on;
-    ctx.imageSmoothingQuality = 'high';
-    // The sign is turned, so its near end looks taller than its far end.
-    // Drawn as thin vertical strips, each mapped from its own corners.
-    for (let i = 0; i < N; i++) {
-      const a0 = at(i / N, z1), a1 = at((i + 1) / N, z1), b0 = at(i / N, B.z);
-      ctx.setTransform(base);
-      ctx.transform((a1.x - a0.x) / sw, (a1.y - a0.y) / sw, (b0.x - a0.x) / H, (b0.y - a0.y) / H, a0.x, a0.y);
-      ctx.drawImage(src, i * sw, 0, Math.min(sw + 1, W - i * sw), H, 0, 0, Math.min(sw + 1, W - i * sw), H);
-    }
-    ctx.restore();
+    return { src, on };
   }
 
   // Flash a word on the billboard for `secs` seconds. With `anim` (an id in
@@ -1375,8 +1425,19 @@
     ctx.lineWidth = 1.5;
     if (groundEllipse(ctx, r, p.x, p.y, 0.6)) ctx.stroke();
     ctx.restore();
+    const pose = playerPose(r, g, p, pos);
+    ctx.save();
+    ctx.translate(pos.x, pos.y);
+    ctx.scale(pos.s * SPRITE_SCALE, pos.s * SPRITE_SCALE);
+    CT.drawCharacter(ctx, p.ch.id, pose, r.quality === 2 ? Math.max(0.3, pos.s / 45) : 0);
+    ctx.restore();
+  }
+
+  // How a player stands this frame, for CT.drawCharacter. pos is their feet
+  // on screen (proj).
+  function playerPose(r, g, p, pos) {
     const a = playerAnim(r, g, p, pos);
-    const pose = {
+    return {
       t: p.anim,
       facing: p.side === r.human ? 'back' : 'front',
       swing: p.swing,
@@ -1387,11 +1448,6 @@
       prep: a.prep, prepWing: a.prepWing,
       lod: r.quality,
     };
-    ctx.save();
-    ctx.translate(pos.x, pos.y);
-    ctx.scale(pos.s * SPRITE_SCALE, pos.s * SPRITE_SCALE);
-    CT.drawCharacter(ctx, p.ch.id, pose, r.quality === 2 ? Math.max(0.3, pos.s / 45) : 0);
-    ctx.restore();
   }
 
   function drawBall(ctx, r, g) {
@@ -1701,9 +1757,47 @@
 
     const ctx = r.ctx;
     ctx.setTransform(r.dpr, 0, 0, r.dpr, 0, 0);
+    const d3 = !r.vr && r.want3d && r.three && r.three.ready ? r.three : null;
+    show3d(r, !!d3);
+    let out = ctx;
     if (r.vr) drawStereo(ctx, r, g, human, info, land);
-    else drawScene(ctx, r, g, human, info, land);
+    else if (d3) {
+      // 3D (three.js, js/render3d.js): the world is drawn on its own WebGL
+      // canvas, over this one, from the same camera, and the touch guides
+      // on a clear canvas over that (input still goes to this canvas)
+      d3.draw(r, g, human, now);
+      out = r.ov.getContext('2d');
+      out.setTransform(1, 0, 0, 1, 0, 0);
+      out.clearRect(0, 0, r.ov.width, r.ov.height);
+      out.setTransform(r.dpr, 0, 0, r.dpr, 0, 0);
+      drawOverlay(out, r, g, human, info, land);
+    } else drawScene(ctx, r, g, human, info, land);
+    if (SHOW_FPS) drawFps(out, r, dt, d3);
     watchFrameRate(r, dt, (performance.now() - now) / 1000);
+  }
+
+  // ?fps: frames a second (averaged over the last second) in the corner
+  // ?prof: the 3D theme's draw calls, triangles, textures and glow setting too
+  const SHOW_PROF = /[?&]prof\b/.test(location.search);
+  const SHOW_FPS = SHOW_PROF || /[?&]fps\b/.test(location.search);
+  function drawFps(ctx, r, dt, d3) {
+    const f = r.fps || (r.fps = { n: 0, t: 0, v: 0 });
+    f.n++; f.t += dt;
+    if (f.t >= 1) { f.v = f.n / f.t; f.n = 0; f.t = 0; }
+    ctx.save();
+    ctx.font = '700 13px sans-serif'; ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(4, r.H - 24, 120, 20);
+    ctx.fillStyle = '#e4ff4a';
+    ctx.fillText(`${f.v.toFixed(0)} fps${d3 ? ' 3D' : ''} x${d3 ? d3.stats().dpr : r.dpr}`, 10, r.H - 9);
+    if (d3 && SHOW_PROF) {
+      const s = d3.stats();
+      const lines = [`${s.calls} draws  ${(s.tris / 1000).toFixed(0)}k tris`, `${s.tex} textures  ${s.geo} meshes`, `${s.glow}  bake ${s.bake}`];
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx.fillRect(4, r.H - 28 - lines.length * 17, 170, lines.length * 17 + 2);
+      ctx.fillStyle = '#e4ff4a';
+      lines.forEach((t, i) => ctx.fillText(t, 10, r.H - 32 - (lines.length - 1 - i) * 17));
+    }
+    ctx.restore();
   }
 
   // VR: the left half of the screen for the left eye, the right half for
@@ -1864,6 +1958,20 @@
     sceneN++;
   }
 
+  // Over the 3D view: what drawScene draws on the court that isn't scenery.
+  function drawOverlay(ctx, r, g, human, info, land) {
+    for (const m of g.marks) {
+      ctx.strokeStyle = `rgba(228,255,74,${(1 - m.age / 1.2) * 0.8})`;
+      ctx.lineWidth = 1.5;
+      if (groundEllipse(ctx, r, m.x, m.y, 0.12 + m.age * 0.5)) ctx.stroke();
+    }
+    drawGuides(ctx, r, g, human, info, land);
+    if (r.view === 'first') {
+      drawRacketView(ctx, r, g, g.players[human]);
+      if (!r.zen) drawTimingRing(ctx, r, g, info);
+    }
+  }
+
   function drawScene(ctx, r, g, human, info, land) {
     drawSky(ctx, r);
     drawBillboard(ctx, r);
@@ -1922,7 +2030,10 @@
   CT.setView = setView;
   CT.setVR = setVR;
   CT.setQuality = setQuality;
+  CT.setTheme = setTheme;
   CT.renderGame = render;
+  // for js/render3d.js
+  CT.R2D = { COURT, PAL, LAMPS, CARS, BOARD, BOARD_TEX, LOT_EDGE, LOT_BACK, STALL_IN, STALL_OUT, STALL_W, SPRITE_SCALE, hash, proj, sizeAt, playerPose, boardSource };
   CT.showBillboard = showBillboard;
   CT.BOARD_ANIMS = Object.keys(BOARD_ANIMS);
   CT.drawBoardAnim = (id, ctx, r, age, data) => BOARD_ANIMS[id](ctx, r, age, data);

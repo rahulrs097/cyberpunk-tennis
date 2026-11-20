@@ -50,6 +50,14 @@
   const GFX = { ...VR_GFX, max: 'max' };
   let gfx = 'auto';
   try { const v = localStorage.getItem('ct.gfx'); if (v in GFX) gfx = v; } catch (e) { /* storage is optional */ }
+  // Theme: the neon Cyberpunk court, or the 3D Concrete rooftop
+  const THEMES = ['cyberpunk', 'concrete'];
+  let theme = 'cyberpunk';
+  try {
+    const v = localStorage.getItem('ct.theme');
+    if (THEMES.includes(v)) theme = v;
+    else if (localStorage.getItem('ct.gfx') === '3d') theme = 'concrete';   // the 3D trial was a graphics level
+  } catch (e) { /* storage is optional */ }
   try {
     const v = JSON.parse(localStorage.getItem('ct.vrFit'));
     if (v && VR_FOV[v.fov] && VR_LENS[v.lens]) vrFit = { ...vrFit, fov: v.fov, lens: v.lens, gfx: v.gfx in VR_GFX ? v.gfx : 'auto' };
@@ -1758,6 +1766,13 @@
     if ((renderer.quality !== was || renderer.max !== wasMax) && renderer.args) CT.resizeRenderer(renderer, ...renderer.args);
   }
 
+  function setTheme(value) {
+    theme = value;
+    try { localStorage.setItem('ct.theme', value); } catch (e) { /* storage is optional */ }
+    document.querySelectorAll('[data-theme]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.theme === value)));
+    CT.setTheme(renderer, value);
+  }
+
   function setVRFit(key, value) {
     vrFit = { ...vrFit, [key]: value };
     try { localStorage.setItem('ct.vrFit', JSON.stringify(vrFit)); } catch (e) { /* storage is optional */ }
@@ -1942,6 +1957,8 @@
     setView(view);
     document.querySelectorAll('[data-gfx]').forEach((b) => b.addEventListener('click', () => setGfx(b.dataset.gfx)));
     setGfx(gfx);
+    document.querySelectorAll('[data-theme]').forEach((b) => b.addEventListener('click', () => setTheme(b.dataset.theme)));
+    setTheme(theme);
     for (const key of ['fov', 'lens', 'gfx']) {
       document.querySelectorAll(`[data-vr-${key}]`).forEach((b) => b.addEventListener('click', () => setVRFit(key, b.getAttribute(`data-vr-${key}`))));
       setVRFit(key, vrFit[key]);

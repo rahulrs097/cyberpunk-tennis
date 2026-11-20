@@ -20,7 +20,10 @@ test('the service worker caches every script, image and icon the page uses', () 
     ...[...html.matchAll(/<link rel="(?:manifest|icon|apple-touch-icon)" href="([^"]+)"/g)].map((x) => x[1]),
   ];
   for (const f of used) assert.ok(list.includes(f), `${f} is not in sw.js SHELL`);
-  for (const f of fs.readdirSync(path.join(root, 'js'))) assert.ok(list.includes('js/' + f), `js/${f} is not in sw.js SHELL`);
+  // (the 3D graphics level's files are cached when first fetched instead: sw.js LAZY)
+  const lazy = new RegExp(/const LAZY = \/(.*)\/;/.exec(read('sw.js'))[1]);
+  for (const f of fs.readdirSync(path.join(root, 'js'))) assert.ok(list.includes('js/' + f) || lazy.test('/js/' + f), `js/${f} is not in sw.js SHELL`);
+  assert.ok(lazy.test('/vendor/three/three.module.min.js') && lazy.test('/vendor/three/addons/postprocessing/Pass.js'), 'three.js is cached for offline 3D');
   for (const f of fs.readdirSync(path.join(root, 'img'))) assert.ok(list.includes('img/' + f), `img/${f} is not in sw.js SHELL`);
   for (const f of list) if (f !== './') assert.ok(fs.existsSync(path.join(root, f)), `${f} in sw.js SHELL does not exist`);
 });
