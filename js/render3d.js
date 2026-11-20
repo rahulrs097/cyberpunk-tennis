@@ -205,14 +205,58 @@ function buildLampGlows(scene, LAMPS) {
 // A baked texture shown as it is, a little brighter, and its brightest
 // parts (lamp lenses, neon strips, car lights, bulbs) pushed above white
 // so the bloom catches them.
-function bakedMaterial(map, gain = 1.0, hot = 3) {
+// detail = { map, repeat: [u, v], amount }: a tiling grain multiplied over the
+// bake, so a smooth bake reads as rough concrete close up instead of glass
+function bakedMaterial(map, gain = 1.0, hot = 3, detail = null) {
   const m = new THREE.MeshBasicMaterial({ map });
   m.onBeforeCompile = (sh) => {
-    sh.fragmentShader = `#define BAKE_GAIN ${gain.toFixed(2)}\n#define BAKE_HOT ${hot.toFixed(2)}\n` + sh.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
+    let head = `#define BAKE_GAIN ${gain.toFixed(2)}\n#define BAKE_HOT ${hot.toFixed(2)}\n`;
+    let grain = '';
+    if (detail) {
+      sh.uniforms.detailMap = { value: detail.map };
+      head += `uniform sampler2D detailMap;\n`;
+      grain = `
+      vec3 dt = texture2D(detailMap, vMapUv * vec2(${detail.repeat[0].toFixed(2)}, ${detail.repeat[1].toFixed(2)})).rgb;
+      diffuseColor.rgb *= 1.0 + (dt.r - 0.5) * ${(detail.amount * 2).toFixed(2)};
+      float lum = dot(diffuseColor.rgb, vec3(0.3, 0.59, 0.11));
+      diffuseColor.rgb = mix(diffuseColor.rgb, vec3(lum), ${(detail.desat || 0).toFixed(2)});`;
+    }
+    sh.fragmentShader = head + sh.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
       float peak = max(diffuseColor.r, max(diffuseColor.g, diffuseColor.b));
-      diffuseColor.rgb *= BAKE_GAIN + BAKE_HOT * smoothstep(0.8, 1.0, peak);`);
+      diffuseColor.rgb *= BAKE_GAIN + BAKE_HOT * smoothstep(0.8, 1.0, peak);${grain}`);
   };
   return m;
+}
+
+// a tiling concrete grain: blotches, fine sand, pits and pale aggregate, mean 0.5
+function concreteTex(size = 512) {
+  let seed = 7;
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  const v = new Float32Array(size * size);
+  // periodic value noise, so the tile wraps without a seam
+  for (const [f, a] of [[4, 0.35], [8, 0.25], [16, 0.18], [32, 0.12], [64, 0.08]]) {
+    const g = Array.from({ length: f * f }, rnd);
+    const at = (i, j) => g[((j % f + f) % f) * f + ((i % f + f) % f)];
+    for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+      const fx = (x / size) * f, fy = (y / size) * f, i = Math.floor(fx), j = Math.floor(fy);
+      let tx = fx - i, ty = fy - j; tx = tx * tx * (3 - 2 * tx); ty = ty * ty * (3 - 2 * ty);
+      const n = (at(i, j) * (1 - tx) + at(i + 1, j) * tx) * (1 - ty) + (at(i, j + 1) * (1 - tx) + at(i + 1, j + 1) * tx) * ty;
+      v[y * size + x] += (n - 0.5) * a;
+    }
+  }
+  for (let i = 0; i < v.length; i++) v[i] += (rnd() - 0.5) * 0.22;   // sand
+  for (let k = 0; k < size * size / 90; k++) {                        // pits and aggregate
+    const i = Math.floor(rnd() * v.length), d = rnd() < 0.6 ? -0.35 : 0.25;
+    v[i] += d; if (rnd() < 0.5) v[(i + 1) % v.length] += d * 0.6;
+  }
+  return canvasTex(size, size, (g) => {
+    const id = g.createImageData(size, size);
+    for (let i = 0; i < v.length; i++) {
+      const c = Math.max(0, Math.min(255, 128 + v[i] * 255));
+      id.data[i * 4] = id.data[i * 4 + 1] = id.data[i * 4 + 2] = c; id.data[i * 4 + 3] = 255;
+    }
+    g.putImageData(id, 0, 0);
+  }, false);
 }
 
 async function loadBaked(scene) {
@@ -221,7 +265,10 @@ async function loadBaked(scene) {
   const [ground, atlas, gltf] = await Promise.all([tex('ground.jpg'), tex('props.jpg'), new GLTFLoader().loadAsync(BAKED + 'props.glb')]);
   atlas.flipY = false;   // glTF's UVs run top-down
   const G = GROUND;
-  const deck = flat(new THREE.PlaneGeometry(G.x1 - G.x0, G.y1 - G.y0), bakedMaterial(ground, 0.85, 0), (G.x0 + G.x1) / 2, (G.y0 + G.y1) / 2, 0);
+  const grain = concreteTex();
+  grain.wrapS = grain.wrapT = THREE.RepeatWrapping;
+  grain.anisotropy = 4;
+  const deck = flat(new THREE.PlaneGeometry(G.x1 - G.x0, G.y1 - G.y0), bakedMaterial(ground, 0.85, 0, { map: grain, repeat: [(G.x1 - G.x0) / 2.5, (G.y1 - G.y0) / 2.5], amount: 0.55, desat: 0.22 }), (G.x0 + G.x1) / 2, (G.y0 + G.y1) / 2, 0);
   // the roof beyond the baked part, dark
   const beyond = flat(new THREE.PlaneGeometry(90, G.y1 - G.y0), new THREE.MeshBasicMaterial({ color: 0x07070b }), 0, (G.y0 + G.y1) / 2, -0.01);
   const mat = bakedMaterial(atlas);
