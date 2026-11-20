@@ -350,6 +350,7 @@
     }
     c.ready = false;
     buildSky(r);
+    if (r.three && r.three.ready) r.three.resize(r);
   }
 
   // phones with few cores or little memory start one level down
@@ -370,9 +371,22 @@
   function setQuality(r, level) {
     r.auto = level === 'auto';
     r.max = level === 'max';
-    const q = r.auto ? AUTO_START : r.max ? 2 : level;
+    r.want3d = level === '3d';
+    if (r.want3d) load3d(r);
+    const q = r.auto ? AUTO_START : r.max || r.want3d ? 2 : level;
     if (r.vr) r.qualityWas = q; else r.quality = q;
     r.frames.length = 0; r.tried = []; r.trial = null;
+  }
+
+  // The 3D view is a separate module (and three.js), fetched the first time
+  // it's picked. Until it's ready, or if the phone has no WebGL, the flat
+  // view carries on.
+  function load3d(r) {
+    if (r.three || r.threeFailed) return;
+    r.three = { ready: false };
+    import(new URL('js/render3d.js', document.baseURI).href)
+      .then((m) => { r.three = m.create3d(r, CT.R2D); if (r.args) resize(r, ...r.args); })
+      .catch((e) => { console.warn('3D view unavailable', e); r.three = null; r.threeFailed = true; });
   }
 
   // Quality levels, highest first. A phone that can't keep up steps down:
@@ -1024,16 +1038,37 @@
     const tl = at(0, z1), tr = at(1, z1);
     if (tl.behind || tr.behind) return;
     if (Math.max(tl.x, tr.x) < 0 || Math.min(tl.x, tr.x) > r.W) return;
+    // the pylon it stands on, down into the skyline
+    const pb = at(0.5, 0), pt = at(0.5, B.z);
+    ctx.strokeStyle = '#1c1b2a'; ctx.lineWidth = Math.max(2, (pt.s || 0) * 0.5);
+    ctx.beginPath(); ctx.moveTo(pb.x, pb.y); ctx.lineTo(pt.x, pt.y); ctx.stroke();
+    const { src, on } = boardSource(r);
+    const W = BOARD_TEX.w, H = BOARD_TEX.h, N = 10, sw = W / N;
+    const base = ctx.getTransform();   // (in VR: one eye's half of the screen, turned with your head)
+    ctx.save();
+    ctx.globalAlpha = on;
+    ctx.imageSmoothingQuality = 'high';
+    // The sign is turned, so its near end looks taller than its far end.
+    // Drawn as thin vertical strips, each mapped from its own corners.
+    for (let i = 0; i < N; i++) {
+      const a0 = at(i / N, z1), a1 = at((i + 1) / N, z1), b0 = at(i / N, B.z);
+      ctx.setTransform(base);
+      ctx.transform((a1.x - a0.x) / sw, (a1.y - a0.y) / sw, (b0.x - a0.x) / H, (b0.y - a0.y) / H, a0.x, a0.y);
+      ctx.drawImage(src, i * sw, 0, Math.min(sw + 1, W - i * sw), H, 0, 0, Math.min(sw + 1, W - i * sw), H);
+    }
+    ctx.restore();
+  }
+
+  // What the sign shows this frame: its picture (a canvas BOARD_TEX in size,
+  // whose `key` changes when it's redrawn, or is null while it's redrawn
+  // every frame) and how bright it is (`on`, 0-1: a new word flickers on).
+  function boardSource(r) {
     const now = performance.now() / 1000;
     const cur = boardText(r, now);
     // a new word flickers on, then hums
     const age = now - cur.from;
     // (no flicker for someone who has asked their phone for less motion)
     const on = cur.anim ? 1 : age < 0.35 && !CALM ? (Math.floor(age * 24) % 2 ? 0.25 : 1) : 0.88 + 0.12 * Math.sin(now * 3);
-    // the pylon it stands on, down into the skyline
-    const pb = at(0.5, 0), pt = at(0.5, B.z);
-    ctx.strokeStyle = '#1c1b2a'; ctx.lineWidth = Math.max(2, (pt.s || 0) * 0.5);
-    ctx.beginPath(); ctx.moveTo(pb.x, pb.y); ctx.lineTo(pt.x, pt.y); ctx.stroke();
     let src;
     if (cur.photo || cur.score || cur.call !== undefined || cur.anim) {
       src = r.boardPhotoTex || (r.boardPhotoTex = document.createElement('canvas'));
@@ -1053,20 +1088,7 @@
         else drawBoardCall(src.getContext('2d'), r, cur.call, age);
       }
     } else src = boardTexture(r, cur.text, cur.color);
-    const W = BOARD_TEX.w, H = BOARD_TEX.h, N = 10, sw = W / N;
-    const base = ctx.getTransform();   // (in VR: one eye's half of the screen, turned with your head)
-    ctx.save();
-    ctx.globalAlpha = on;
-    ctx.imageSmoothingQuality = 'high';
-    // The sign is turned, so its near end looks taller than its far end.
-    // Drawn as thin vertical strips, each mapped from its own corners.
-    for (let i = 0; i < N; i++) {
-      const a0 = at(i / N, z1), a1 = at((i + 1) / N, z1), b0 = at(i / N, B.z);
-      ctx.setTransform(base);
-      ctx.transform((a1.x - a0.x) / sw, (a1.y - a0.y) / sw, (b0.x - a0.x) / H, (b0.y - a0.y) / H, a0.x, a0.y);
-      ctx.drawImage(src, i * sw, 0, Math.min(sw + 1, W - i * sw), H, 0, 0, Math.min(sw + 1, W - i * sw), H);
-    }
-    ctx.restore();
+    return { src, on };
   }
 
   // Flash a word on the billboard for `secs` seconds. With `anim` (an id in
@@ -1375,8 +1397,19 @@
     ctx.lineWidth = 1.5;
     if (groundEllipse(ctx, r, p.x, p.y, 0.6)) ctx.stroke();
     ctx.restore();
+    const pose = playerPose(r, g, p, pos);
+    ctx.save();
+    ctx.translate(pos.x, pos.y);
+    ctx.scale(pos.s * SPRITE_SCALE, pos.s * SPRITE_SCALE);
+    CT.drawCharacter(ctx, p.ch.id, pose, r.quality === 2 ? Math.max(0.3, pos.s / 45) : 0);
+    ctx.restore();
+  }
+
+  // How a player stands this frame, for CT.drawCharacter. pos is their feet
+  // on screen (proj).
+  function playerPose(r, g, p, pos) {
     const a = playerAnim(r, g, p, pos);
-    const pose = {
+    return {
       t: p.anim,
       facing: p.side === r.human ? 'back' : 'front',
       swing: p.swing,
@@ -1387,11 +1420,6 @@
       prep: a.prep, prepWing: a.prepWing,
       lod: r.quality,
     };
-    ctx.save();
-    ctx.translate(pos.x, pos.y);
-    ctx.scale(pos.s * SPRITE_SCALE, pos.s * SPRITE_SCALE);
-    CT.drawCharacter(ctx, p.ch.id, pose, r.quality === 2 ? Math.max(0.3, pos.s / 45) : 0);
-    ctx.restore();
   }
 
   function drawBall(ctx, r, g) {
@@ -1701,9 +1729,32 @@
 
     const ctx = r.ctx;
     ctx.setTransform(r.dpr, 0, 0, r.dpr, 0, 0);
+    const d3 = !r.vr && r.want3d && r.three && r.three.ready ? r.three : null;
     if (r.vr) drawStereo(ctx, r, g, human, info, land);
-    else drawScene(ctx, r, g, human, info, land);
+    else if (d3) {
+      // 3D (three.js, js/render3d.js): the world is drawn on its own WebGL
+      // canvas from the same camera, copied in, and the touch guides go
+      // over it
+      d3.draw(r, g, human, now);
+      ctx.drawImage(d3.canvas, 0, 0, r.W, r.H);
+      drawOverlay(ctx, r, g, human, info, land);
+    } else drawScene(ctx, r, g, human, info, land);
+    if (SHOW_FPS) drawFps(ctx, r, dt, d3);
     watchFrameRate(r, dt, (performance.now() - now) / 1000);
+  }
+
+  // ?fps: frames a second (averaged over the last second) in the corner
+  const SHOW_FPS = /[?&]fps\b/.test(location.search);
+  function drawFps(ctx, r, dt, d3) {
+    const f = r.fps || (r.fps = { n: 0, t: 0, v: 0 });
+    f.n++; f.t += dt;
+    if (f.t >= 1) { f.v = f.n / f.t; f.n = 0; f.t = 0; }
+    ctx.save();
+    ctx.font = '700 13px sans-serif'; ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(4, r.H - 24, 120, 20);
+    ctx.fillStyle = '#e4ff4a';
+    ctx.fillText(`${f.v.toFixed(0)} fps${d3 ? ' 3D' : ''} x${r.dpr}`, 10, r.H - 9);
+    ctx.restore();
   }
 
   // VR: the left half of the screen for the left eye, the right half for
@@ -1864,6 +1915,20 @@
     sceneN++;
   }
 
+  // Over the 3D view: what drawScene draws on the court that isn't scenery.
+  function drawOverlay(ctx, r, g, human, info, land) {
+    for (const m of g.marks) {
+      ctx.strokeStyle = `rgba(228,255,74,${(1 - m.age / 1.2) * 0.8})`;
+      ctx.lineWidth = 1.5;
+      if (groundEllipse(ctx, r, m.x, m.y, 0.12 + m.age * 0.5)) ctx.stroke();
+    }
+    drawGuides(ctx, r, g, human, info, land);
+    if (r.view === 'first') {
+      drawRacketView(ctx, r, g, g.players[human]);
+      if (!r.zen) drawTimingRing(ctx, r, g, info);
+    }
+  }
+
   function drawScene(ctx, r, g, human, info, land) {
     drawSky(ctx, r);
     drawBillboard(ctx, r);
@@ -1923,6 +1988,8 @@
   CT.setVR = setVR;
   CT.setQuality = setQuality;
   CT.renderGame = render;
+  // for js/render3d.js
+  CT.R2D = { COURT, PAL, LAMPS, CARS, BOARD, BOARD_TEX, LOT_EDGE, LOT_BACK, STALL_IN, STALL_OUT, STALL_W, SPRITE_SCALE, hash, proj, sizeAt, playerPose, boardSource };
   CT.showBillboard = showBillboard;
   CT.BOARD_ANIMS = Object.keys(BOARD_ANIMS);
   CT.drawBoardAnim = (id, ctx, r, age, data) => BOARD_ANIMS[id](ctx, r, age, data);

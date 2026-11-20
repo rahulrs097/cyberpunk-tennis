@@ -419,6 +419,7 @@
         <button data-gfx="balanced" aria-pressed="false">Balanced</button>
         <button data-gfx="sharp" aria-pressed="false">Sharp</button>
         <button data-gfx="max" aria-pressed="false">Max</button>
+        <button data-gfx="3d" aria-pressed="false">3D</button>
       </div>
       <div class="label">Camera</div>
       <div class="seg">
@@ -615,6 +616,8 @@
   </div>
 </div>
 
+<!-- three.js, for the 3D graphics level (js/render3d.js, loaded only when it's picked) -->
+<script type="importmap">{ "imports": { "three": "./vendor/three/three.module.min.js", "three/addons/": "./vendor/three/addons/" } }</script>
 <script src="js/physics.js"></script>
 <script src="js/characters.js"></script>
 <script src="js/match.js"></script>

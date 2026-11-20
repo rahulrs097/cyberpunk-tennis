@@ -47,7 +47,7 @@
   let vrFit = { fov: 'normal', lens: 'normal', gfx: 'auto' };
   // the graphics level outside VR: Auto, or one picked in Settings
   // (Max, full screen resolution, is offered outside VR only)
-  const GFX = { ...VR_GFX, max: 'max' };
+  const GFX = { ...VR_GFX, max: 'max', '3d': '3d' };
   let gfx = 'auto';
   try { const v = localStorage.getItem('ct.gfx'); if (v in GFX) gfx = v; } catch (e) { /* storage is optional */ }
   try {

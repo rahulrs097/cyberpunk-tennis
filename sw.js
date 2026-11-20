@@ -29,6 +29,9 @@ const SHELL = [
   'icons/apple-touch-icon.png',
 ];
 const SHELL_URLS = new Set(SHELL.map((p) => new URL(p, self.registration.scope).href));
+// The 3D graphics level's files: not fetched at install (most never use
+// them), but kept once they have been, so 3D works offline after that.
+const LAZY = /\/(js\/render3d\.js|vendor\/three\/.+\.js|models\/.+)$/;
 // Google Fonts: the stylesheet and the font files, kept once seen
 const FONT_HOSTS = ['fonts.googleapis.com', 'fonts.gstatic.com'];
 
@@ -66,7 +69,7 @@ async function freshFirst(req) {
   const key = nav ? new URL('./', self.registration.scope).href : req;
   try {
     const res = await fetch(req, { cache: 'no-cache' });
-    if (res.ok && (nav || SHELL_URLS.has(stripSearch(req.url)))) await cache.put(key, res.clone());
+    if (res.ok && (nav || SHELL_URLS.has(stripSearch(req.url)) || LAZY.test(new URL(req.url).pathname))) await cache.put(key, res.clone());
     return res;
   } catch (err) {
     const hit = await cache.match(key, { ignoreSearch: true });
