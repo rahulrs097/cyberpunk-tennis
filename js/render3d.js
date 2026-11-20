@@ -393,7 +393,7 @@ function buildCourt(scene, C) {
   const D = C.DW, L = C.HL, S = C.SW, B = 2 * C.LW;
   const lines = [[-D, -L, D, -L, B], [-D, L, D, L, B], [-D, -L, -D, L], [D, -L, D, L], [-S, -L, -S, L], [S, -L, S, L],
     [-S, -C.SL, S, -C.SL], [-S, C.SL, S, C.SL], [0, -C.SL, 0, C.SL], [0, -L, 0, -L + 0.3], [0, L, 0, L - 0.3]];
-  const mat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.24, 0.8, 0.95) });
+  const mat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.85, 0.95, 1.0) });
   for (const [x1, y1, x2, y2, w0 = C.LW] of lines) {
     const w = Math.max(w0, 0.07);   // a touch wider than real, so far lines don't break up
     const len = Math.hypot(x2 - x1, y2 - y1) + w;
@@ -415,9 +415,9 @@ function buildNet(scene, C) {
   const grid = canvasTex(32, 32, (g) => { g.strokeStyle = '#fff'; g.lineWidth = 2; g.strokeRect(0, 0, 32, 32); }, false);
   grid.wrapS = grid.wrapT = THREE.RepeatWrapping;
   grid.repeat.set(2 * X / 0.07, 1 / 0.07);
-  scene.add(new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: new THREE.Color(1.0, 0.2, 0.7), alphaMap: grid, transparent: true, opacity: 0.5, side: THREE.DoubleSide, depthWrite: false })));
+  scene.add(new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: new THREE.Color(0.1, 0.1, 0.12), alphaMap: grid, transparent: true, opacity: 0.75, side: THREE.DoubleSide, depthWrite: false })));
   // the tape along the top and the posts
-  const tapeMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.95, 0.18, 0.6) });
+  const tapeMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.82, 0.86, 0.9) });   // white, like the lines
   const pts = [];
   for (let i = 0; i <= N; i++) { const x = -X + (2 * X * i) / N; pts.push(new THREE.Vector3(x, top(x), 0)); }
   scene.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 64, 0.03, 6), tapeMat));
@@ -485,12 +485,13 @@ function buildCars(scene, CARS, hash) {
 }
 
 // ---------------- billboard ----------------
+const BOARD_DIM = 0.6;   // the one neon accent left, kept soft against the concrete
 function buildBoard(scene, R) {
   const B = R.BOARD;
   const grp = new THREE.Group();
   const tex = new THREE.CanvasTexture(document.createElement('canvas'));
   tex.colorSpace = THREE.SRGBColorSpace;
-  const mat = new THREE.MeshBasicMaterial({ map: tex, color: new THREE.Color(1.15, 1.15, 1.15), transparent: true, fog: false, side: THREE.DoubleSide });
+  const mat = new THREE.MeshBasicMaterial({ map: tex, color: new THREE.Color(BOARD_DIM, BOARD_DIM, BOARD_DIM), transparent: true, fog: false, side: THREE.DoubleSide });
   const sign = new THREE.Mesh(new THREE.PlaneGeometry(B.w, B.h), mat);
   sign.position.y = B.z + B.h / 2;
   const post = new THREE.Mesh(new THREE.BoxGeometry(0.5, B.z, 0.5), new THREE.MeshStandardMaterial({ color: 0x1c1b2a, roughness: 0.6 }));
@@ -508,7 +509,7 @@ function buildBoard(scene, R) {
         tex.image = src; tex.needsUpdate = true;
         lastSrc = src; lastKey = src.key;
       }
-      mat.color.setScalar(1.15 * on);
+      mat.color.setScalar(BOARD_DIM * on);
     },
   };
 }

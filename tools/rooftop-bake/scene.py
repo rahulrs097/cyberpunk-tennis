@@ -357,6 +357,10 @@ for x, y, hexc in LAMPS:
     light = tuple(0.5 * c + 0.5 for c in col[:3]) + (1,) if neon else col
     spot("Lamp", (hx, y, 7.33), light, 3600 if neon else 9000, 125, soft=0.25)
 
+# court floodlight: a soft neutral wash over the court only, so it stands out from the darker lot
+fl = area_light("CourtFlood", (0, 0, 10.0), (1.0, 0.95, 0.88, 1), float(os.environ.get("FLOOD", "2500")), 2 * DW + 3, 2 * HL + 5)
+fl.data.spread = math.radians(float(os.environ.get("FLOOD_SPREAD", "35")))
+
 # ---------------------------------------------------------------- props: stair tower, HVAC units, bollards, bench
 box("StairTower", (17.0, 8.0, 0), (23.0, 14.5, 4.2), conc, bevel=0.05)
 box("StairRoof", (16.8, 7.8, 4.2), (23.2, 14.7, 4.4), metal)
