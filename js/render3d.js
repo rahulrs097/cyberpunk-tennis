@@ -195,7 +195,7 @@ function buildSky(scene, hash) {
 // a soft glow round each lamp head, which bloom can't make on its own on a small screen
 function buildLampGlows(scene, LAMPS) {
   for (const [x, y, col] of LAMPS) {
-    const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: radial, color: new THREE.Color(col), transparent: true, opacity: 0.4, blending: THREE.AdditiveBlending, depthWrite: false }));
+    const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: radial, color: new THREE.Color(col), transparent: true, opacity: /ffb04a/i.test(col) ? 0.4 : 0.22, blending: THREE.AdditiveBlending, depthWrite: false }));
     glow.position.copy(V(x * 0.75, y, 7.3)); glow.scale.set(2.4, 1.4, 1);
     scene.add(glow);
   }

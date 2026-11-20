@@ -153,11 +153,11 @@ def acrylic(name, hexc):
     L.new(node(N, L, "ShaderNodeMapRange", {"Value": wetc, "From Min": 0.45, "From Max": 0.7, "To Min": 0.4, "To Max": 0.18}).outputs[0], p.inputs["Roughness"])
     L.new(node(N, L, "ShaderNodeBump", {"Height": g, "Strength": 0.18, "Distance": 0.001}).outputs["Normal"], p.inputs["Normal"])
     return m
-box("CourtSurround", (-DW - 1.2, -HL - 2.5, 0), (DW + 1.2, HL + 2.5, 0.003), acrylic("CourtOuter", "#17294a"))
-box("CourtSingles", (-SW, -HL, 0.003), (SW, HL, 0.004), acrylic("CourtInner", "#1b3a66"))
+# the court is the deck's own concrete (Rahul, 2026-11-20): only the lines mark it
+box("CourtSurround", (-DW - 1.2, -HL - 2.5, 0), (DW + 1.2, HL + 2.5, 0.003), asphalt)
 line_m, N, L, p = M("CourtLine")
 p.inputs["Base Color"].default_value = (0.85, 0.95, 1.0, 1); p.inputs["Roughness"].default_value = 0.3
-p.inputs["Emission Color"].default_value = srgb("#7af6ff"); p.inputs["Emission Strength"].default_value = 5.0
+p.inputs["Emission Color"].default_value = srgb("#d8f4ff"); p.inputs["Emission Strength"].default_value = 2.5
 def line(x0, y0, x1, y1, wdt=LW):
     if x0 == x1: box("Line", (x0 - wdt / 2, y0, 0.004), (x0 + wdt / 2, y1, 0.007), line_m)
     else: box("Line", (x0, y0 - wdt / 2, 0.004), (x1, y0 + wdt / 2, 0.007), line_m)
@@ -166,9 +166,6 @@ for xx in (-DW, DW, -SW, SW): line(xx, -HL, xx, HL)
 for yy in (-SL, SL): line(-SW, yy, SW, yy)
 line(0, -SL, 0, SL)
 line(0, -HL, 0, -HL + 0.3); line(0, HL - 0.3, 0, HL)
-# the lines light the court a little, as the neon glow does in the game
-for yy in (-HL, HL):
-    area_light("LineGlow", (0, yy, 0.05), srgb("#25d9ff"), 25, 2 * DW, 0.2).rotation_euler = (math.pi, 0, 0)
 
 # ---------------------------------------------------------------- net: cord mesh, pink neon headband, posts
 metal, N, L, p = M("PostMetal"); p.inputs["Base Color"].default_value = srgb("#1c1b2a"); p.inputs["Metallic"].default_value = 0.8; p.inputs["Roughness"].default_value = 0.35
@@ -355,7 +352,10 @@ for x, y, hexc in LAMPS:
     arm = cyl("LampArm", ((x + hx) / 2, y, 7.5), 0.05, abs(x - hx) + 0.1, metal, 12, 'X')
     box("LampHead", (hx - 0.45, y - 0.22, 7.38), (hx + 0.45, y + 0.22, 7.56), metal, bevel=0.03)
     box("LampLens", (hx - 0.38, y - 0.16, 7.365), (hx + 0.38, y + 0.16, 7.38), emit("Lens" + hexc, col, 40.0, base=(1, 1, 1, 1)))
-    spot("Lamp", (hx, y, 7.33), col, 9000, 125, soft=0.25)
+    # the pink and cyan lamps: paler and dimmer, so their colour doesn't flood the court
+    neon = hexc != '#ffb04a'
+    light = tuple(0.5 * c + 0.5 for c in col[:3]) + (1,) if neon else col
+    spot("Lamp", (hx, y, 7.33), light, 3600 if neon else 9000, 125, soft=0.25)
 
 # ---------------------------------------------------------------- props: stair tower, HVAC units, bollards, bench
 box("StairTower", (17.0, 8.0, 0), (23.0, 14.5, 4.2), conc, bevel=0.05)

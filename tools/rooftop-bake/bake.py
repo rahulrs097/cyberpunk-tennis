@@ -102,8 +102,11 @@ mesh_obj("Deck", [(-45, GY0, 0), (45, GY0, 0), (45, GY1, 0), (-45, GY1, 0)], [(0
 
 # Littlest Tokyo is lit softly all round, not just by its lamps: more sky
 # light (the purple night), and a faint moon from above to shape the props
-scn.world.node_tree.nodes["Background"].inputs["Strength"].default_value = float(os.environ.get("SKY", "2.2"))
-moon = bpy.data.lights.new("moonfill", 'SUN'); moon.energy = float(os.environ.get("MOON", "0.25")); moon.color = (0.65, 0.7, 1.0); moon.angle = math.radians(8)
+bg = scn.world.node_tree.nodes["Background"]
+for l in list(bg.inputs["Color"].links): scn.world.node_tree.links.remove(l)
+bg.inputs["Color"].default_value = (0.03, 0.028, 0.034, 1)   # a near-neutral night: no purple wash on the roof
+bg.inputs["Strength"].default_value = float(os.environ.get("SKY", "2.2"))
+moon = bpy.data.lights.new("moonfill", 'SUN'); moon.energy = float(os.environ.get("MOON", "0.25")); moon.color = (0.82, 0.85, 0.95); moon.angle = math.radians(8)
 mo = link(bpy.data.objects.new("moonfill", moon)); mo.rotation_euler = Vector((-0.35, -0.6, -1.0)).to_track_quat('-Z', 'Y').to_euler()
 # paint a little lighter, so the cars read under the lamps
 for m in bpy.data.materials:
