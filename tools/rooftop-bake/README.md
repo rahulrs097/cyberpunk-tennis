@@ -45,3 +45,13 @@ floats. If LAT0/LAT1 change, change them in render3d.js's loadSkyline too.
 ```
 python skyline.py out 4096 48
 ```
+
+## After the bake
+
+```
+python decimate.py out/props.glb ../../models/rooftop/props.glb 0.5   # 77k -> 39k triangles, UVs kept
+```
+
+Also save half-size copies of the two pictures as `ground_2k.jpg` and
+`props_2k.jpg` (quality ~88). The Smooth and Balanced graphics levels load
+those: a quarter of the GPU memory.

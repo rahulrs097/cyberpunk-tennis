@@ -23,8 +23,10 @@ const V = (x, y, z = 0) => new THREE.Vector3(x, z, -y);
 const LITE = /[?&]3d=lite\b/.test(location.search);
 // Graphics levels (render.js r.quality, r.max) for this theme: pixel ratio
 // and whether the glow pass runs. Smooth draws straight to the screen.
-const LEVELS = [{ dpr: 1, bloom: false }, { dpr: 1, bloom: true }, { dpr: 1.25, bloom: true }];
-const MAX = { dpr: 2, bloom: true };
+// samples: anti-aliasing of the glow pass's buffer (costly on phones; the
+// higher pixel ratios smooth edges anyway). small: 2048 px baked textures.
+const LEVELS = [{ dpr: 1, bloom: false, small: true }, { dpr: 1, bloom: true, samples: 0, small: true }, { dpr: 1.25, bloom: true, samples: 2 }];
+const MAX = { dpr: 2, bloom: true, samples: 4 };
 // ?3d=plain: the simple lit scenery instead of the baked rooftop
 const PLAIN = /[?&]3d=plain\b/.test(location.search);
 // The baked rooftop (made in Blender: art/rooftop-bake/). Its light is in
@@ -36,10 +38,22 @@ const GROUND = { x0: -30, x1: 30, y0: -21.8, y1: 17.8 };
 // HDR colour: above 1 it blooms
 const hdr = (hex, k) => new THREE.Color(hex).multiplyScalar(k);
 
+function dispose(root) {
+  root.traverse((o) => {
+    if (o.geometry) o.geometry.dispose();
+    for (const m of [].concat(o.material || [])) {
+      for (const k of Object.keys(m)) if (m[k] && m[k].isTexture && m[k] !== radial && m[k] !== blob) m[k].dispose();
+      m.dispose();
+    }
+  });
+}
+
 export function create3d(r, R) {
   const { COURT: C, hash } = R;
+  let small = false;   // the 2048 px bake (see loadBaked below)
   const canvas = document.createElement('canvas');
   const gl = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance', preserveDrawingBuffer: false });
+  gl.info.autoReset = false;
   gl.toneMapping = THREE.ACESFilmicToneMapping;
   gl.toneMappingExposure = 0.9;
   gl.shadowMap.enabled = !LITE && PLAIN;   // only the plain scenery has live shadows
@@ -68,12 +82,16 @@ export function create3d(r, R) {
   buildNet(scene, C);
   buildLampGlows(scene, R.LAMPS);
   if (!PLAIN) {
-    loadBaked(scene).then(() => {
+    // the lower graphics levels (and Auto on a modest phone) load the 2048 px bake: a quarter of the memory
+    small = LITE || (!r.max && r.quality < 2);
+    loadBaked(scene, small).then(() => {
       scene.remove(plain);
+      dispose(plain);   // free its meshes and textures on the GPU too
       gl.shadowMap.enabled = false;
+      if (scene.environment) scene.environment.dispose();
       scene.environment = null;   // (only the plain cars' paint used it)
     }).catch((e) => console.warn('baked rooftop unavailable', e));
-    loadSkyline(scene).then(() => { scene.remove(skyline, moon); })
+    loadSkyline(scene).then(() => { scene.remove(skyline, moon); dispose(skyline); dispose(moon); })
       .catch((e) => console.warn('baked skyline unavailable', e));
   }
   const board = buildBoard(scene, R);
@@ -83,8 +101,8 @@ export function create3d(r, R) {
   const cam = new THREE.PerspectiveCamera(50, 1, 0.3, 2400);
   // the composer draws into a multisampled target, so edges stay smooth
   let composer, bloom;
-  function makeComposer(w, h, dpr) {
-    const rt = new THREE.WebGLRenderTarget(w * dpr, h * dpr, { type: THREE.HalfFloatType, samples: 4 });
+  function makeComposer(w, h, dpr, samples) {
+    const rt = new THREE.WebGLRenderTarget(w * dpr, h * dpr, { type: THREE.HalfFloatType, samples });
     composer = new EffectComposer(gl, rt);
     composer.setPixelRatio(dpr);
     composer.setSize(w, h);
@@ -99,6 +117,12 @@ export function create3d(r, R) {
   let level = null, levelKey = '';
   const self = {
     ready: true, canvas,
+    // ?prof: what the last frame cost the GPU, roughly
+    stats() {
+      const i = gl.info;
+      return { calls: i.render.calls, tris: i.render.triangles, tex: i.memory.textures, geo: i.memory.geometries,
+        dpr: gl.getPixelRatio(), glow: level && level.bloom ? `glow aa${level.samples}` : 'no glow', bake: small ? '2k' : '4k' };
+    },
     resize(r) {
       level = LITE ? LEVELS[0] : r.max ? MAX : LEVELS[r.quality] || LEVELS[2];
       levelKey = `${r.quality}|${r.max}|${r.W}x${r.H}`;
@@ -106,9 +130,10 @@ export function create3d(r, R) {
       gl.setPixelRatio(dpr);
       gl.setSize(r.W, r.H);
       if (composer) composer.renderTarget1.dispose(), composer.renderTarget2.dispose(), composer = null;
-      if (level.bloom) makeComposer(r.W, r.H, dpr);
+      if (level.bloom) makeComposer(r.W, r.H, dpr, level.samples);
     },
     draw(r, g, human, now) {
+      gl.info.reset();   // counted over all the passes (?prof)
       // Auto graphics steps r.quality down (or back) while playing
       if (levelKey !== `${r.quality}|${r.max}|${r.W}x${r.H}`) self.resize(r);
       setCamera(cam, r);
@@ -266,10 +291,10 @@ function concreteTex(size = 512) {
   }, false);
 }
 
-async function loadBaked(scene) {
+async function loadBaked(scene, small) {
   const tl = new THREE.TextureLoader();
   const tex = (f) => tl.loadAsync(BAKED + f).then((t) => { t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; return t; });
-  const [ground, atlas, gltf] = await Promise.all([tex('ground.jpg'), tex('props.jpg'), new GLTFLoader().loadAsync(BAKED + 'props.glb')]);
+  const [ground, atlas, gltf] = await Promise.all([tex(small ? 'ground_2k.jpg' : 'ground.jpg'), tex(small ? 'props_2k.jpg' : 'props.jpg'), new GLTFLoader().loadAsync(BAKED + 'props.glb')]);
   atlas.flipY = false;   // glTF's UVs run top-down
   const G = GROUND;
   const grain = concreteTex();
@@ -542,6 +567,7 @@ function buildPlayer(scene) {
   ring.rotation.x = -Math.PI / 2;
   scene.add(card, shadow, ring);
   const q = new THREE.Quaternion();
+  let drawn = -1e9;
   return {
     update(r, g, p, hidden, cam) {
       card.visible = shadow.visible = ring.visible = !hidden;
@@ -549,12 +575,17 @@ function buildPlayer(scene) {
       const R = CT.R2D;
       const pos = R.proj(r, p.x, p.y, 0);
       const pose = R.playerPose(r, g, p, pos.behind ? { x: 0, y: 0, s: 1 } : pos);
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.clearRect(0, 0, cv.width, cv.height);
-      ctx.translate(cv.width / 2, CARD_UP * PPM);
-      ctx.scale(PPM, PPM);
-      CT.drawCharacter(ctx, p.ch.id, pose, PPM / 45);
-      tex.needsUpdate = true;
+      // the drawing (and its upload) at 30 fps; the card still moves every frame
+      const t = performance.now();
+      if (t - drawn >= 30) {
+        drawn = t;
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.clearRect(0, 0, cv.width, cv.height);
+        ctx.translate(cv.width / 2, CARD_UP * PPM);
+        ctx.scale(PPM, PPM);
+        CT.drawCharacter(ctx, p.ch.id, pose, PPM / 45);
+        tex.needsUpdate = true;
+      }
       card.position.copy(V(p.x, p.y, 0));
       card.scale.setScalar(R.SPRITE_SCALE);
       // stand up facing the camera, like a sprite drawn upright on the screen

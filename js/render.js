@@ -412,6 +412,9 @@
     if (!r.ov || r.shown3d === on) return;
     r.shown3d = on;
     r.three.canvas.style.display = r.ov.style.display = on ? 'block' : 'none';
+    // the flat canvas still takes the touches, but hidden under the 3D one it
+    // needn't be blended into every frame (fully clear layers are skipped)
+    r.canvas.style.opacity = on ? '0' : '';
   }
 
   // Quality levels, highest first. A phone that can't keep up steps down:
@@ -1774,7 +1777,9 @@
   }
 
   // ?fps: frames a second (averaged over the last second) in the corner
-  const SHOW_FPS = /[?&]fps\b/.test(location.search);
+  // ?prof: the 3D theme's draw calls, triangles, textures and glow setting too
+  const SHOW_PROF = /[?&]prof\b/.test(location.search);
+  const SHOW_FPS = SHOW_PROF || /[?&]fps\b/.test(location.search);
   function drawFps(ctx, r, dt, d3) {
     const f = r.fps || (r.fps = { n: 0, t: 0, v: 0 });
     f.n++; f.t += dt;
@@ -1783,7 +1788,15 @@
     ctx.font = '700 13px sans-serif'; ctx.fillStyle = 'rgba(0,0,0,0.6)';
     ctx.fillRect(4, r.H - 24, 120, 20);
     ctx.fillStyle = '#e4ff4a';
-    ctx.fillText(`${f.v.toFixed(0)} fps${d3 ? ' 3D' : ''} x${r.dpr}`, 10, r.H - 9);
+    ctx.fillText(`${f.v.toFixed(0)} fps${d3 ? ' 3D' : ''} x${d3 ? d3.stats().dpr : r.dpr}`, 10, r.H - 9);
+    if (d3 && SHOW_PROF) {
+      const s = d3.stats();
+      const lines = [`${s.calls} draws  ${(s.tris / 1000).toFixed(0)}k tris`, `${s.tex} textures  ${s.geo} meshes`, `${s.glow}  bake ${s.bake}`];
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx.fillRect(4, r.H - 28 - lines.length * 17, 170, lines.length * 17 + 2);
+      ctx.fillStyle = '#e4ff4a';
+      lines.forEach((t, i) => ctx.fillText(t, 10, r.H - 32 - (lines.length - 1 - i) * 17));
+    }
     ctx.restore();
   }
 
