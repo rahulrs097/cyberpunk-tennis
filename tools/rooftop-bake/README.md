@@ -36,11 +36,12 @@ If the ground's extent changes, change `GROUND` in js/render3d.js to match.
 
 ## Skyline
 
-`skyline.py` renders the city around the rooftop as a 360° strip
-(`skyline.png`, transparent sky, latitude -6..24°) from the middle of the
-court. render3d.js wraps it on a far cylinder behind everything, so the
-towers and their windows are baked like the rest.
+`skyline.py` renders a far-off city (1.2-4 km away: small hazy towers with
+speckled windows, beacons, dark streets below) as a 360° strip (`skyline.png`,
+transparent sky, latitude -4..14°) from the middle of the court. render3d.js
+wraps it on a far cylinder, with a dark skirt below it so the city never
+floats. If LAT0/LAT1 change, change them in render3d.js's loadSkyline too.
 
 ```
-python skyline.py out 4096
+python skyline.py out 4096 48
 ```

@@ -86,7 +86,7 @@ export function create3d(r, R) {
     composer.setSize(w, h);
     composer.addPass(new RenderPass(scene, cam));
     {
-      bloom = new UnrealBloomPass(new THREE.Vector2(w / 2, h / 2), 0.32, 0.35, 0.95);
+      bloom = new UnrealBloomPass(new THREE.Vector2(w / 2, h / 2), 0.14, 0.3, 1.2);
       composer.addPass(bloom);
     }
     composer.addPass(new OutputPass());
@@ -195,7 +195,7 @@ function buildSky(scene, hash) {
 // a soft glow round each lamp head, which bloom can't make on its own on a small screen
 function buildLampGlows(scene, LAMPS) {
   for (const [x, y, col] of LAMPS) {
-    const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: radial, color: new THREE.Color(col), transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending, depthWrite: false }));
+    const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: radial, color: new THREE.Color(col), transparent: true, opacity: 0.4, blending: THREE.AdditiveBlending, depthWrite: false }));
     glow.position.copy(V(x * 0.75, y, 7.3)); glow.scale.set(2.4, 1.4, 1);
     scene.add(glow);
   }
@@ -221,7 +221,7 @@ async function loadBaked(scene) {
   const [ground, atlas, gltf] = await Promise.all([tex('ground.jpg'), tex('props.jpg'), new GLTFLoader().loadAsync(BAKED + 'props.glb')]);
   atlas.flipY = false;   // glTF's UVs run top-down
   const G = GROUND;
-  const deck = flat(new THREE.PlaneGeometry(G.x1 - G.x0, G.y1 - G.y0), bakedMaterial(ground, 1.0, 0), (G.x0 + G.x1) / 2, (G.y0 + G.y1) / 2, 0);
+  const deck = flat(new THREE.PlaneGeometry(G.x1 - G.x0, G.y1 - G.y0), bakedMaterial(ground, 0.85, 0), (G.x0 + G.x1) / 2, (G.y0 + G.y1) / 2, 0);
   // the roof beyond the baked part, dark
   const beyond = flat(new THREE.PlaneGeometry(90, G.y1 - G.y0), new THREE.MeshBasicMaterial({ color: 0x07070b }), 0, (G.y0 + G.y1) / 2, -0.01);
   const mat = bakedMaterial(atlas);
@@ -266,7 +266,7 @@ function buildSkyline(scene, hash) {
 // strip from LAT0 to LAT1 degrees round the court, its centre straight down
 // the court (+y), on a band of a big sphere.
 function loadSkyline(scene) {
-  const LAT0 = -6, LAT1 = 24, R = 1000, NU = 96, NV = 6;
+  const LAT0 = -4, LAT1 = 14, R = 1000, NU = 96, NV = 6, DIM = 0.55;   // must match tools/rooftop-bake/skyline.py
   return new THREE.TextureLoader().loadAsync(BAKED + 'skyline.png').then((t) => {
     t.colorSpace = THREE.SRGBColorSpace;
     t.anisotropy = 4;
@@ -287,9 +287,16 @@ function loadSkyline(scene) {
     geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
     geo.setIndex(idx);
-    const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map: t, color: new THREE.Color(0.8, 0.8, 0.8), transparent: true, fog: false, depthWrite: false, side: THREE.DoubleSide }));
+    const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map: t, color: new THREE.Color(DIM, DIM, DIM), transparent: true, fog: false, depthWrite: false, side: THREE.DoubleSide }));
     m.renderOrder = -1;
     scene.add(m);
+    // the dark streets carry on below the strip, so from the higher chase camera
+    // the city never floats on sky
+    const skirt = new THREE.Mesh(new THREE.CylinderGeometry(R * Math.cos(LAT0 * Math.PI / 180), R * 0.1, R * 0.99, NU, 1, true),
+      new THREE.MeshBasicMaterial({ color: new THREE.Color().setRGB(26 / 255 * DIM, 17 / 255 * DIM, 34 / 255 * DIM, THREE.SRGBColorSpace), transparent: true, fog: false, depthWrite: false, side: THREE.DoubleSide }));   // transparent: drawn after the sky, like the strip
+    skirt.position.y = 5 + R * Math.sin(LAT0 * Math.PI / 180) - R * 0.495;
+    skirt.renderOrder = -1;
+    scene.add(skirt);
   });
 }
 
@@ -339,7 +346,7 @@ function buildCourt(scene, C) {
   const D = C.DW, L = C.HL, S = C.SW, B = 2 * C.LW;
   const lines = [[-D, -L, D, -L, B], [-D, L, D, L, B], [-D, -L, -D, L], [D, -L, D, L], [-S, -L, -S, L], [S, -L, S, L],
     [-S, -C.SL, S, -C.SL], [-S, C.SL, S, C.SL], [0, -C.SL, 0, C.SL], [0, -L, 0, -L + 0.3], [0, L, 0, L - 0.3]];
-  const mat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.32, 1.15, 1.4) });
+  const mat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.24, 0.8, 0.95) });
   for (const [x1, y1, x2, y2, w0 = C.LW] of lines) {
     const w = Math.max(w0, 0.07);   // a touch wider than real, so far lines don't break up
     const len = Math.hypot(x2 - x1, y2 - y1) + w;
@@ -363,7 +370,7 @@ function buildNet(scene, C) {
   grid.repeat.set(2 * X / 0.07, 1 / 0.07);
   scene.add(new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: new THREE.Color(1.0, 0.2, 0.7), alphaMap: grid, transparent: true, opacity: 0.5, side: THREE.DoubleSide, depthWrite: false })));
   // the tape along the top and the posts
-  const tapeMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(1.5, 0.25, 0.9) });
+  const tapeMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.95, 0.18, 0.6) });
   const pts = [];
   for (let i = 0; i <= N; i++) { const x = -X + (2 * X * i) / N; pts.push(new THREE.Vector3(x, top(x), 0)); }
   scene.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 64, 0.03, 6), tapeMat));
@@ -507,8 +514,8 @@ function buildPlayer(scene) {
 // ---------------- ball ----------------
 const TRAIL_MAX = 40;
 function buildBall(scene) {
-  const ball = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), new THREE.MeshBasicMaterial({ color: new THREE.Color(1.15, 1.45, 0.35) }));
-  const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: radial, color: 0xc6ff2e, transparent: true, opacity: 0.4, blending: THREE.AdditiveBlending, depthWrite: false }));
+  const ball = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), new THREE.MeshBasicMaterial({ color: new THREE.Color(0.95, 1.15, 0.3) }));
+  const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: radial, color: 0xc6ff2e, transparent: true, opacity: 0.22, blending: THREE.AdditiveBlending, depthWrite: false }));
   const shadow = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: blob, transparent: true, opacity: 0.5, depthWrite: false }));
   shadow.rotation.x = -Math.PI / 2;
   // the trail: a ribbon facing the camera, fading towards its tail
