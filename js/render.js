@@ -375,11 +375,16 @@
   function setQuality(r, level) {
     r.auto = level === 'auto';
     r.max = level === 'max';
-    r.want3d = level === '3d';
-    if (r.want3d) load3d(r);
-    const q = r.auto ? AUTO_START : r.max || r.want3d ? 2 : level;
+    const q = r.auto ? AUTO_START : r.max ? 2 : level;
     if (r.vr) r.qualityWas = q; else r.quality = q;
     r.frames.length = 0; r.tried = []; r.trial = null;
+  }
+
+  // Theme: 'cyberpunk' is the flat neon view drawn here; 'concrete' is the
+  // 3D rooftop (js/render3d.js). Graphics levels apply to both.
+  function setTheme(r, theme) {
+    r.want3d = theme === 'concrete';
+    if (r.want3d) load3d(r);
   }
 
   // The 3D view is a separate module (and three.js), fetched the first time
@@ -2012,6 +2017,7 @@
   CT.setView = setView;
   CT.setVR = setVR;
   CT.setQuality = setQuality;
+  CT.setTheme = setTheme;
   CT.renderGame = render;
   // for js/render3d.js
   CT.R2D = { COURT, PAL, LAMPS, CARS, BOARD, BOARD_TEX, LOT_EDGE, LOT_BACK, STALL_IN, STALL_OUT, STALL_W, SPRITE_SCALE, hash, proj, sizeAt, playerPose, boardSource };

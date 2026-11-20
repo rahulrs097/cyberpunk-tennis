@@ -19,8 +19,12 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 const CT = window.CT;
 const V = (x, y, z = 0) => new THREE.Vector3(x, z, -y);
-// ?3d=lite: no bloom or shadows, fewer pixels (to compare speed)
+// ?3d=lite: the lightest graphics level whatever Settings says (to compare speed)
 const LITE = /[?&]3d=lite\b/.test(location.search);
+// Graphics levels (render.js r.quality, r.max) for this theme: pixel ratio
+// and whether the glow pass runs. Smooth draws straight to the screen.
+const LEVELS = [{ dpr: 1, bloom: false }, { dpr: 1, bloom: true }, { dpr: 1.25, bloom: true }];
+const MAX = { dpr: 2, bloom: true };
 // ?3d=plain: the simple lit scenery instead of the baked rooftop
 const PLAIN = /[?&]3d=plain\b/.test(location.search);
 // The baked rooftop (made in Blender: art/rooftop-bake/). Its light is in
@@ -35,10 +39,10 @@ const hdr = (hex, k) => new THREE.Color(hex).multiplyScalar(k);
 export function create3d(r, R) {
   const { COURT: C, hash } = R;
   const canvas = document.createElement('canvas');
-  const gl = new THREE.WebGLRenderer({ canvas, antialias: LITE, powerPreference: 'high-performance', preserveDrawingBuffer: false });
+  const gl = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance', preserveDrawingBuffer: false });
   gl.toneMapping = THREE.ACESFilmicToneMapping;
   gl.toneMappingExposure = 0.9;
-  gl.shadowMap.enabled = !LITE;
+  gl.shadowMap.enabled = !LITE && PLAIN;   // only the plain scenery has live shadows
   gl.shadowMap.type = THREE.PCFShadowMap;
   gl.shadowMap.autoUpdate = false;   // the scenery that casts shadows never moves
   gl.shadowMap.needsUpdate = true;
@@ -92,24 +96,27 @@ export function create3d(r, R) {
     composer.addPass(new OutputPass());
   }
 
+  let level = null, levelKey = '';
   const self = {
     ready: true, canvas,
     resize(r) {
-      // fewer pixels than the flat view's Sharp: each one costs more here
-      const dpr = Math.min(LITE ? 1 : 1.25, window.devicePixelRatio || 1);
+      level = LITE ? LEVELS[0] : r.max ? MAX : LEVELS[r.quality] || LEVELS[2];
+      levelKey = `${r.quality}|${r.max}|${r.W}x${r.H}`;
+      const dpr = Math.min(level.dpr, window.devicePixelRatio || 1);
       gl.setPixelRatio(dpr);
       gl.setSize(r.W, r.H);
-      if (LITE) return;   // drawn straight to the screen: no bloom
-      if (composer) composer.renderTarget1.dispose(), composer.renderTarget2.dispose();
-      makeComposer(r.W, r.H, dpr);
+      if (composer) composer.renderTarget1.dispose(), composer.renderTarget2.dispose(), composer = null;
+      if (level.bloom) makeComposer(r.W, r.H, dpr);
     },
     draw(r, g, human, now) {
+      // Auto graphics steps r.quality down (or back) while playing
+      if (levelKey !== `${r.quality}|${r.max}|${r.W}x${r.H}`) self.resize(r);
       setCamera(cam, r);
       const f = human === 1 ? -1 : 1;
       board.update(r, f);
       for (const p of g.players) players[p.side].update(r, g, p, r.view === 'first' && p.side === human, cam);
       ball.update(r, g, cam);
-      if (LITE) gl.render(scene, cam); else composer.render();
+      if (composer) composer.render(); else gl.render(scene, cam);
     },
   };
   self.resize(r);
