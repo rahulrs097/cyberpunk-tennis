@@ -1382,6 +1382,14 @@
   }
 
   // ---------------- players, ball, guides ----------------
+  // The ball's shadow under the floodlights: tight and dark on the ground,
+  // wider and fainter as the ball climbs, so its height can be read.
+  // rad is the shadow's radius in metres at height 0.
+  function ballShadow(z, rad) {
+    const h = CT.clamp(z / 4, 0, 1);
+    return { rad: rad * (1 + 1.4 * h), alpha: 0.55 - 0.37 * h };
+  }
+
   function drawShadow(ctx, r, x, y, rad, alpha) {
     if (groundEllipse(ctx, r, x, y, rad)) { ctx.fillStyle = `rgba(0,0,0,${alpha})`; ctx.fill(); }
   }
@@ -1456,7 +1464,8 @@
   function drawBall(ctx, r, g) {
     const b = g.ball;
     if (!b.active) return;
-    drawShadow(ctx, r, b.pos.x, b.pos.y, 0.09, 0.5);
+    const sh = ballShadow(b.pos.z, 0.09);
+    drawShadow(ctx, r, b.pos.x, b.pos.y, sh.rad, sh.alpha);
     const p = proj(r, b.pos.x, b.pos.y, b.pos.z);
     if (p.behind) return;
     if (g.trail.length > 1) {
@@ -2042,6 +2051,7 @@
   CT.drawBoardAnim = (id, ctx, r, age, data) => BOARD_ANIMS[id](ctx, r, age, data);
   CT.showOpponent = showOpponent;
   CT.showLineCall = showLineCall;
+  CT.ballShadow = ballShadow;
   CT.showPing = showPing;
   CT.showScore = showScore;
   CT.setZen = setZen;
