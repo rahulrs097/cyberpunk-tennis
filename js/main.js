@@ -180,7 +180,7 @@
     // the last lesson is a real point against the easiest CPU
     if (L.rally) beginMatch({ ...chars, control: ['human', 'cpu'], autoMove: [autoMove, false], ...CT.levelOpts('chill') });
     else beginMatch({ ...chars, timeScale: CT.CPU_LEVELS.chill.timeScale, control: ['human', 'feeder'], autoMove: [autoMove, false],
-      drill: { serve: !!L.serve, wing: L.wing, feed: L.feed, reps: 0 } });
+      drill: { serve: !!L.serve, wing: L.wing, feed: L.feed, reps: 0, vary: !!tut.practice } });
     showMsg(L.title, L.intro, 'neutral');
   }
 

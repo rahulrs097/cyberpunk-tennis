@@ -281,16 +281,42 @@
     // (wing 'mix' alternates forehand and backhand feeds)
     const wing = g.drill.wing === 'mix' ? ((g.drill.reps || 0) % 2 ? 'bh' : 'fh') : g.drill.wing || 'fh';
     g.drill.cur = wing;
+    const side = wing === 'fh' ? 1 : -1;
+    // Practice (drill.vary) mixes it up like a match ball: the machine moves
+    // along its baseline, and each feed has its own pace, depth, height,
+    // spin and distance out to the wing. (Like the CPU's, the machine's shot
+    // choice is the only randomness.) The tutorial's lessons stay the same easy ball.
+    const vary = !!g.drill.vary;
+    F.x = vary ? rand(-3, 3) : 0;
     const b = CT.makeBall();
     b.pos = { x: F.x, y: F.y - 0.5, z: 1.0 };
     b.active = true; b.inFlight = true; b.bounces = 1;
     g.ball = b;
     g.phase = 'rally';
-    const landX = clamp(P.x + (wing === 'fh' ? 1 : -1) * 0.9, -3, 3);
-    const input = feed === 'volley' ? { aim: 0, landX, pace: 0.2, spinDir: 1, curve: 0, depth: 0.45, clear: 0.6 }
-      : feed === 'smash' ? { aim: 0, landX: P.x, pace: 0, spinDir: 1, curve: 0, depth: 0.32, lob: true }
-      : { aim: 0, landX, pace: 0.2, spinDir: 1, curve: 0, depth: 0.75, clear: 0.6 };
-    applyShot(g, F, computeShot(g, F, input, 0));
+    let input;
+    if (!vary) {
+      const landX = clamp(P.x + side * 0.9, -3, 3);
+      input = feed === 'volley' ? { aim: 0, landX, pace: 0.2, spinDir: 1, curve: 0, depth: 0.45, clear: 0.6 }
+        : feed === 'smash' ? { aim: 0, landX: P.x, pace: 0, spinDir: 1, curve: 0, depth: 0.32, lob: true }
+        : { aim: 0, landX, pace: 0.2, spinDir: 1, curve: 0, depth: 0.75, clear: 0.6 };
+    } else if (feed === 'volley') {
+      input = { aim: 0, landX: clamp(P.x + side * rand(0.4, 2.2), -3.4, 3.4), pace: rand(0.15, 0.55), spinDir: Math.random() < 0.7 ? 1 : -1,
+        curve: rand(-0.2, 0.2), depth: rand(0.4, 0.5), clear: rand(0.4, 0.8) };
+    } else if (feed === 'smash') {
+      input = { aim: 0, landX: clamp(P.x + rand(-1.6, 1.6), -3, 3), pace: 0, spinDir: 1, curve: 0, depth: rand(0.26, 0.42), lob: true };
+    } else {
+      input = { aim: 0, landX: clamp(P.x + side * rand(0.5, 3.8), -3.9, 3.9), pace: rand(0.1, 0.7), spinDir: Math.random() < 0.75 ? 1 : -1,
+        curve: rand(-0.3, 0.3), depth: rand(0.45, 0.95), clear: rand(0.4, 1.1) };
+    }
+    // a varied feed that would miss the court is eased off until it lands in
+    let shot = computeShot(g, F, input, 0);
+    for (let i = 0; vary && i < 6; i++) {
+      const land = CT.flight(shot.pos, shot.vel, shot.spin, shot.side).land;
+      if (land && CT.inSingles(land.x, land.y) && land.y < -0.5) break;
+      input = { ...input, pace: Math.max(0, input.pace - 0.12), clear: 0.6, landX: input.landX * 0.85 };
+      shot = computeShot(g, F, input, 0);
+    }
+    applyShot(g, F, shot);
   }
 
   function drillEnd(g, ok, text, at) {
