@@ -173,7 +173,7 @@
      screen then starts at the top and scrolls, instead of losing its top */
   .sheet { width: 100%; max-width: 440px; display: grid; gap: 16px; margin: auto; }
   /* screens opened over the menu hide it, so its buttons don't show through */
-  #help, #trophies, #settings { background: rgba(5, 4, 12, 0.94); }
+  #help, #trophies, #settings, #practice { background: rgba(5, 4, 12, 0.94); }
   /* the end screen sits low and clear of the sky, so the billboard (and the
      achievements going up on it) stays in view over the result */
   #end { background: linear-gradient(to bottom, rgba(5, 4, 12, 0) 0%, rgba(5, 4, 12, 0) 35%, rgba(5, 4, 12, 0.85) 60%); backdrop-filter: none; }
@@ -290,8 +290,13 @@
   .start span { font-size: 13px; color: var(--muted); }
   .start em { font-style: normal; font: 700 11px var(--ui); letter-spacing: 0.12em; text-transform: uppercase; background: var(--ball); color: #14140a; border-radius: 3px; padding: 3px 6px; }
   .note { margin: 0; padding: 10px 12px; border-radius: 6px; border: 1px solid var(--gold); background: rgba(255, 194, 61, 0.12); color: #fff3d6; font-size: 14px; }
-  .nav { margin-top: auto; padding-top: 4px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
-  .nav button { min-height: 52px; display: grid; gap: 3px; place-items: center; align-content: center; background: none; border: 0; border-top: 1px solid var(--line); border-radius: 0; color: var(--ink); font: 600 12px var(--ui); letter-spacing: 0.08em; text-transform: uppercase; }
+  .nav { margin-top: auto; padding-top: 4px; display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; }
+  .nav button { min-height: 52px; min-width: 0; display: grid; gap: 3px; place-items: center; align-content: center; background: none; border: 0; border-top: 1px solid var(--line); border-radius: 0; color: var(--ink); font: 600 11px var(--ui); letter-spacing: 0.04em; text-transform: uppercase; }
+  /* the practice picker: a grid of shots, then the wing to feed them to */
+  .seg.shots { display: grid; grid-template-columns: repeat(2, 1fr); }
+  .seg.shots button { min-height: 56px; min-width: 0; padding: 6px 8px; text-align: left; }
+  .seg.shots button small { font-size: 12px; }
+  .seg.tabs button:disabled { opacity: 0.35; }
   .nav svg { width: 20px; height: 20px; fill: none; stroke: var(--cyan); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 
   /* the lobby: waiting shows a spinner, and errors don't look like instructions */
@@ -394,6 +399,7 @@
     <p class="lede" id="installHint" hidden>In Safari, tap Share, then Add to Home Screen. It opens full screen and plays the CPU offline.</p>
     <div class="nav">
       <button id="howBtn"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v16H5zM9 9h6M9 13h4"/></svg>How to</button>
+      <button id="practiceBtn"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>Practice</button>
       <button id="statsBtn"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 20v-7M12 20V5M18 20v-10"/></svg>Stats</button>
       <button id="achBtn"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 4h8v5a4 4 0 0 1-8 0zM8 6H5a3 3 0 0 0 3 4M16 6h3a3 3 0 0 1-3 4M12 13v4M9 20h6"/></svg>Trophies</button>
       <button id="settingsBtn"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/></svg>Settings</button>
@@ -555,6 +561,7 @@
     </div>
     <div class="btns sticky">
       <button class="btn primary" id="helpTut">Try the tutorial</button>
+      <button class="btn" id="helpPractice">Practice a shot</button>
       <button class="btn" id="helpClose">Back</button>
     </div>
   </div>
@@ -587,6 +594,26 @@
   </div>
 </div>
 
+<!-- practice one shot on repeat: the ball machine feeds it until you stop -->
+<div class="overlay" id="practice" hidden>
+  <div class="sheet">
+    <div class="title"><b>Practice</b></div>
+    <p class="lede">Pick a shot and the ball machine feeds it over and over. Pause to pick another.</p>
+    <div class="label">Feed it to</div>
+    <div class="seg tabs" id="practiceWings">
+      <button data-wing="fh" aria-pressed="true">Forehand</button>
+      <button data-wing="bh" aria-pressed="false">Backhand</button>
+      <button data-wing="mix" aria-pressed="false">Both</button>
+    </div>
+    <div class="label">Shot</div>
+    <div class="seg shots" id="practiceShots"></div>
+    <div class="btns sticky">
+      <button class="btn" id="practiceTut">Full tutorial<small>11 drills in order</small></button>
+      <button class="btn" id="practiceClose">Back</button>
+    </div>
+  </div>
+</div>
+
 <div class="overlay" id="pauseMenu" hidden>
   <div class="sheet">
     <div class="title"><b id="pauseTitle">Paused</b></div>
@@ -602,6 +629,7 @@
     </div>
     <div class="btns">
       <button class="btn primary" id="resume">Resume</button>
+      <button class="btn" id="pickShot" hidden>Pick another shot</button>
       <button class="btn" id="quit">Quit to menu<small id="quitNote">This match is saved</small></button>
     </div>
   </div>
