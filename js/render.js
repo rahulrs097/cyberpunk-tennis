@@ -759,10 +759,13 @@
     ctx.fillRect(0, 0, W, H);
     ctx.save();
     ctx.beginPath(); ctx.rect(vx, vy, vw, vh); ctx.clip();
-    ctx.fillStyle = '#08152b'; ctx.fillRect(vx, vy, vw, vh);   // out
-    ctx.fillStyle = '#17487f'; rect(callArea(call.box));          // in
-    ctx.fillStyle = PAL.line;
-    if (r.quality) { ctx.shadowColor = PAL.line; ctx.shadowBlur = 14; }
+    // the court as it looks in the current theme: neon blue, or (Concrete
+    // 3D) bare concrete with the worn blue paint and plain white lines
+    const con = r.want3d;
+    ctx.fillStyle = con ? '#4b4744' : '#08152b'; ctx.fillRect(vx, vy, vw, vh);   // out
+    ctx.fillStyle = con ? '#4a5a70' : '#17487f'; rect(callArea(call.box));          // in
+    ctx.fillStyle = con ? '#f2f5f8' : PAL.line;
+    if (r.quality && !con) { ctx.shadowColor = PAL.line; ctx.shadowBlur = 14; }
     for (const q of courtLines()) rect(q);
     ctx.shadowBlur = 0;
     // the mark: an oval from the back of the contact patch, stretched on
