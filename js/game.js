@@ -248,10 +248,18 @@
     g.trail = [];
     g.peakT = null; g.peakBall = null; g.held = null; g.serveWait = 0;
     g.phaseWall = 0;
+    const deuce = (g.drill.reps || 0) % 2 === 0;
     if (g.drill.serve) {
-      const deuce = (g.drill.reps || 0) % 2 === 0;
       P.x = (deuce ? 1 : -1) * 0.7; P.y = -(COURT.HL + 0.3);
       g.serveBox = { side: 1, sign: deuce ? -1 : 1 };
+      g.phase = 'preServe';
+    } else if (g.drill.feed === 'return') {
+      // the ball machine serves (from the baseline, deuce and ad in turn)
+      g.server = 1;
+      F.x = F.fwd * (deuce ? 1 : -1) * 0.7; F.y = -F.fwd * (COURT.HL + 0.3); F.tx = F.x; F.ty = F.y;
+      const boxSign = deuce ? P.fwd : -P.fwd;
+      P.x = boxSign * 2.5; P.y = -P.fwd * P.ch.returnDepth;
+      g.serveBox = { side: 0, sign: boxSign };
       g.phase = 'preServe';
     } else {
       // volley and smash drills start at the net
@@ -269,17 +277,46 @@
   // or a short lob to smash (feed 'smash'). (Both reach a player at the net
   // at the right height: about waist high, and about 2.7 m.)
   function feedBall(g) {
-    const P = g.players[0], F = g.players[1], wing = g.drill.wing || 'fh', feed = g.drill.feed;
+    const P = g.players[0], F = g.players[1], feed = g.drill.feed;
+    // (wing 'mix' alternates forehand and backhand feeds)
+    const wing = g.drill.wing === 'mix' ? ((g.drill.reps || 0) % 2 ? 'bh' : 'fh') : g.drill.wing || 'fh';
+    g.drill.cur = wing;
+    const side = wing === 'fh' ? 1 : -1;
+    // Practice (drill.vary) mixes it up like a match ball: the machine moves
+    // along its baseline, and each feed has its own pace, depth, height,
+    // spin and distance out to the wing. (Like the CPU's, the machine's shot
+    // choice is the only randomness.) The tutorial's lessons stay the same easy ball.
+    const vary = !!g.drill.vary;
+    F.x = vary ? rand(-3, 3) : 0;
     const b = CT.makeBall();
     b.pos = { x: F.x, y: F.y - 0.5, z: 1.0 };
     b.active = true; b.inFlight = true; b.bounces = 1;
     g.ball = b;
     g.phase = 'rally';
-    const landX = clamp(P.x + (wing === 'fh' ? 1 : -1) * 0.9, -3, 3);
-    const input = feed === 'volley' ? { aim: 0, landX, pace: 0.2, spinDir: 1, curve: 0, depth: 0.45, clear: 0.6 }
-      : feed === 'smash' ? { aim: 0, landX: P.x, pace: 0, spinDir: 1, curve: 0, depth: 0.32, lob: true }
-      : { aim: 0, landX, pace: 0.2, spinDir: 1, curve: 0, depth: 0.75, clear: 0.6 };
-    applyShot(g, F, computeShot(g, F, input, 0));
+    let input;
+    if (!vary) {
+      const landX = clamp(P.x + side * 0.9, -3, 3);
+      input = feed === 'volley' ? { aim: 0, landX, pace: 0.2, spinDir: 1, curve: 0, depth: 0.45, clear: 0.6 }
+        : feed === 'smash' ? { aim: 0, landX: P.x, pace: 0, spinDir: 1, curve: 0, depth: 0.32, lob: true }
+        : { aim: 0, landX, pace: 0.2, spinDir: 1, curve: 0, depth: 0.75, clear: 0.6 };
+    } else if (feed === 'volley') {
+      input = { aim: 0, landX: clamp(P.x + side * rand(0.4, 2.2), -3.4, 3.4), pace: rand(0.15, 0.55), spinDir: Math.random() < 0.7 ? 1 : -1,
+        curve: rand(-0.2, 0.2), depth: rand(0.4, 0.5), clear: rand(0.4, 0.8) };
+    } else if (feed === 'smash') {
+      input = { aim: 0, landX: clamp(P.x + rand(-1.6, 1.6), -3, 3), pace: 0, spinDir: 1, curve: 0, depth: rand(0.26, 0.42), lob: true };
+    } else {
+      input = { aim: 0, landX: clamp(P.x + side * rand(0.5, 3.8), -3.9, 3.9), pace: rand(0.1, 0.7), spinDir: Math.random() < 0.75 ? 1 : -1,
+        curve: rand(-0.3, 0.3), depth: rand(0.45, 0.95), clear: rand(0.4, 1.1) };
+    }
+    // a varied feed that would miss the court is eased off until it lands in
+    let shot = computeShot(g, F, input, 0);
+    for (let i = 0; vary && i < 6; i++) {
+      const land = CT.flight(shot.pos, shot.vel, shot.spin, shot.side).land;
+      if (land && CT.inSingles(land.x, land.y) && land.y < -0.5) break;
+      input = { ...input, pace: Math.max(0, input.pace - 0.12), clear: 0.6, landX: input.landX * 0.85 };
+      shot = computeShot(g, F, input, 0);
+    }
+    applyShot(g, F, shot);
   }
 
   function drillEnd(g, ok, text, at) {
@@ -890,7 +927,7 @@
         q += ch.tactics.late * t + (wing === 'fh' ? ch.tactics.fhPref : 0);
         // in a tutorial drill, automove sets the player up on the lesson's
         // wing (Octopus would otherwise take a forehand feed on his backhand)
-        if (g.drill && c.side === 0 && wing === (g.drill.wing || 'fh')) q += 3;
+        if (g.drill && c.side === 0 && g.drill.cur && wing === g.drill.cur) q += 3;
         q -= dist * 0.05;
         cands.push({ t, x: px, y: py, z, slack, q, wing });
       }
@@ -1196,7 +1233,8 @@
 
   function fault(g, text) {
     const m = g.match;
-    if (g.drill) { drillEnd(g, false, text === 'Net' ? 'Net' : 'Fault', g.ball.pos); return; }
+    // (a ball machine serve that misses doesn't count either way)
+    if (g.drill) { drillEnd(g, g.server === 1 ? null : false, text === 'Net' ? 'Net' : 'Fault', g.ball.pos); return; }
     if (m.firstServe) {
       m.firstServe = false;
       g.phase = 'fault';
@@ -1226,7 +1264,7 @@
       if (b.isServe) {
         if (b.netted || !inOppHalf) fault(g, 'Net');
         else if (!CT.inServiceBox(b.pos.x, b.pos.y, g.serveBox)) fault(g, 'Fault');
-        else if (g.drill) drillEnd(g, true, 'In', b.pos);
+        else if (g.drill && h === 0) drillEnd(g, true, 'In', b.pos);
         else {
           b.bounces = 1;
           // (for the returner's scouting) how far from the centre line it landed, recent serves counting most
@@ -1364,9 +1402,12 @@
         if (vzBefore > 0 && b.vel.z <= 0) {
           g.peakT = g.time;
           g.peakBall = CT.cloneBall(b);
-          if (g.control[g.server] === 'cpu') {
+          // (and the ball machine, in a return drill: a CPU serve, always well timed)
+          const machine = !!g.drill && g.server === 1;
+          if (g.control[g.server] === 'cpu' || machine) {
             const c = g.players[g.server];
             const input = cpuChooseServe(g, c);
+            if (machine) { input.err = 0; c.netSpot = null; }
             applyShot(g, c, computeShot(g, c, input, input.err));
           }
         } else if (b.vel.z < 0 && b.pos.z < 1.25) {
@@ -1408,6 +1449,7 @@
       m.firstServe = false;
     }
     if (g.phase === 'feed' && g.phaseWall > 0.9) feedBall(g);
+    if (g.drill && g.server === 1 && g.phase === 'preServe' && g.phaseWall > 1.1) requestToss(g, 1);
     if (g.phase === 'pointOver' && g.phaseWall > (g.drill ? 1.3 : 1.9)) {
       if (g.match.over) { g.phase = 'matchOver'; emit(g, 'matchOver', { winner: g.match.winner }); }
       else startPoint(g, false);
