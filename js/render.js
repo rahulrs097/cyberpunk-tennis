@@ -319,7 +319,7 @@
       }
       Object.assign(r.vr, opts);
       r.quality = r.vr.gfx === 'auto' ? 2 : r.vr.gfx;
-      r.vrHalf = false; r.vrWork = [];
+      r.vrHalf = false; r.vrWork = []; r.vr3dWatch = null; r.vr3dSlow = false;
     } else if (r.vr) { r.vr = null; r.quality = r.qualityWas; }
     r.cam.ready = false;
   }
@@ -1784,7 +1784,7 @@
       out.setTransform(r.dpr, 0, 0, r.dpr, 0, 0);
       drawOverlay(out, r, g, human, info, land);
     } else drawScene(ctx, r, g, human, info, land);
-    if (SHOW_FPS) drawFps(out, r, dt, d3);
+    if (SHOW_FPS) drawFps(out, r, dt, d3 || (r.vr && r.want3d && r.three && r.three.ready ? r.three : null));
     watchFrameRate(r, dt, (performance.now() - now) / 1000);
   }
 
@@ -1798,9 +1798,9 @@
     if (f.t >= 1) { f.v = f.n / f.t; f.n = 0; f.t = 0; }
     ctx.save();
     ctx.font = '700 13px sans-serif'; ctx.fillStyle = 'rgba(0,0,0,0.6)';
-    ctx.fillRect(4, r.H - 24, 120, 20);
+    ctx.fillRect(4, r.H - 24, 140, 20);
     ctx.fillStyle = '#e4ff4a';
-    ctx.fillText(`${f.v.toFixed(0)} fps${d3 ? ' 3D' : ''} x${d3 ? d3.stats().dpr : r.dpr}`, 10, r.H - 9);
+    ctx.fillText(`${f.v.toFixed(0)} fps${d3 ? ' 3D' : ''}${r.vr && r.vrHalf ? ' ½' : ''} x${d3 ? d3.stats().dpr : r.dpr}`, 10, r.H - 9);
     if (d3 && SHOW_PROF) {
       const s = d3.stats();
       const lines = [`${s.calls} draws  ${(s.tris / 1000).toFixed(0)}k tris`, `${s.tex} textures  ${s.geo} meshes`, `${s.glow}  bake ${s.bake}`];
@@ -1838,6 +1838,8 @@
     const c = r.cam, v = r.vr, eyeW = r.W, eyeH = r.H;
     const mx = Math.round(eyeW * WARP), my = Math.round(eyeH * WARP), bw = eyeW + 2 * mx, bh = eyeH + 2 * my;
     const cxOf = (i) => (i ? r.lensX : eyeW - r.lensX);   // under the lens: lensX either side of the screen's middle
+    const d3 = r.want3d && r.three && r.three.ready ? r.three : null;
+    if (d3) watchVR3d(r);
     r.vrOdd = !r.vrOdd;
     if (!r.eyePose || !r.vrHalf || r.vrOdd) {
       const t0 = performance.now();
@@ -1849,7 +1851,15 @@
         b.ctx.setTransform(r.dpr, 0, 0, r.dpr, 0, 0);
         c.cx = mx + cxOf(i);
         c.x = x0 + c.R.x * s * IPD / 2; c.y = y0 + c.R.y * s * IPD / 2;
-        drawScene(b.ctx, r, g, human, info, land);
+        if (d3) {
+          // Concrete 3D: three.js draws this eye (no glow, see render3d.js),
+          // copied into the eye's buffer, with the guides and racket on top
+          d3.draw(r, g, human, t0);
+          b.ctx.setTransform(1, 0, 0, 1, 0, 0);
+          b.ctx.drawImage(d3.canvas, 0, 0, b.cv.width, b.cv.height);
+          b.ctx.setTransform(r.dpr, 0, 0, r.dpr, 0, 0);
+          drawEyeOverlay(b.ctx, r, g, human, info, land);
+        } else drawScene(b.ctx, r, g, human, info, land);
       }
       r.W = eyeW; r.H = eyeH; c.cy = cy0; c.x = x0; c.y = y0;
       r.eyePose = { yaw: v.yaw, pitch: v.pitch };
@@ -1859,7 +1869,7 @@
         r.vrWork.length = 0;
         if (work > VR_SLOW && v.gfx === 'auto' && r.quality > 0 && !r.vrHalf) { r.quality--; resize(r, ...r.args); }
         else if (work > VR_SLOW) r.vrHalf = true;
-        else if (work < VR_FAST) r.vrHalf = false;
+        else if (work < VR_FAST && !(d3 && r.vr3dSlow)) r.vrHalf = false;
       }
     }
     // turning right moves the picture left; looking up moves it down
@@ -1884,6 +1894,40 @@
     ctx.fillStyle = 'rgba(255,255,255,0.85)';
     ctx.fillRect(eyeW - 1, 0, 2, eyeH);
     c.cx = eyeW / 2;
+  }
+
+  // Concrete 3D in VR: the GPU's work doesn't show in the drawing time, so
+  // the frame rate itself is watched. Under VR3D_HALF fps the scene redraws
+  // every other frame (the picture still follows your head every frame). It
+  // stays 3D however slow it gets, on purpose: ?fps shows the rate.
+  const VR3D_HALF = 50;
+  function watchVR3d(r) {
+    const now = performance.now(), w = r.vr3dWatch || (r.vr3dWatch = { t: 0, n: 0, skip: 30 });
+    if (w.last && now - w.last < 250) {
+      // the first half second after going into VR (or changing pace) is skipped
+      if (w.skip > 0) w.skip--;
+      else { w.t += now - w.last; w.n++; }
+    }
+    w.last = now;
+    if (w.n < 60) return;
+    const fps = 1000 * w.n / w.t;
+    w.t = 0; w.n = 0;
+    r.vr3dSlow = fps < VR3D_HALF + 5;
+    if (fps >= VR3D_HALF) return;
+    if (!r.vrHalf) { r.vrHalf = true; w.skip = 30; }
+  }
+
+  // what drawScene adds over the world, for an eye drawn in 3D
+  function drawEyeOverlay(ctx, r, g, human, info, land) {
+    for (const m of g.marks) {
+      ctx.strokeStyle = `rgba(228,255,74,${(1 - m.age / 1.2) * 0.8})`;
+      ctx.lineWidth = 1.5;
+      if (groundEllipse(ctx, r, m.x, m.y, 0.12 + m.age * 0.5)) ctx.stroke();
+    }
+    drawGuides(ctx, r, g, human, info, land);
+    // the racket is the nearest thing there is, so it goes over the world
+    drawRacketWorld(ctx, r, g, g.players[human], racketHead(r, g, g.players[human]));
+    if (r.view === 'first' && !r.zen) drawTimingRing(ctx, r, g, info);
   }
 
   // VR's marks that stay with your head, drawn fresh every frame: an arrow

@@ -115,6 +115,7 @@ export function create3d(r, R) {
   }
 
   let level = null, levelKey = '';
+  const key = (r) => `${r.quality}|${r.max}|${r.W}x${r.H}|${r.vr ? r.dpr : ''}`;
   const self = {
     ready: true, canvas,
     // ?prof: what the last frame cost the GPU, roughly
@@ -124,8 +125,10 @@ export function create3d(r, R) {
         dpr: gl.getPixelRatio(), glow: level && level.bloom ? `glow aa${level.samples}` : 'no glow', bake: small ? '2k' : '4k' };
     },
     resize(r) {
-      level = LITE ? LEVELS[0] : r.max ? MAX : LEVELS[r.quality] || LEVELS[2];
-      levelKey = `${r.quality}|${r.max}|${r.W}x${r.H}`;
+      // VR draws two eyes a frame on a phone, so never with glow; the
+      // sharpness follows the VR graphics setting (Smooth 1x, Sharp 1.5x)
+      level = r.vr ? { dpr: r.dpr, bloom: false } : LITE ? LEVELS[0] : r.max ? MAX : LEVELS[r.quality] || LEVELS[2];
+      levelKey = key(r);
       const dpr = Math.min(level.dpr, window.devicePixelRatio || 1);
       gl.setPixelRatio(dpr);
       gl.setSize(r.W, r.H);
@@ -135,7 +138,7 @@ export function create3d(r, R) {
     draw(r, g, human, now) {
       gl.info.reset();   // counted over all the passes (?prof)
       // Auto graphics steps r.quality down (or back) while playing
-      if (levelKey !== `${r.quality}|${r.max}|${r.W}x${r.H}`) self.resize(r);
+      if (levelKey !== key(r)) self.resize(r);
       setCamera(cam, r);
       const f = human === 1 ? -1 : 1;
       board.update(r, f);
