@@ -454,10 +454,11 @@
         </div>
         <div class="label">VR lenses</div>
         <div class="seg">
-          <button data-vr-lens="narrow" aria-pressed="false">Narrow</button>
-          <button data-vr-lens="normal" aria-pressed="true">Normal</button>
-          <button data-vr-lens="wide" aria-pressed="false">Wide</button>
+          <button data-vr-lens-step="-1" aria-label="Lenses closer">−</button>
+          <button id="vrLensVal" disabled>64 mm</button>
+          <button data-vr-lens-step="1" aria-label="Lenses further apart">+</button>
         </div>
+        <p class="lede">How far apart the headset's lenses are. Seeing double? Go down a few mm. The headset's pause menu has it too: look down, LENSES.</p>
         <div class="label">Swipe pad</div>
         <div class="seg">
           <button id="padHost">Link a phone</button>

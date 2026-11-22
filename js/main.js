@@ -40,11 +40,15 @@
   let view = 'chase';  // camera: 'chase' (behind and above), 'first' (your eyes) or 'vr' (Cardboard)
   try { const v = localStorage.getItem('ct.view'); if (v === 'first' || v === 'vr') view = v; } catch (e) { /* storage is optional */ }
   // Cardboard VR. vrFit fits the picture to the headset: how wide each eye
-  // sees (degrees) and how far apart its lenses are (mm).
+  // sees (degrees) and how far apart its lenses are (mm, LENS_MIN to
+  // LENS_MAX in 1 mm steps; a viewer with lenses 62 mm apart wants 62).
   // vrFit.gfx is the graphics level: Auto starts sharp and steps down if the phone can't keep up.
-  const VR_FOV = { wide: 95, normal: 80, close: 65 }, VR_LENS = { narrow: 60, normal: 64, wide: 68 };
+  const VR_FOV = { wide: 95, normal: 80, close: 65 };
+  const LENS_MIN = 52, LENS_MAX = 72;
+  const OLD_LENS = { narrow: 60, normal: 64, wide: 68 };   // the old three choices
+  const lensMM = (v) => (typeof v === 'number' && v >= LENS_MIN && v <= LENS_MAX ? Math.round(v) : OLD_LENS[v] || 64);
   const VR_GFX = { auto: 'auto', smooth: 0, balanced: 1, sharp: 2 };
-  let vrFit = { fov: 'normal', lens: 'normal', gfx: 'auto' };
+  let vrFit = { fov: 'normal', lens: 64, gfx: 'auto' };
   // the graphics level outside VR: Auto, or one picked in Settings
   // (Max, full screen resolution, is offered outside VR only)
   const GFX = { ...VR_GFX, max: 'max' };
@@ -60,7 +64,7 @@
   } catch (e) { /* storage is optional */ }
   try {
     const v = JSON.parse(localStorage.getItem('ct.vrFit'));
-    if (v && VR_FOV[v.fov] && VR_LENS[v.lens]) vrFit = { ...vrFit, fov: v.fov, lens: v.lens, gfx: v.gfx in VR_GFX ? v.gfx : 'auto' };
+    if (v && VR_FOV[v.fov]) vrFit = { ...vrFit, fov: v.fov, lens: lensMM(v.lens), gfx: v.gfx in VR_GFX ? v.gfx : 'auto' };
   } catch (e) { /* storage is optional */ }
   // during a VR match: { head, wait (until a press starts play), press (when the button went down), ignoreUp, aim }
   let vr = null;
@@ -852,9 +856,11 @@
   const VR_ROW_PITCH = -0.22;   // looking further down than this picks from row 1
   const onOff = (on) => (on ? 'ON' : 'OFF');
   function vrSettingsRow(all) {
-    const sound = [{ id: 'zen', label: 'ZEN: ' + onOff(zen), row: 1 }, { id: 'music', label: 'MUSIC: ' + onOff(musicOn), row: 1 }];
+    // Lenses: each press brings the two pictures 1 mm closer (back to the
+    // widest after the narrowest), for when you see double
+    const sound = [{ id: 'zen', label: 'ZEN: ' + onOff(zen), row: 1 }, { id: 'music', label: 'MUSIC: ' + onOff(musicOn), row: 1 }, { id: 'lens', label: 'LENSES: ' + vrFit.lens + ' MM', row: 1 }];
     const row = all ? [{ id: 'char', label: 'PLAYER: ' + CT.CHARACTERS[humanChar].name.toUpperCase(), row: 1 }, { id: 'level', label: 'LEVEL: ' + level.toUpperCase(), row: 1 }, ...sound] : sound;
-    const gap = 0.6;
+    const gap = row.length > 4 ? 0.5 : 0.6;
     row.forEach((it, i) => { it.yaw = (i - (row.length - 1) / 2) * gap; });
     return row;
   }
@@ -882,6 +888,7 @@
     else if (it.id === 'char') { const ids = Object.keys(CT.CHARACTERS); pickChar(ids[(ids.indexOf(humanChar) + 1) % ids.length]); blip(880, 0.08, 'sine', 0.06); }
     else if (it.id === 'zen') { setZen(!zen); blip(880, 0.08, 'sine', 0.06); }
     else if (it.id === 'music') { setMusic(!musicOn); blip(880, 0.08, 'sine', 0.06); }
+    else if (it.id === 'lens') { setLens(vrFit.lens > LENS_MIN ? vrFit.lens - 1 : LENS_MAX); blip(880, 0.08, 'sine', 0.06); }
     else if (it.id === 'quit') showMenu('', true);
     else leaveVR();
   }
@@ -933,7 +940,7 @@
       document.body.classList.add('vr');
     }
     vr.wait = true; vr.press = null; vr.end = null; vr.home = false;
-    CT.setVR(renderer, { fov: VR_FOV[vrFit.fov], lens: VR_LENS[vrFit.lens], gfx: VR_GFX[vrFit.gfx] });
+    CT.setVR(renderer, { fov: VR_FOV[vrFit.fov], lens: vrFit.lens, gfx: VR_GFX[vrFit.gfx] });
     // in a headset you can only look and press, so automove always runs
     if (game.control[me] === 'human') CT.setAutoMove(game, me, true);
     if (isGuest()) send({ t: 'auto', on: true });
@@ -1831,6 +1838,15 @@
     CT.setTheme(renderer, value);
   }
 
+  // Lens spacing in mm, from Settings' - and + or the headset's menu; in VR
+  // the eyes move at once
+  function setLens(mm) {
+    vrFit = { ...vrFit, lens: lensMM(mm) };
+    try { localStorage.setItem('ct.vrFit', JSON.stringify(vrFit)); } catch (e) { /* storage is optional */ }
+    $('vrLensVal').textContent = vrFit.lens + ' mm';
+    if (renderer.vr) { renderer.vr.lens = vrFit.lens; if (renderer.args) CT.resizeRenderer(renderer, ...renderer.args); }
+  }
+
   function setVRFit(key, value) {
     vrFit = { ...vrFit, [key]: value };
     try { localStorage.setItem('ct.vrFit', JSON.stringify(vrFit)); } catch (e) { /* storage is optional */ }
@@ -2017,7 +2033,9 @@
     setGfx(gfx);
     document.querySelectorAll('[data-theme]').forEach((b) => b.addEventListener('click', () => setTheme(b.dataset.theme)));
     setTheme(theme);
-    for (const key of ['fov', 'lens', 'gfx']) {
+    document.querySelectorAll('[data-vr-lens-step]').forEach((b) => b.addEventListener('click', () => setLens(vrFit.lens + Number(b.dataset.vrLensStep))));
+    setLens(vrFit.lens);
+    for (const key of ['fov', 'gfx']) {
       document.querySelectorAll(`[data-vr-${key}]`).forEach((b) => b.addEventListener('click', () => setVRFit(key, b.getAttribute(`data-vr-${key}`))));
       setVRFit(key, vrFit[key]);
     }
