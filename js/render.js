@@ -1784,7 +1784,7 @@
       out.setTransform(r.dpr, 0, 0, r.dpr, 0, 0);
       drawOverlay(out, r, g, human, info, land);
     } else drawScene(ctx, r, g, human, info, land);
-    if (SHOW_FPS) drawFps(out, r, dt, d3 || (r.vr && r.want3d && !r.vr3dOff && r.three && r.three.ready ? r.three : null));
+    if (SHOW_FPS) drawFps(out, r, dt, d3 || (r.vr && r.want3d && r.three && r.three.ready ? r.three : null));
     watchFrameRate(r, dt, (performance.now() - now) / 1000);
   }
 
@@ -1838,7 +1838,7 @@
     const c = r.cam, v = r.vr, eyeW = r.W, eyeH = r.H;
     const mx = Math.round(eyeW * WARP), my = Math.round(eyeH * WARP), bw = eyeW + 2 * mx, bh = eyeH + 2 * my;
     const cxOf = (i) => (i ? r.lensX : eyeW - r.lensX);   // under the lens: lensX either side of the screen's middle
-    const d3 = r.want3d && !r.vr3dOff && r.three && r.three.ready ? r.three : null;
+    const d3 = r.want3d && r.three && r.three.ready ? r.three : null;
     if (d3) watchVR3d(r);
     r.vrOdd = !r.vrOdd;
     if (!r.eyePose || !r.vrHalf || r.vrOdd) {
@@ -1898,10 +1898,9 @@
 
   // Concrete 3D in VR: the GPU's work doesn't show in the drawing time, so
   // the frame rate itself is watched. Under VR3D_HALF fps the scene redraws
-  // every other frame (the picture still follows your head every frame); if
-  // that still can't hold VR3D_FLAT fps, VR goes back to the flat view for
-  // the rest of the session.
-  const VR3D_HALF = 50, VR3D_FLAT = 40;
+  // every other frame (the picture still follows your head every frame). It
+  // stays 3D however slow it gets, on purpose: ?fps shows the rate.
+  const VR3D_HALF = 50;
   function watchVR3d(r) {
     const now = performance.now(), w = r.vr3dWatch || (r.vr3dWatch = { t: 0, n: 0, skip: 30 });
     if (w.last && now - w.last < 250) {
@@ -1916,7 +1915,6 @@
     r.vr3dSlow = fps < VR3D_HALF + 5;
     if (fps >= VR3D_HALF) return;
     if (!r.vrHalf) { r.vrHalf = true; w.skip = 30; }
-    else if (fps < VR3D_FLAT) { r.vr3dOff = true; console.warn(`Concrete 3D off in VR: ${fps.toFixed(0)} fps`); }
   }
 
   // what drawScene adds over the world, for an eye drawn in 3D
