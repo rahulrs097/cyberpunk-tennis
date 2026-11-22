@@ -123,6 +123,50 @@
       intro: 'Now win a point against the CPU', pass: (d) => d.ok },
   ];
 
+  // Practice: one shot on repeat, as long as you like. Each is a lesson that
+  // never ends (`wing` true: fed to the wing picked on the practice screen).
+  const SHOT_TYPES = [
+    { id: 'drive', title: 'Drive', sub: 'Topspin or flat', wing: true, hint: 'Swipe up as the ring around the ball closes. A fast flick hits harder',
+      pass: (d) => d.ok && d.shot && d.shot.spin !== 'Slice' && d.shot.spin !== 'Lob', not: 'That was a slice or lob' },
+    { id: 'slice', title: 'Slice', sub: 'Swipe down', wing: true, hint: 'Swipe down for backspin. Top-left to bottom-right goes left',
+      pass: (d) => d.ok && d.shot && d.shot.spin === 'Slice', not: 'Swipe down to slice' },
+    { id: 'drop', title: 'Drop shot', sub: 'Short swipe', wing: true, hint: 'A short swipe drops the ball short. Land it in front of the service line',
+      pass: (d) => d.ok && d.y < CT.COURT.SL, not: 'Land it in front of the service line' },
+    { id: 'lob', title: 'Lob', sub: 'Slow, long swipe', wing: true, hint: 'Swipe up slowly over a quarter of the screen or more, as the ball arrives',
+      pass: (d) => d.ok && d.shot && d.shot.spin === 'Lob', not: 'Slower and longer for a lob' },
+    { id: 'volley', title: 'Volley', sub: 'At the net', wing: true, feed: 'volley', hint: 'At the net, swipe as the ring closes, before the ball bounces',
+      pass: (d) => d.ok && d.shot && /volley/i.test(d.shot.kind), not: 'Hit it before it bounces' },
+    { id: 'smash', title: 'Smash', sub: 'Off a lob', feed: 'smash', hint: 'Wait under the lob and swipe hard, up or down, as the ring closes',
+      pass: (d) => d.ok && d.shot && d.shot.kind === 'overhead', not: 'Take it out of the air, above your head' },
+    { id: 'serve', title: 'Serve', sub: 'Both boxes', serve: true, hint: 'Tap to toss, then swipe up as the ball tops out in the ring',
+      pass: (d) => d.ok },
+    { id: 'return', title: 'Return', sub: 'Of a real serve', feed: 'return', hint: 'The machine serves at full pace. Swipe as the ring closes',
+      pass: (d) => d.ok },
+  ];
+  const WING_NAMES = { fh: 'forehand', bh: 'backhand', mix: 'both wings' };
+  let practiceWing = 'fh';
+  try { practiceWing = WING_NAMES[localStorage.getItem('ct.pwing')] ? localStorage.getItem('ct.pwing') : 'fh'; } catch (e) { /* storage is optional */ }
+
+  // the lesson being played: a tutorial step, or the shot being practised
+  function lesson() { return tut.practice || LESSONS[tut.i]; }
+
+  function startPractice(id) {
+    const T = SHOT_TYPES.find((t) => t.id === id);
+    if (!T) return;
+    const wing = T.wing ? practiceWing : undefined;
+    me = 0;
+    tut = { i: 0, done: 0, made: 0, tried: 0, streak: 0, best: 0,
+      practice: { ...T, wing, title: T.title + (wing ? ' · ' + WING_NAMES[wing] : ''), need: Infinity, intro: T.hint } };
+    $('practice').hidden = true;
+    runLesson();
+  }
+
+  function showPractice() {
+    document.querySelectorAll('[data-wing]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.wing === practiceWing)));
+    $('practice').hidden = false;
+    $('practice').scrollTop = 0;
+  }
+
   function startTutorial() {
     me = 0;
     tut = { i: 0, done: 0 };
@@ -130,20 +174,30 @@
   }
 
   function runLesson() {
-    const L = LESSONS[tut.i];
+    const L = lesson();
     tut.done = 0;
     const chars = { p0: humanChar, p1: humanChar === 'octopus' ? 'philosopher' : 'octopus' };
     // the last lesson is a real point against the easiest CPU
     if (L.rally) beginMatch({ ...chars, control: ['human', 'cpu'], autoMove: [autoMove, false], ...CT.levelOpts('chill') });
     else beginMatch({ ...chars, timeScale: CT.CPU_LEVELS.chill.timeScale, control: ['human', 'feeder'], autoMove: [autoMove, false],
-      drill: { serve: !!L.serve, wing: L.wing, feed: L.feed, reps: 0 } });
+      drill: { serve: !!L.serve, wing: L.wing, feed: L.feed, reps: 0, vary: !!tut.practice } });
     showMsg(L.title, L.intro, 'neutral');
   }
 
   function onDrill(d) {
-    const L = LESSONS[tut.i];
+    const L = lesson();
     if (d.ok === null) return;
     const good = L.pass(d);
+    if (tut.practice) {
+      tut.tried++;
+      if (good) { tut.made++; tut.streak++; tut.best = Math.max(tut.best, tut.streak); } else tut.streak = 0;
+      blip(good ? 520 : 200, 0.18, 'triangle', 0.07, good ? 780 : 120);
+      const score = `${tut.made} of ${tut.tried}`;
+      if (good) showMsg(tut.streak >= 3 ? tut.streak + ' in a row' : 'Nice', score, 'good');
+      else showMsg(d.ok ? 'In, but not quite' : d.text, (d.ok && L.not) || score, 'warn');
+      updateHud();
+      return;
+    }
     if (good) tut.done++;
     blip(good ? 520 : 200, 0.18, 'triangle', 0.07, good ? 780 : 120);
     if (tut.done < L.need) {
@@ -421,7 +475,8 @@
       const left = game.serveClock - game.serveWait;
       if (left <= 10) call = 'Serve clock ' + Math.max(0, Math.ceil(left)) + (call ? ' · ' + call : '');
     }
-    if (tut) { const L = LESSONS[tut.i]; call = `Lesson ${tut.i + 1}/${LESSONS.length} · ${L.title} · ${Math.min(tut.done, L.need)}/${L.need}`; }
+    if (tut && tut.practice) call = `${tut.practice.title} · ${tut.made} of ${tut.tried} in` + (tut.best >= 3 ? ` · best ${tut.best} in a row` : '');
+    else if (tut) { const L = LESSONS[tut.i]; call = `Lesson ${tut.i + 1}/${LESSONS.length} · ${L.title} · ${Math.min(tut.done, L.need)}/${L.need}`; }
     if (rows) put($('callout'), 'text', call, (v) => { $('callout').textContent = v; });
     if (boardScore()) {
       const opp = 1 - me;
@@ -452,9 +507,9 @@
     if (!game) return;
     const humanServing = game.server === me;
     // new players, and the tutorial's serve lesson, get the gesture shown
-    const coach = (!seen && !tut) || (tut && LESSONS[tut.i].serve);
+    const coach = (!seen && !tut) || (tut && lesson().serve);
     setGhost(coach && humanServing && game.control[me] === 'human' ? (game.phase === 'preServe' ? 'tap' : game.phase === 'toss' ? 'swipe' : null) : null);
-    if (tut) { setHint(LESSONS[tut.i].hint); return; }
+    if (tut) { setHint(lesson().hint); return; }
     if (game.phase === 'preServe') setHint(humanServing ? 'Tap to toss the ball' : autoMove ? 'Get ready to return' : 'Tap the court to move into position');
     else if (game.phase === 'toss' && humanServing) setHint('Swipe up as the ball tops out in the ring');
     else if (game.phase === 'rally') setHint(autoMove ? 'Swipe as the ring closes. Tap to reposition' : 'Tap to move. Swipe as the ring closes');
@@ -1622,7 +1677,7 @@
   // frame and taken away again once you're back on the menu.
   let backEntry = false, dropping = false;
   function backCloses() {
-    return $('menu').hidden || ['settings', 'trophies', 'help'].some((id) => !$(id).hidden);
+    return $('menu').hidden || ['settings', 'trophies', 'help', 'practice'].some((id) => !$(id).hidden);
   }
   function syncBack() {
     if (dropping) return;
@@ -1637,6 +1692,7 @@
     if (open('settings')) $('settingsClose').click();
     else if (open('trophies')) $('achClose').click();
     else if (open('help')) $('helpClose').click();
+    else if (open('practice')) $('practiceClose').click();
     else if (open('lobby')) $('lobbyCancel').click();
     else if (open('pad')) $('padLeave').click();
     else if (open('end')) showMenu();
@@ -1745,11 +1801,13 @@
       // the score, and what Quit will do
       const m = game.match, o = 1 - me, name = (side) => (side === me ? 'You' : (net && net.opp && net.opp.name) || game.players[side].ch.name);
       const pts = m.tiebreak || m.points[0] + m.points[1] ? ' · ' + CT.pointLabel(m, me) + '–' + CT.pointLabel(m, o) : '';
-      $('pauseScore').textContent = tut ? `Lesson ${tut.i + 1} of ${LESSONS.length}: ${LESSONS[tut.i].title}` : `${name(me)} ${m.games[me]}–${m.games[o]} ${name(o)}${pts}`;
+      $('pauseScore').textContent = tut && tut.practice ? `Practice: ${tut.practice.title} · ${tut.made} of ${tut.tried} made` : tut ? `Lesson ${tut.i + 1} of ${LESSONS.length}: ${LESSONS[tut.i].title}` : `${name(me)} ${m.games[me]}–${m.games[o]} ${name(o)}${pts}`;
       $('pauseTitle').textContent = net ? 'Menu' : 'Paused';
       $('pauseNote').hidden = !net;
       quitArmed = 0;
-      $('quit').firstChild.textContent = tut ? 'Quit tutorial' : net ? 'Leave match' : 'Quit to menu';
+      $('pickShot').hidden = !tut;
+      $('pickShot').textContent = tut && tut.practice ? 'Pick another shot' : 'Practice a shot instead';
+      $('quit').firstChild.textContent = tut && tut.practice ? 'Quit practice' : tut ? 'Quit tutorial' : net ? 'Leave match' : 'Quit to menu';
       $('quitNote').textContent = tut ? '' : net ? 'This ends the match for both of you' : canSave ? 'This match is saved' : '';
     }
     $('pauseMenu').hidden = !v;
@@ -1913,7 +1971,7 @@
     checkBuild();
     setInterval(() => { if (!document.hidden) checkBuild(); }, 5 * 60 * 1000);
     // closing the trophies or help sheet lands back on the menu
-    for (const id of ['trophies', 'help', 'settings']) new MutationObserver(reloadIfNewBuild).observe($(id), { attributes: true, attributeFilter: ['hidden'] });
+    for (const id of ['trophies', 'help', 'settings', 'practice']) new MutationObserver(reloadIfNewBuild).observe($(id), { attributes: true, attributeFilter: ['hidden'] });
     document.querySelectorAll('.pick').forEach((b) => b.addEventListener('click', () => pickChar(b.dataset.char)));
     pickLevel = (id) => {
       level = id;
@@ -1989,6 +2047,23 @@
     $('tutBtn').addEventListener('click', () => { ensureAudio(); startTutorial(); });
     $('helpTut').addEventListener('click', () => { $('help').hidden = true; ensureAudio(); startTutorial(); });
     $('helpClose').addEventListener('click', () => { $('help').hidden = true; });
+    $('helpPractice').addEventListener('click', () => { $('help').hidden = true; showPractice(); });
+    $('practiceBtn').addEventListener('click', showPractice);
+    $('practiceClose').addEventListener('click', () => { $('practice').hidden = true; });
+    $('practiceTut').addEventListener('click', () => { $('practice').hidden = true; ensureAudio(); startTutorial(); });
+    $('pickShot').addEventListener('click', () => { leaveFullscreen(); showMenu(); showPractice(); });
+    SHOT_TYPES.forEach((T) => {
+      const b = document.createElement('button');
+      b.dataset.shot = T.id;
+      b.innerHTML = `${T.title}<small>${T.sub}</small>`;
+      b.addEventListener('click', () => { ensureAudio(); startPractice(T.id); });
+      $('practiceShots').appendChild(b);
+    });
+    document.querySelectorAll('[data-wing]').forEach((b) => b.addEventListener('click', () => {
+      practiceWing = b.dataset.wing;
+      try { localStorage.setItem('ct.pwing', practiceWing); } catch (e) { /* storage is optional */ }
+      document.querySelectorAll('[data-wing]').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+    }));
     $('achBtn').addEventListener('click', () => showTrophies('ach'));
     $('statsBtn').addEventListener('click', () => showTrophies('stats'));
     $('achClose').addEventListener('click', () => { $('trophies').hidden = true; });

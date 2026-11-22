@@ -643,6 +643,53 @@ test('serve drill: the player always serves, alternating courts', () => {
   assert.ok(sides.includes(1) && sides.includes(-1), 'both service boxes');
 });
 
+test('practice with both wings alternates forehand and backhand feeds', () => {
+  const CT = loadEngine();
+  const { ends } = drill(CT, { wing: 'mix' }, true);
+  assert.equal(ends.length, 4);
+  assert.deepEqual(ends.map((e) => e.shot && e.shot.wing), ['fh', 'bh', 'fh', 'bh']);
+});
+
+test('practice feeds vary in pace and placement, and always land in', () => {
+  const CT = loadEngine(7);
+  const ends = [], bounces = [], kmh = [];
+  const g = CT.createGame({ p0: 'octopus', p1: 'philosopher', control: ['human', 'feeder'], autoMove: [true, false], timeScale: 0.75,
+    drill: { reps: 0, wing: 'fh', vary: true }, onEvent: (t, e) => {
+      if (t === 'drill') ends.push(e);
+      if (t === 'hit' && e.side === 1) kmh.push(e.kmh);
+      if (t === 'bounce' && e.y < 0 && g && g.ball.lastHitter === 1) bounces.push(e);
+    } });
+  const bot = makeBot(CT, g, 0, 0, () => 0.7);
+  for (let i = 0; i < 60 * 200 && ends.length < 20; i++) { bot(); CT.updateGame(g, 1 / 60); }
+  assert.equal(ends.length, 20);
+  assert.ok(ends.every((e) => e.ok !== null), 'every feed lands in');
+  assert.ok(ends.filter((e) => e.ok).length >= 16, JSON.stringify(ends.map((e) => e.text)));
+  const spread = (v) => Math.max(...v) - Math.min(...v);
+  assert.ok(spread(kmh) >= 15, 'pace varies ' + kmh);
+  assert.ok(spread(bounces.map((b) => b.x)) >= 1.5 && spread(bounces.map((b) => b.y)) >= 2, 'placement varies');
+});
+
+test('return drill: the machine serves into both boxes and a good return counts as in', () => {
+  const CT = loadEngine();
+  const ends = [];
+  const g = CT.createGame({ p0: 'octopus', p1: 'philosopher', control: ['human', 'feeder'], autoMove: [true, false], timeScale: 0.75,
+    drill: { reps: 0, feed: 'return' }, onEvent: (t, e) => { if (t === 'drill') ends.push(e); } });
+  // (a bot that returns down the middle: the serves are real ones, often out wide)
+  const bot = makeBot(CT, g, 0, 0, () => 0.7);
+  const boxes = new Set();
+  for (let i = 0; i < 60 * 40 && ends.length < 4; i++) { bot(); CT.updateGame(g, 1 / 60); if (g.serveBox) boxes.add(g.serveBox.sign); }
+  assert.equal(ends.length, 4);
+  assert.equal(boxes.size, 2, 'both service boxes');
+  // its own faults don't count either way, so every rep that counts is the player's return
+  assert.ok(ends.filter((e) => e.ok !== null).length >= 3, JSON.stringify(ends));
+  assert.ok(ends.filter((e) => e.ok).every((e) => e.y > 0 && e.shot && e.shot.side === 0), JSON.stringify(ends));
+  assert.ok(ends.filter((e) => e.ok).length >= 2, JSON.stringify(ends));
+  assert.equal(g.match.games[0] + g.match.games[1], 0, 'the score never moves');
+  // missing the serve is a failed rep
+  const miss = drill(loadEngine(), { feed: 'return' }, false).ends;
+  assert.ok(miss.length >= 2 && miss.every((e) => e.ok === false || e.ok === null), JSON.stringify(miss));
+});
+
 // ---------------- online ----------------
 test('a snapshot carries the match to the guest', () => {
   const CT = loadEngine(5);
