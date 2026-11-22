@@ -629,12 +629,17 @@ function buildBall(scene) {
       cp.copy(cam.position);
       ball.position.copy(V(b.pos.x, b.pos.y, b.pos.z));
       const dist = Math.max(0.4, ball.position.distanceTo(cp));
-      // as in the flat view: twice life size, never under 2.8 px, capped up close
-      const px = Math.min(r.H * 0.04, Math.max(2.8, (0.075 * f) / dist));
+      // as in the flat view: twice life size, never under 2.8 px, capped up
+      // close. In VR the floor is 0.9 px and the glow follows the true size:
+      // a ball that stops shrinking reads as growing when both eyes say "far"
+      // (as render.js drawBall)
+      const t = (0.075 * f) / dist;
+      const px = Math.min(r.H * 0.04, Math.max(r.vr ? 0.9 : 2.8, t));
       const rad = (px * dist) / f;
       ball.scale.setScalar(rad);
       glow.position.copy(ball.position);
-      glow.scale.setScalar(rad * 6);
+      // the sprite is 1.5x as wide as the glow's radius (its texture fades early)
+      glow.scale.setScalar(r.vr ? (Math.max(px * 1.6, t * 4) * dist / f) * 1.5 : rad * 6);
       shadow.position.copy(V(b.pos.x, b.pos.y, 0.02));
       // the blob texture fades out before its edge, hence the 1.4
       const sh = CT.ballShadow(b.pos.z, 0.09);
@@ -652,7 +657,7 @@ function buildBall(scene) {
         side.crossVectors(d, view).normalize();
         const fr = n > 1 ? k / (n - 1) : 0;
         const dd = Math.max(0.4, view.length());
-        const w = Math.max(1.5 * dd / f, 0.08) * fr * 0.5;
+        const w = Math.max((r.vr ? 0.6 : 1.5) * dd / f, 0.08) * fr * 0.5;
         tpos[i * 6] = a.x + side.x * w; tpos[i * 6 + 1] = a.y + side.y * w; tpos[i * 6 + 2] = a.z + side.z * w;
         tpos[i * 6 + 3] = a.x - side.x * w; tpos[i * 6 + 4] = a.y - side.y * w; tpos[i * 6 + 5] = a.z - side.z * w;
         const c = fr * 0.45 * (i < n ? 1 : 0);
