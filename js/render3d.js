@@ -633,7 +633,10 @@ function buildBall(scene) {
       glow.position.copy(ball.position);
       glow.scale.setScalar(rad * 6);
       shadow.position.copy(V(b.pos.x, b.pos.y, 0.02));
-      shadow.scale.setScalar(0.18 * 1.4);
+      // the blob texture fades out before its edge, hence the 1.4
+      const sh = CT.ballShadow(b.pos.z, 0.09);
+      shadow.scale.setScalar(2 * sh.rad * 1.4);
+      shadow.material.opacity = sh.alpha;
       const T = g.trail, n = Math.min(T.length, TRAIL_MAX);
       const off = T.length - n;
       for (let i = 0; i < TRAIL_MAX; i++) {
