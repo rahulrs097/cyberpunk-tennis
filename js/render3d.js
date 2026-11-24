@@ -71,7 +71,6 @@ export function create3d(r, R) {
   }
 
   const sky = buildSky(scene, hash), moon = sky.moon;
-  let overcast = null;
   const skyline = buildSkyline(scene, hash);
   // the simple lit scenery, until (or unless) the baked rooftop has loaded
   const plain = new THREE.Group();
@@ -101,7 +100,7 @@ export function create3d(r, R) {
       .catch((e) => console.warn('baked skyline unavailable', e));
   }
   const board = buildBoard(scene, R);
-  const players = [0, 1].map(() => buildPlayer(scene));
+  const players = [0, 1].map(() => buildPlayer(scene, R.LAMPS));
   const ball = buildBall(scene);
 
   const cam = new THREE.PerspectiveCamera(50, 1, 0.3, 2400);
@@ -134,12 +133,6 @@ export function create3d(r, R) {
     rain.geometry.setDrawRange(0, 2 * Math.round(RAIN_N * (r.vr ? 0.35 : r.quality === 0 ? 0.45 : r.quality === 1 ? 0.7 : 1)));
     if (on) rain.material.uniforms.time.value = (now / 1000) % 1000, rain.material.uniforms.cam.value.copy(cam.position);
     board.setWet(on);
-    // the sky: clear and starry, or (Rain 3D) low overcast
-    if (on && !overcast) overcast = overcastTex(hash);
-    sky.stars.visible = !on;
-    sky.dome.material.map = on ? overcast : sky.dome.userData.clear;
-    // (the overcast is shown in its own colours; tone mapping would sink it to black)
-    if (sky.dome.material.toneMapped === on) { sky.dome.material.toneMapped = !on; sky.dome.material.needsUpdate = true; }
     if (!baked) return;
     if (baked.cars) {
       const d = baked.cars.material.userData;
@@ -258,6 +251,20 @@ const blob = canvasTex(64, 64, (g) => {
   g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
 });
 
+// a shadow cast along the ground: darkest at the feet (the texture's top),
+// soft at the sides, fading out towards its far end
+const castTex = canvasTex(64, 128, (g) => {
+  const id = g.createImageData(64, 128);
+  for (let y = 0; y < 128; y++) for (let x = 0; x < 64; x++) {
+    const t = y / 127, sx = Math.abs(x - 31.5) / 32;
+    const w = 1 - t * 0.45;   // narrower towards the tip
+    const side = Math.max(0, 1 - Math.pow(sx / w, 2));
+    const a = Math.min(1, 1.25 * side * Math.pow(1 - t, 0.8) * Math.min(1, (t + 0.04) / 0.1));
+    id.data[(y * 64 + x) * 4 + 3] = Math.round(255 * a);
+  }
+  g.putImageData(id, 0, 0);
+});
+
 function flat(geo, mat, x, y, z) {
   const m = new THREE.Mesh(geo, mat);
   m.rotation.x = -Math.PI / 2;
@@ -297,48 +304,6 @@ function buildSky(scene, hash) {
   const g = new THREE.Group(); g.add(moon, halo);
   scene.remove(moon, halo); scene.add(g);
   return { moon: g, dome, stars };
-}
-
-// Rain 3D's sky: low cloud, no stars. Darkest overhead (#0b0e17), lighter
-// towards the horizon (#1c2235) where the city lights its underside, with
-// soft lumps of cloud that wrap round the dome without a seam.
-function overcastTex(hash) {
-  const W = 256, H = 256;
-  const g0 = Array.from({ length: 4 }, (_, o) => {
-    const f = 4 << o, n = Array.from({ length: f * (f / 2 + 1) }, (_, i) => hash(i * 1.37 + o * 91.7));
-    return { f, n };
-  });
-  const noise = (u, v) => {   // u wraps (0..1 round the sky), v 0..1 top to bottom
-    let sum = 0, amp = 0.5, tot = 0;
-    for (const { f, n } of g0) {
-      const fx = u * f, fy = v * f / 2, i = Math.floor(fx), j = Math.floor(fy);
-      let tx = fx - i, ty = fy - j; tx = tx * tx * (3 - 2 * tx); ty = ty * ty * (3 - 2 * ty);
-      const at = (a, b) => n[Math.min(b, f / 2) * f + ((a % f) + f) % f];
-      sum += amp * ((at(i, j) * (1 - tx) + at(i + 1, j) * tx) * (1 - ty) + (at(i, j + 1) * (1 - tx) + at(i + 1, j + 1) * tx) * ty);
-      tot += amp; amp *= 0.55;
-    }
-    return sum / tot;
-  };
-  const top = [0x0b, 0x0e, 0x17], low = [0x1c, 0x22, 0x35];
-  const t = canvasTex(W, H, (g) => {
-    const id = g.createImageData(W, H);
-    for (let y = 0; y < H; y++) {
-      const v = y / (H - 1);
-      // (the dome's v: 0 overhead, 0.5 the horizon; below it the skirt covers the sky)
-      const h = Math.min(1, v / 0.5), k = h * h;
-      for (let x = 0; x < W; x++) {
-        const c = noise(x / W, v);
-        // the clouds show most low down, lit from below; overhead they melt into the dark
-        const lump = 1 + (c - 0.5) * (0.5 + 0.8 * k);
-        const o = (y * W + x) * 4;
-        for (let ch = 0; ch < 3; ch++) id.data[o + ch] = Math.max(0, Math.min(255, (top[ch] + (low[ch] - top[ch]) * k) * lump));
-        id.data[o + 3] = 255;
-      }
-    }
-    g.putImageData(id, 0, 0);
-  });
-  t.wrapS = THREE.RepeatWrapping;
-  return t;
 }
 
 // a soft glow round each lamp head, which bloom can't make on its own on a small screen
@@ -835,7 +800,7 @@ function buildBoard(scene, R) {
 // the metre, feet at (CW/2, FEET), and shown on a card standing at their
 // feet, turned to face the camera, like the flat view's sprite.
 const PPM = 80, CARD_W = 3.6, CARD_UP = 3.0, CARD_DOWN = 0.4;
-function buildPlayer(scene) {
+function buildPlayer(scene, LAMPS) {
   const cv = document.createElement('canvas');
   cv.width = Math.round(CARD_W * PPM); cv.height = Math.round((CARD_UP + CARD_DOWN) * PPM);
   const ctx = cv.getContext('2d');
@@ -846,12 +811,23 @@ function buildPlayer(scene) {
   const card = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map: tex, transparent: true, alphaTest: 0.02, toneMapped: false }));
   const shadow = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 1.1), new THREE.MeshBasicMaterial({ map: blob, transparent: true, opacity: 0.55, depthWrite: false }));
   shadow.rotation.x = -Math.PI / 2;
-  // a small dark core right under the feet (contact), so the cutout stands on
-  // the asphalt rather than hovering over it; squashed across the body
-  const contact = new THREE.Mesh(new THREE.PlaneGeometry(0.62, 0.36), new THREE.MeshBasicMaterial({ map: blob, transparent: true, opacity: 0.75, depthWrite: false }));
-  contact.rotation.x = -Math.PI / 2;
+  // what stands the cutout on the asphalt: a small near-black core right
+  // under the feet (contact), and a long soft shadow cast away from the
+  // nearest lamp, as long as that lamp's height makes it
+  const contact = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.3), new THREE.MeshBasicMaterial({ map: blob, transparent: true, opacity: 0.92, depthWrite: false }));
   shadow.add(contact);
-  contact.rotation.x = 0; contact.position.z = 0.001;
+  contact.position.z = 0.002;
+  // (one from each of the two nearest lamps, as under real floodlights)
+  const casts = [0, 1].map(() => {
+    const pivot = new THREE.Object3D();
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: castTex, transparent: true, opacity: 0.5, depthWrite: false, side: THREE.DoubleSide }));
+    m.rotation.x = -Math.PI / 2;
+    pivot.add(m);
+    scene.add(pivot);
+    return { pivot, m };
+  });
+  const lamps = LAMPS.map(([x, y]) => ({ x: x * 0.75, y }));
+  const LAMP_H = 7.37, BODY_H = 1.6;
   const ring = new THREE.Mesh(new THREE.RingGeometry(0.57, 0.63, 48), new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.6, depthWrite: false }));
   ring.rotation.x = -Math.PI / 2;
   scene.add(card, shadow, ring);
@@ -860,7 +836,7 @@ function buildPlayer(scene) {
   return {
     card, tex,
     update(r, g, p, hidden, cam) {
-      card.visible = shadow.visible = ring.visible = !hidden;
+      card.visible = shadow.visible = ring.visible = casts[0].pivot.visible = casts[1].pivot.visible = !hidden;
       if (hidden) return;
       const R = CT.R2D;
       const pos = R.proj(r, p.x, p.y, 0);
@@ -882,6 +858,17 @@ function buildPlayer(scene) {
       cam.getWorldQuaternion(q);
       card.quaternion.copy(q);
       shadow.position.copy(V(p.x, p.y, 0.015));
+      const by = lamps.map((l) => ({ l, d: Math.hypot(l.x - p.x, l.y - p.y) })).sort((a, b) => a.d - b.d);
+      casts.forEach(({ pivot, m }, i) => {
+        const { l, d } = by[i], len = Math.min(4, Math.max(0.7, BODY_H * d / (LAMP_H - BODY_H)));
+        pivot.position.copy(V(p.x, p.y, 0.013 - i * 0.001));
+        // (+z of the pivot points away from the lamp, along the ground)
+        pivot.rotation.y = Math.atan2(p.x - l.x, -(p.y - l.y));
+        m.position.set(0, 0, len * 0.5 - 0.05);
+        m.scale.set(0.9, len, 1);
+        // darker from the nearer lamp, and the shorter the shadow
+        m.material.opacity = Math.min(1, (i ? 0.75 : 1.1) * Math.min(1, 2.2 / len) + 0.15);
+      });
       ring.position.copy(V(p.x, p.y, 0.016));
       ring.material.color.set(p.ch.colors.glow);
     },
@@ -890,9 +877,48 @@ function buildPlayer(scene) {
 
 // ---------------- ball ----------------
 const TRAIL_MAX = 40;
+const UP3 = new THREE.Vector3(0, 1, 0);
+// A real ball for the 3D themes: optic-yellow felt with its white seam, lit
+// from the lamps above (dark underneath), turning with its spin, and no
+// neon glow; only a faint motion streak behind it so it still reads at pace.
+// The flat Cyberpunk court keeps its neon ball (render.js drawBall).
+function feltTex() {
+  const W = 256, H = 128;
+  let seed = 11;
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  return canvasTex(W, H, (g) => {
+    g.fillStyle = '#c8dc32'; g.fillRect(0, 0, W, H);
+    // fuzz: little light and dark flecks
+    for (let i = 0; i < 2600; i++) {
+      const l = rnd();
+      g.fillStyle = l > 0.5 ? `rgba(240,250,140,${0.25 * rnd()})` : `rgba(90,110,10,${0.25 * rnd()})`;
+      g.fillRect(rnd() * W, rnd() * H, 1 + rnd() * 2, 1 + rnd() * 2);
+    }
+    // the seam: a curve weaving round the ball (in this equirectangular map)
+    g.strokeStyle = 'rgba(245,245,235,0.95)'; g.lineWidth = 3.5;
+    g.beginPath();
+    for (let x = 0; x <= W; x += 2) {
+      const phi = (x / W) * Math.PI * 2, lat = 0.62 * Math.cos(2 * phi);
+      const y = H / 2 - (lat / Math.PI) * H;
+      if (x) g.lineTo(x, y); else g.moveTo(x, y);
+    }
+    g.stroke();
+  });
+}
+
 function buildBall(scene) {
-  const ball = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), new THREE.MeshBasicMaterial({ color: new THREE.Color(0.95, 1.15, 0.3) }));
+  const felt = new THREE.MeshBasicMaterial({ map: feltTex() });
+  felt.onBeforeCompile = (sh) => {
+    sh.vertexShader = 'varying vec3 vWN;\n' + sh.vertexShader.replace('#include <project_vertex>', '#include <project_vertex>\n vWN = normalize(mat3(modelMatrix) * normal);');
+    sh.fragmentShader = 'varying vec3 vWN;\n' + sh.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
+      // lit from the lamps overhead, a little from the city behind; dark underneath
+      vec3 n = normalize(vWN);
+      float lit = 0.22 + 0.95 * max(dot(n, normalize(vec3(0.25, 1.0, 0.35))), 0.0) + 0.15 * max(-n.z, 0.0);
+      diffuseColor.rgb *= lit;`);
+  };
+  const ball = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 14), felt);
   const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: radial, color: 0xc6ff2e, transparent: true, opacity: 0.22, blending: THREE.AdditiveBlending, depthWrite: false }));
+  glow.visible = false;
   const shadow = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: blob, transparent: true, opacity: 0.5, depthWrite: false }));
   shadow.rotation.x = -Math.PI / 2;
   // the trail: a ribbon facing the camera, fading towards its tail
@@ -911,11 +937,20 @@ function buildBall(scene) {
     mesh: ball,
     update(r, g, cam) {
       const b = g.ball, on = !!b.active;
-      ball.visible = glow.visible = shadow.visible = trail.visible = on;
+      ball.visible = shadow.visible = trail.visible = on;
+      glow.visible = false;
       if (!on) return;
       const f = r.cam.f;
       cp.copy(cam.position);
+      const was = ball.position.clone();
       ball.position.copy(V(b.pos.x, b.pos.y, b.pos.z));
+      // turn with its travel, as if rolling forward (topspin), so the seam moves
+      d.copy(ball.position).sub(was);
+      const moved = d.length();
+      if (moved > 1e-4 && moved < 2) {
+        side.crossVectors(UP3, d).normalize();
+        ball.rotateOnWorldAxis(side, Math.min(0.9, moved / 0.033 * 0.35));
+      }
       const dist = Math.max(0.4, ball.position.distanceTo(cp));
       // as in the flat view: twice life size, never under 2.8 px, capped up
       // close. In VR the floor is 0.9 px and the glow follows the true size:
@@ -948,8 +983,9 @@ function buildBall(scene) {
         const w = Math.max((r.vr ? 0.6 : 1.5) * dd / f, 0.08) * fr * 0.5;
         tpos[i * 6] = a.x + side.x * w; tpos[i * 6 + 1] = a.y + side.y * w; tpos[i * 6 + 2] = a.z + side.z * w;
         tpos[i * 6 + 3] = a.x - side.x * w; tpos[i * 6 + 4] = a.y - side.y * w; tpos[i * 6 + 5] = a.z - side.z * w;
-        const c = fr * 0.45 * (i < n ? 1 : 0);
-        for (const o of [0, 3]) { tcol[i * 6 + o] = 0.89 * c; tcol[i * 6 + o + 1] = 1.0 * c; tcol[i * 6 + o + 2] = 0.29 * c; }
+        // (a faint motion streak, not a neon tail)
+        const c = fr * fr * 0.16 * (i < n ? 1 : 0);
+        for (const o of [0, 3]) { tcol[i * 6 + o] = 0.85 * c; tcol[i * 6 + o + 1] = 0.9 * c; tcol[i * 6 + o + 2] = 0.55 * c; }
       }
       tg.attributes.position.needsUpdate = true;
       tg.attributes.color.needsUpdate = true;
@@ -1097,8 +1133,6 @@ function groundMaterial(ground, grain, LAMPS, wet) {
         float lod = rough * 9.0;
         // the night sky, and the baked city where the strip is (loadSkyline: -4..14 degrees)
         vec3 env = mix(vec3(0.02, 0.022, 0.05), vec3(0.09, 0.05, 0.11), exp(-rd.y * 6.0));
-        // (in the rain: the overcast sky, #0b0e17 overhead to #1c2235 low down, as overcastTex)
-        if (WET > 0) env = mix(vec3(0.0034, 0.0044, 0.0086), vec3(0.0116, 0.016, 0.0356), exp(-rd.y * 3.0)) * 1.6;
         if (WET > 0 && skyOn > 0.5) {
           float lat = degrees(asin(rd.y));
           vec2 su = vec2(atan(rd.x, -rd.z) / (2.0 * PI) + 0.5, (lat + 4.0) / 18.0);

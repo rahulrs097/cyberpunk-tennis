@@ -142,11 +142,13 @@ function loadNet() {
   return sandbox.CT.Net;
 }
 
-test('profiles: only a short clean name and a small PNG picture get through', () => {
+test('profiles: only a short clean name and a small PNG or JPEG picture get through', () => {
   const { cleanProfile } = loadNet();
   const png = 'data:image/png;base64,iVBORw0KGgo=';
   assert.deepEqual({ ...cleanProfile({ name: '  Neon\n  Rahul  ', pic: png }) }, { name: 'Neon Rahul', pic: png });
   assert.equal(cleanProfile({ name: 'A'.repeat(40) }).name.length, 16);
+  const jpg = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ==';
+  assert.equal(cleanProfile({ pic: jpg }).pic, jpg, 'the 96x96 JPEG pictures');
   assert.equal(cleanProfile({ pic: 'javascript:alert(1)' }).pic, '');
   assert.equal(cleanProfile({ pic: 'data:image/svg+xml;base64,PHN2Zz4=' }).pic, '', 'no SVG');
   assert.equal(cleanProfile({ pic: 'data:image/png;base64,' + 'A'.repeat(20000) }).pic, '', 'too big');

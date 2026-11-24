@@ -967,13 +967,10 @@
     playShot(CT.VR.autoShot(game, me, hold >= CT.VR.POWER_HOLD));
   }
 
-  // the countdown's beeps: [seconds before the moment to let go, pitch]
-  const VR_TICKS = [[0.5, 660], [0.25, 660], [0, 1320]];
-
   // VR is for matches; the tutorial's lessons need their hints on screen.
   function enterVR() {
     if (!vr) {
-      vr = { head: CT.VR.createHead(), wait: true, press: null, ignoreUp: false, pad: false, lastT: null };
+      vr = { head: CT.VR.createHead(), wait: true, press: null, ignoreUp: false, pad: false };
       CT.VR.startHead(vr.head);
       CT.VR.keepAwake(true);
       document.body.classList.add('vr');
@@ -1007,13 +1004,7 @@
     try { for (const gp of navigator.getGamepads ? navigator.getGamepads() : []) if (gp && gp.buttons[0] && gp.buttons[0].pressed) down = true; } catch (e) { /* no gamepads here */ }
     if (down !== vr.pad) { vr.pad = down; if (down) vrPress(); else vrRelease(); }
     v.charge = vr.press === null ? 0 : Math.min(1, (performance.now() - vr.press) / 1000 / CT.VR.POWER_HOLD);
-    // a countdown you can hear wherever you're looking: two ticks, then a
-    // higher one on the moment to let go
-    const hit = !paused && !vr.wait && !vr.home ? CT.VR.timeToHit(game, me, CT.incomingInfo(game, me)) : null;
-    if (hit && hit.reach && vr.lastT !== null) {
-      for (const [at, freq] of VR_TICKS) if (vr.lastT > at && hit.t <= at) blip(freq, 0.06, 'sine', 0.06);
-    }
-    vr.lastT = hit && hit.reach ? hit.t : null;
+    // (no countdown beeps before a shot: Rahul found them noisy, 2026-11-24)
     v.prompt = ''; v.sub = '';
     // held upright it isn't in a headset, so a button on the screen gets you out
     const upright = window.innerHeight > window.innerWidth;
@@ -1340,7 +1331,7 @@
   }
 
   // Your profile in the menu: a name box and a picture you pick, cut to a
-  // 32×32 square from its middle.
+  // 96×96 square from its middle.
   function saveProfile() {
     try { localStorage.setItem('ct.profile', JSON.stringify(profile)); } catch (e) { /* storage is optional */ }
   }
@@ -1360,7 +1351,10 @@
       g.imageSmoothingQuality = 'high';
       g.drawImage(img, (img.naturalWidth - side) / 2, (img.naturalHeight - side) / 2, side, side, 0, 0, S, S);
       URL.revokeObjectURL(url);
-      const p = CT.Net.cleanProfile({ name: profile.name, pic: c.toDataURL('image/png') });
+      // a JPEG, as good as fits the size limit (about 4-8 KB for a photo)
+      let pic = '';
+      for (const q of [0.88, 0.8, 0.7, 0.6, 0.5, 0.4]) { pic = c.toDataURL('image/jpeg', q); if (pic.length <= 12000) break; }
+      const p = CT.Net.cleanProfile({ name: profile.name, pic });
       if (!p.pic) return;
       profile = p;
       saveProfile();
@@ -1582,7 +1576,7 @@
     game = CT.createGame({ p0: 'octopus', p1: 'philosopher', timeScale: 0.6, control: ['cpu', 'cpu'], onEvent: () => {} });
     // (the court stands still behind the headset's menu: a rally seen through
     // a moving player's eyes, with nobody moving you, makes you feel sick)
-    if (keepVR) { vr.home = true; vr.end = null; vr.wait = false; vr.press = null; vr.lastT = null; }
+    if (keepVR) { vr.home = true; vr.end = null; vr.wait = false; vr.press = null; }
     applyZen();
     reloadIfNewBuild();
   }
