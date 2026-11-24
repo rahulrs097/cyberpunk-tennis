@@ -400,6 +400,8 @@
     const base = me === 0 ? -CT.COURT.HL : CT.COURT.HL;
     return Math.min(1, Math.abs(y - base) / (2 * CT.COURT.HL));
   }
+  // the game's sounds, in every mode (Rahul, 2026-11-24: only the zen ones,
+  // no neon blips): a real racket and ball, a net, quiet chimes for points
   function realSfx(kind, d) {
     if (!audio || muted) return;
     try {
@@ -618,7 +620,7 @@
       lineCallShown = false;
       rallyShots = d.kind === 'serve' ? 1 : rallyShots + 1;
       if (!tut && (rallyShots === LONG_RALLY || (d.perfect && d.side === me && /power|overhead/i.test(d.kind)))) CT.showBillboard(renderer, 'WOW', '#ff3fb4', 1.8);
-      if (zenOn()) realSfx('hit', d); else blip(d.kind === 'overhead' || d.kind === 'serve' ? 220 : 330, 0.07, 'square', 0.09, 140, soundAt(d));
+      realSfx('hit', d);
       if (d.side === me) {
         const kind = { fh: 'Forehand', bh: 'Backhand' }[d.wing];
         const label = d.kind === 'serve' ? 'Serve' : d.kind === 'overhead' ? 'Overhead' : d.kind === 'volley' ? kind + ' volley' : d.kind === 'power' ? 'Power ' + kind.toLowerCase() : d.kind === 'powerVolley' ? 'Power ' + kind.toLowerCase() + ' volley' : kind;
@@ -630,20 +632,20 @@
       }
       hintForState();
     } else if (type === 'bounce') {
-      if (zenOn()) realSfx('bounce', d); else blip(120, 0.05, 'sine', 0.07, 0, soundAt(d, true));
+      realSfx('bounce', d);
       if (net && net.role === 'guest') game.marks.push({ x: d.x, y: d.y, age: 0 });
     } else if (type === 'lineCall') {
       if (d.m > CLOSE_OUT || d.m < -CLOSE_IN) return;
       CT.showLineCall(renderer, d, 3);
       lineCallShown = true;
     } else if (type === 'net') {
-      if (zenOn()) realSfx('net', d); else blip(90, 0.12, 'sawtooth', 0.05, 0, soundAt(d));
+      realSfx('net', d);
     } else if (type === 'whiff') {
       if (d.side === me) showShot([{ text: d.reason, cls: 'bad' }]);
     } else if (type === 'fault') {
       if (boardScore()) CT.showBillboard(renderer, d.text === 'Net' || d.text === 'Serve clock' ? d.text.toUpperCase() : 'FAULT', '#ffc23d', 1.6);
       showMsg(d.text === 'Net' || d.text === 'Serve clock' ? d.text : 'Fault', 'Second serve', 'warn');
-      if (zenOn()) realSfx('fault', d); else blip(160, 0.2, 'sawtooth', 0.05, 90);
+      realSfx('fault', d);
     } else if (type === 'point') {
       if (tut) { onDrill({ ok: d.winner === me, text: d.winner === me ? 'Point' : d.text }); updateHud(); return; }
       const youWon = d.winner === me;
@@ -656,7 +658,7 @@
       setGhost(null);
       if (!seen && !net && d.result !== 'set' && tipNo < TIPS.length * 2) setHint(TIPS[tipNo++ % TIPS.length], true);
       if (word && !lineCallShown) CT.showBillboard(renderer, word[0], word[1], 2.6);
-      if (zenOn()) realSfx(youWon ? 'won' : 'lost', d); else blip(youWon ? 520 : 200, 0.25, 'triangle', 0.08, youWon ? 780 : 120);
+      realSfx(youWon ? 'won' : 'lost', d);
       updateHud();
     } else if (type === 'serveReady') {
       lineCallShown = false;
