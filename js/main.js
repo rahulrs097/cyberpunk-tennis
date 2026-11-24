@@ -56,6 +56,9 @@
   try { const v = localStorage.getItem('ct.gfx'); if (v in GFX) gfx = v; } catch (e) { /* storage is optional */ }
   // Theme: the neon Cyberpunk court, the 3D Concrete rooftop, or that rooftop in the rain
   const THEMES = ['cyberpunk', 'concrete', 'rain'];
+  // Ball: the neon ball (with its glow and tail) or a real felt one
+  let ballLook = 'neon';
+  try { if (localStorage.getItem('ct.ball') === 'real') ballLook = 'real'; } catch (e) { /* storage is optional */ }
   const THEME_NAME = { cyberpunk: 'Cyberpunk', concrete: 'Concrete 3D', rain: 'Rain 3D' };
   let theme = null;   // (none saved: Rain 3D for a new player, see below)
   try {
@@ -1872,6 +1875,13 @@
     CT.setTheme(renderer, value);
   }
 
+  function setBall(value) {
+    ballLook = value;
+    try { localStorage.setItem('ct.ball', value); } catch (e) { /* storage is optional */ }
+    document.querySelectorAll('[data-ball]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.ball === value)));
+    CT.setBall(renderer, value);
+  }
+
   // Lens spacing in mm, from Settings' - and + or the headset's menu; in VR
   // the eyes move at once
   function setLens(mm) {
@@ -2072,6 +2082,8 @@
       setTheme(order[(order.indexOf(theme) + 1) % order.length]);
     });
     setTheme(theme);
+    document.querySelectorAll('[data-ball]').forEach((b) => b.addEventListener('click', () => setBall(b.dataset.ball)));
+    setBall(ballLook);
     document.querySelectorAll('[data-vr-lens-step]').forEach((b) => b.addEventListener('click', () => setLens(vrFit.lens + Number(b.dataset.vrLensStep))));
     setLens(vrFit.lens);
     for (const key of ['fov', 'gfx']) {

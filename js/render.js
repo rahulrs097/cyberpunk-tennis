@@ -389,6 +389,9 @@
     if (r.want3d) load3d(r);
   }
 
+  // Settings' Ball: 'neon' (glowing, with a bright tail) or 'real' (felt, a seam, no glow)
+  function setBall(r, look) { r.realBall = look === 'real'; }
+
   // The 3D view is a separate module (and three.js), fetched the first time
   // it's picked. Until it's ready, or if the phone has no WebGL, the flat
   // view carries on.
@@ -1482,7 +1485,8 @@
       for (let i = 1; i < g.trail.length; i++) {
         const s = segment(r, [g.trail[i - 1].x, g.trail[i - 1].y, g.trail[i - 1].z], [g.trail[i].x, g.trail[i].y, g.trail[i].z]);
         if (!s) continue;
-        ctx.strokeStyle = `rgba(228,255,74,${(i / g.trail.length) * 0.45})`;
+        // (the real ball leaves only a faint streak)
+        ctx.strokeStyle = r.realBall ? `rgba(225,232,170,${(i / g.trail.length) ** 2 * 0.18})` : `rgba(228,255,74,${(i / g.trail.length) * 0.45})`;
         ctx.lineWidth = Math.max(r.vr ? 0.6 : 1.5, 0.08 * s[1].s) * (i / g.trail.length);
         ctx.beginPath(); ctx.moveTo(s[0].x, s[0].y); ctx.lineTo(s[1].x, s[1].y); ctx.stroke();
       }
@@ -1502,9 +1506,28 @@
       rad = Math.min(r.H * 0.04, Math.max(2.8, 0.075 * p.s));   // capped when it flies past your face
       gr = rad * 4;
     }
+    if (r.realBall) { drawRealBall(ctx, p.x, p.y, rad, g); return; }
     ctx.drawImage(glowSprite(r, PAL.ballGlow, 0.8), p.x - gr, p.y - gr, gr * 2, gr * 2);
     ctx.fillStyle = PAL.ball;
     ctx.beginPath(); ctx.arc(p.x, p.y, rad, 0, Math.PI * 2); ctx.fill();
+  }
+
+  // A real tennis ball: optic-yellow felt lit from above, dark underneath,
+  // and (when it's big enough to see) its white seam turning with the spin
+  function drawRealBall(ctx, x, y, rad, g) {
+    const gr = ctx.createRadialGradient(x - rad * 0.35, y - rad * 0.45, rad * 0.1, x, y, rad);
+    gr.addColorStop(0, '#e6f25a'); gr.addColorStop(0.6, '#b9cc2c'); gr.addColorStop(1, '#55600e');
+    ctx.fillStyle = gr;
+    ctx.beginPath(); ctx.arc(x, y, rad, 0, Math.PI * 2); ctx.fill();
+    if (rad < 3) return;
+    const a = (g.time || 0) * 9;
+    ctx.save();
+    ctx.beginPath(); ctx.arc(x, y, rad, 0, Math.PI * 2); ctx.clip();
+    ctx.strokeStyle = 'rgba(245,245,230,0.85)'; ctx.lineWidth = Math.max(0.8, rad * 0.12);
+    ctx.beginPath();
+    ctx.arc(x + Math.cos(a) * rad * 0.95, y + Math.sin(a) * rad * 0.95, rad * 0.75, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
   }
 
   function ringOnBall(r, b) {
@@ -2095,6 +2118,7 @@
   CT.setVR = setVR;
   CT.setQuality = setQuality;
   CT.setTheme = setTheme;
+  CT.setBall = setBall;
   CT.renderGame = render;
   // for js/render3d.js
   CT.R2D = { COURT, PAL, LAMPS, CARS, BOARD, BOARD_TEX, LOT_EDGE, LOT_BACK, STALL_IN, STALL_OUT, STALL_W, SPRITE_SCALE, hash, proj, sizeAt, playerPose, boardSource };

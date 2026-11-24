@@ -878,10 +878,10 @@ function buildPlayer(scene, LAMPS) {
 // ---------------- ball ----------------
 const TRAIL_MAX = 40;
 const UP3 = new THREE.Vector3(0, 1, 0);
-// A real ball for the 3D themes: optic-yellow felt with its white seam, lit
-// from the lamps above (dark underneath), turning with its spin, and no
-// neon glow; only a faint motion streak behind it so it still reads at pace.
-// The flat Cyberpunk court keeps its neon ball (render.js drawBall).
+// Settings' Ball: Neon (glowing, with a bright tail) or Real (r.realBall):
+// optic-yellow felt with its white seam, lit from the lamps above (dark
+// underneath), turning with its spin, no glow, only a faint motion streak
+// so it still reads at pace (the flat view's is render.js drawRealBall).
 function feltTex() {
   const W = 256, H = 128;
   let seed = 11;
@@ -916,9 +916,9 @@ function buildBall(scene) {
       float lit = 0.22 + 0.95 * max(dot(n, normalize(vec3(0.25, 1.0, 0.35))), 0.0) + 0.15 * max(-n.z, 0.0);
       diffuseColor.rgb *= lit;`);
   };
-  const ball = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 14), felt);
+  const neon = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.95, 1.15, 0.3) });
+  const ball = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 14), neon);
   const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: radial, color: 0xc6ff2e, transparent: true, opacity: 0.22, blending: THREE.AdditiveBlending, depthWrite: false }));
-  glow.visible = false;
   const shadow = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: blob, transparent: true, opacity: 0.5, depthWrite: false }));
   shadow.rotation.x = -Math.PI / 2;
   // the trail: a ribbon facing the camera, fading towards its tail
@@ -937,9 +937,11 @@ function buildBall(scene) {
     mesh: ball,
     update(r, g, cam) {
       const b = g.ball, on = !!b.active;
+      const real = !!r.realBall;
       ball.visible = shadow.visible = trail.visible = on;
-      glow.visible = false;
+      glow.visible = on && !real;
       if (!on) return;
+      ball.material = real ? felt : neon;
       const f = r.cam.f;
       cp.copy(cam.position);
       const was = ball.position.clone();
@@ -983,9 +985,10 @@ function buildBall(scene) {
         const w = Math.max((r.vr ? 0.6 : 1.5) * dd / f, 0.08) * fr * 0.5;
         tpos[i * 6] = a.x + side.x * w; tpos[i * 6 + 1] = a.y + side.y * w; tpos[i * 6 + 2] = a.z + side.z * w;
         tpos[i * 6 + 3] = a.x - side.x * w; tpos[i * 6 + 4] = a.y - side.y * w; tpos[i * 6 + 5] = a.z - side.z * w;
-        // (a faint motion streak, not a neon tail)
-        const c = fr * fr * 0.16 * (i < n ? 1 : 0);
-        for (const o of [0, 3]) { tcol[i * 6 + o] = 0.85 * c; tcol[i * 6 + o + 1] = 0.9 * c; tcol[i * 6 + o + 2] = 0.55 * c; }
+        // (the real ball leaves a faint motion streak, the neon one a bright tail)
+        const c = (real ? fr * fr * 0.16 : fr * 0.45) * (i < n ? 1 : 0);
+        const tc = real ? [0.85, 0.9, 0.55] : [0.89, 1.0, 0.29];
+        for (const o of [0, 3]) { tcol[i * 6 + o] = tc[0] * c; tcol[i * 6 + o + 1] = tc[1] * c; tcol[i * 6 + o + 2] = tc[2] * c; }
       }
       tg.attributes.position.needsUpdate = true;
       tg.attributes.color.needsUpdate = true;
