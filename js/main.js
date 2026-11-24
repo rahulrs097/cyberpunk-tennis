@@ -57,7 +57,7 @@
   // Theme: the neon Cyberpunk court, the 3D Concrete rooftop, or that rooftop in the rain
   const THEMES = ['cyberpunk', 'concrete', 'rain'];
   // Ball: the neon ball (with its glow and tail) or a real felt one
-  // Settings' Storm (Rain 3D): lightning, thunder and clouds that follow the
+  // Settings' Storm toggle (Rain 3D): lightning, thunder and clouds that follow the
   // play, and rain that starts with the first winner. Off: it just rains.
   let stormOn = true;
   try { stormOn = localStorage.getItem('ct.storm') !== '0'; } catch (e) { /* storage is optional */ }
@@ -1990,7 +1990,7 @@
   function setStorm(on) {
     stormOn = on;
     try { localStorage.setItem('ct.storm', on ? '1' : '0'); } catch (e) { /* storage is optional */ }
-    document.querySelectorAll('[data-storm]').forEach((b) => b.setAttribute('aria-pressed', String((b.dataset.storm === 'on') === on)));
+    document.querySelectorAll('[data-storm]').forEach((b) => b.setAttribute('aria-pressed', String(on)));
     // switched off mid-match: the sky clears and it rains
     if (!on) { CT.stormEvent(renderer, 'reset', 1); updateRain(); }
   }
@@ -1998,7 +1998,7 @@
   function setBall(value) {
     ballLook = value;
     try { localStorage.setItem('ct.ball', value); } catch (e) { /* storage is optional */ }
-    document.querySelectorAll('[data-ball]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.ball === value)));
+    document.querySelectorAll('[data-ball]').forEach((b) => b.setAttribute('aria-pressed', String(value === 'real')));
     CT.setBall(renderer, value);
   }
 
@@ -2202,9 +2202,9 @@
       setTheme(order[(order.indexOf(theme) + 1) % order.length]);
     });
     setTheme(theme);
-    document.querySelectorAll('[data-ball]').forEach((b) => b.addEventListener('click', () => setBall(b.dataset.ball)));
+    document.querySelectorAll('[data-ball]').forEach((b) => b.addEventListener('click', () => setBall(ballLook === 'real' ? 'neon' : 'real')));
     setBall(ballLook);
-    document.querySelectorAll('[data-storm]').forEach((b) => b.addEventListener('click', () => setStorm(b.dataset.storm === 'on')));
+    document.querySelectorAll('[data-storm]').forEach((b) => b.addEventListener('click', () => setStorm(!stormOn)));
     setStorm(stormOn);
     document.querySelectorAll('[data-vr-lens-step]').forEach((b) => b.addEventListener('click', () => setLens(vrFit.lens + Number(b.dataset.vrLensStep))));
     setLens(vrFit.lens);
