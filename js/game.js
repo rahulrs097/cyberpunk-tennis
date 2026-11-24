@@ -641,7 +641,11 @@
     // auto-moving players need a moment to read the shot; a human moving
     // themselves already has their own reaction time
     // (returners split-step as the server swings, so they react faster)
-    if (autoMoves(g, other.side)) { other.reactUntil = g.time + (b.isServe ? 0.08 : g.control[other.side] === 'cpu' ? g.cpuReact : REACT); cpuPlan(g, other); }
+    // (Philosopher reads the ball a little quicker than Octopus: ch.react)
+    if (autoMoves(g, other.side)) {
+      other.reactUntil = g.time + (b.isServe ? 0.08 : (g.control[other.side] === 'cpu' ? g.cpuReact : REACT) + (other.ch.react || 0));
+      cpuPlan(g, other);
+    }
     if (autoMoves(g, p.side)) cpuRecover(g, p);
     emit(g, 'hit', info);
   }
