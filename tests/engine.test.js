@@ -517,17 +517,19 @@ test('pushing every ball back down the middle is no better than mixing it up aga
   assert.ok(games.push <= games.varied, JSON.stringify(games));
 });
 
-test('the two characters are a fair match as CPU opponents: each wins a fair share of the games at Club and Pro', () => {
+// (points, not games: over six sets the games won swing too much to tell a
+// real imbalance from a run of close games)
+test('the two characters are a fair match as CPU opponents: each wins a fair share of the points at Club and Pro', () => {
   for (const level of ['club', 'pro']) {
-    const games = { octopus: 0, philosopher: 0 };
+    const points = { octopus: 0, philosopher: 0 };
     for (let i = 0; i < 6; i++) {
       const CT = loadEngine(300 + i);
       const chars = i % 2 ? ['octopus', 'philosopher'] : ['philosopher', 'octopus'];
       const r = playSet(CT, { p0: chars[0], p1: chars[1], control: ['cpu', 'cpu'], extra: levelOpts(CT, level) });
-      games[chars[0]] += r.games[0]; games[chars[1]] += r.games[1];
+      for (const k in r.stats.endings) points[chars[+k.split(':')[1]]] += r.stats.endings[k];
     }
-    const share = games.octopus / (games.octopus + games.philosopher);
-    assert.ok(share > 0.4 && share < 0.6, level + ' ' + JSON.stringify(games));
+    const share = points.octopus / (points.octopus + points.philosopher);
+    assert.ok(share > 0.4 && share < 0.6, level + ' ' + JSON.stringify(points));
   }
 });
 
