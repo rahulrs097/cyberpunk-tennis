@@ -79,7 +79,7 @@ export function create3d(r, R) {
   buildLamps(plain, R.LAMPS, LITE);
   buildCars(plain, R.CARS, hash);
   const court = buildCourt(scene, C);
-  buildNet(scene, C);
+  const net = buildNet(scene, C);
   buildLampGlows(scene, R.LAMPS);
   // the Rain 3D theme (r.wet): falling rain, and the baked ground and lines
   // swapped for wet ones once the bake has loaded
@@ -131,6 +131,9 @@ export function create3d(r, R) {
     }
     baked.deck.material = on ? wet.ground : baked.dry;
     for (const m of court.meshes) m.material = on ? wet.lines : court.mat;
+    if (on && !wet.posts) wet.posts = buildMetalPosts(scene, C);
+    if (wet) wet.posts.visible = on;
+    for (const p of net.posts) p.visible = !on;
     if (!on) return;
     const u = wet.ground.uniforms;
     u.camPos.value.copy(cam.position);
@@ -504,11 +507,14 @@ function buildNet(scene, C) {
   const pts = [];
   for (let i = 0; i <= N; i++) { const x = -X + (2 * X * i) / N; pts.push(new THREE.Vector3(x, top(x), 0)); }
   scene.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 64, 0.03, 6), tapeMat));
+  const posts = [];
   for (const x of [-X, X]) {
     const p = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, top(x) + 0.05, 10), tapeMat);
     p.position.set(x, (top(x) + 0.05) / 2, 0);
     scene.add(p);
+    posts.push(p);
   }
+  return { posts };
 }
 
 function buildLamps(scene, LAMPS, lite) {
@@ -764,7 +770,7 @@ function puddleTex(C) {
 }
 
 function wetGroundMaterial(ground, grain, LAMPS) {
-  const G = GROUND;
+  const G = GROUND, C = CT.R2D.COURT;
   const lamps = LAMPS.map(([x, y]) => V(x * 0.75, y, 7.37));
   // the baked lamp colours: amber, and the pink and cyan paled half to white (scene.py)
   const cols = LAMPS.map(([, , c]) => { const k = new THREE.Color(c); return /ffb04a/i.test(c) ? k : k.lerp(new THREE.Color(1, 1, 1), 0.5); });
@@ -788,7 +794,7 @@ function wetGroundMaterial(ground, grain, LAMPS) {
   } u.puddles = { value: puddleTex(CT.R2D.COURT) };
   const m = new THREE.ShaderMaterial({
     uniforms: u, fog: true,
-    defines: { NL: lamps.length, GX0: G.x0.toFixed(2), GW: (G.x1 - G.x0).toFixed(2), GY0: G.y0.toFixed(2), GH: (G.y1 - G.y0).toFixed(2),
+    defines: { DW: C.DW.toFixed(3), SW: C.SW.toFixed(3), HL: C.HL.toFixed(3), SL: C.SL.toFixed(3), NL: lamps.length, GX0: G.x0.toFixed(2), GW: (G.x1 - G.x0).toFixed(2), GY0: G.y0.toFixed(2), GH: (G.y1 - G.y0).toFixed(2),
       CW: CARD_W.toFixed(2), CUP: CARD_UP.toFixed(2), CDN: CARD_DOWN.toFixed(2), SKY_DIM: '0.55', BOARD_K: BOARD_DIM.toFixed(2) },
     vertexShader: `
       varying vec2 vUv; varying vec3 vW;
@@ -811,6 +817,7 @@ function wetGroundMaterial(ground, grain, LAMPS) {
       varying vec2 vUv; varying vec3 vW;
       #include <fog_pars_fragment>
       const float PI = 3.14159265;
+      const vec3 LINE_GLOW = vec3(0.35, 0.9, 1.0);
       float h21(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
       // a hit on a flat card (plane z = 0 of its own space): rgba, a = 0 for a miss
       vec4 hitCard(mat4 inv, vec3 p, vec3 d, vec2 lo, vec2 hi, sampler2D tex, float lod) {
@@ -888,6 +895,17 @@ function wetGroundMaterial(ground, grain, LAMPS) {
         float fr = 0.02 + 0.98 * pow(1.0 - cosv, 5.0);
         float k = mix(0.12 + 0.45 * fr, 0.35 + 0.65 * fr, pud);
         vec3 col = base * mix(0.62, 0.22, pud) * mix(1.0, 0.8, damp) * (1.0 - k * 0.5) + env * k + spec * mix(0.1 + 0.3 * fr, 1.0, pud);
+        // the glowing court lines: a cyan halo on the wet ground round each
+        // line, and a longer smear of it where the water mirrors it
+        vec2 c = vec2(vW.x, -vW.z), a = abs(c);
+        float d = 1e3;
+        d = min(d, max(abs(a.x - DW), a.y - HL));
+        d = min(d, max(abs(a.x - SW), a.y - HL));
+        d = min(d, max(abs(a.y - HL), a.x - DW));
+        d = min(d, max(abs(a.y - SL), a.x - SW));
+        d = min(d, max(a.x, a.y - SL));
+        d = max(d, 0.0);
+        col += LINE_GLOW * (exp(-d / 0.08) * 0.5 + exp(-d / 0.35) * 0.16) * mix(0.7, 1.6, max(pud, damp * 0.5));
         gl_FragColor = vec4(col, 1.0);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
@@ -900,6 +918,7 @@ function wetGroundMaterial(ground, grain, LAMPS) {
 // wet court lines: worn and patchy, the paint darker where the grain is deep
 function wetLines(mat, grain, asphalt) {
   const m = mat.clone();
+  m.color = new THREE.Color(0.9, 1.5, 1.7);   // pale cyan, above white so the glow pass catches it
   m.onBeforeCompile = (sh) => {
     sh.uniforms.grain = { value: grain };
     sh.uniforms.asphalt = { value: asphalt };
@@ -951,4 +970,43 @@ function buildRain(scene) {
   lines.renderOrder = 2;
   scene.add(lines);
   return lines;
+}
+
+// the net posts in the rain: thick steel, worn grey paint over rust
+// (Poly Haven's Rusty Metal 04, CC0), a cap and a foot plate. The baked
+// rooftop has no live lights, so the shine is a painted matcap: amber from
+// the lamps above, cyan from the lines below.
+function buildMetalPosts(scene, C) {
+  const rust = new THREE.TextureLoader().load('models/rain/post_rust.jpg');
+  rust.colorSpace = THREE.SRGBColorSpace;
+  rust.wrapS = rust.wrapT = THREE.RepeatWrapping;
+  rust.repeat.set(0.6, 1.2);
+  const cap = canvasTex(128, 128, (g) => {
+    g.fillStyle = '#05070a'; g.fillRect(0, 0, 128, 128);
+    const ball = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+    ball.addColorStop(0, '#b4bac4'); ball.addColorStop(0.65, '#6a7079'); ball.addColorStop(1, '#262a30');
+    g.fillStyle = ball; g.beginPath(); g.arc(64, 64, 63, 0, Math.PI * 2); g.fill();
+    const hot = (x, y, r, c) => { const h = g.createRadialGradient(x, y, 0, x, y, r); h.addColorStop(0, c); h.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = h; g.fillRect(0, 0, 128, 128); };
+    hot(48, 26, 26, 'rgba(255,214,150,0.95)');   // the lamps
+    hot(90, 40, 18, 'rgba(255,170,210,0.5)');
+    hot(70, 116, 30, 'rgba(110,230,255,0.55)');  // the lines' glow from below
+  });
+  // (brighter than white: the rust map is dark, and the rooftop is dim)
+  const mat = new THREE.MeshMatcapMaterial({ matcap: cap, map: rust, color: new THREE.Color(2.6, 2.6, 2.6) });
+  const grp = new THREE.Group();
+  for (const x of [-C.POST_X, C.POST_X]) {
+    const h = CT.netHeight(x) + 0.12;
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.08, h, 16), mat);
+    pole.position.set(x, h / 2, 0);
+    const top = new THREE.Mesh(new THREE.CylinderGeometry(0.085, 0.075, 0.05, 16), mat);
+    top.position.set(x, h + 0.02, 0);
+    const foot = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.18, 0.03, 16), mat);
+    foot.position.set(x, 0.015, 0);
+    // the winder on the side of the post
+    const wind = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.12, 0.08), mat);
+    wind.position.set(x + Math.sign(x) * 0.08, h * 0.55, 0);
+    grp.add(pole, top, foot, wind);
+  }
+  scene.add(grp);
+  return grp;
 }
