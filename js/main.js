@@ -251,6 +251,7 @@
     master.connect(makeup).connect(audio.destination);
     CT.Music.setOn(musicOn);
     CT.Music.start(audio, master);
+    loadSamples();
   }
   function blip(freq, dur, type, gain, slide, at) {
     if (!audio || muted) return;
@@ -339,43 +340,37 @@
     src.connect(fl).connect(gn).connect(dest);
     src.start(t); src.stop(t + dur + 0.02);
   }
-  // A shaped noise burst: att seconds up, then down over dur, its filter
-  // sliding from f to f1, read from off seconds into the noise (so bursts
-  // played together don't sound alike).
-  function grain(t, o, dest) {
-    const src = audio.createBufferSource(), fl = audio.createBiquadFilter(), gn = audio.createGain();
-    src.buffer = noiseBuf();
-    fl.type = o.type; fl.Q.value = o.q;
-    fl.frequency.setValueAtTime(o.f, t);
-    if (o.f1) fl.frequency.exponentialRampToValueAtTime(o.f1, t + o.att + o.dur);
-    gn.gain.setValueAtTime(0.0001, t);
-    gn.gain.exponentialRampToValueAtTime(o.vol * SFX_GAIN, t + o.att);
-    gn.gain.exponentialRampToValueAtTime(0.0001, t + o.att + o.dur);
-    src.connect(fl).connect(gn).connect(dest);
-    src.start(t, o.off || 0); src.stop(t + o.att + o.dur + 0.02);
-  }
-  // A ball into a net: no hard knock (there's nothing solid to knock), but
-  // a soft cloth thud as the mesh takes it, a low whoomp as the net bellies
-  // out and swings back, and the cords rustling against each other. A ball
-  // that catches the top gets a dull slap of the tape too.
-  function netSound(t, d, dist, bus) {
-    const pace = CT.clamp(((d.kmh || 90) - 40) / 120, 0, 1);
-    const tape = d.tape || 0;
-    const v = (1 - dist * 0.5) * (0.55 + pace * 0.6);
-    grain(t, { att: 0.004, dur: 0.07, vol: 0.55 * v, type: 'lowpass', f: 420, f1: 140, q: 0.5 }, bus);            // the mesh takes the ball
-    grain(t + 0.01, { att: 0.03, dur: 0.22 + pace * 0.1, vol: 0.22 * v, type: 'bandpass', f: 480, f1: 170, q: 0.9, off: 0.11 }, bus);   // the net bellies out
-    // the cords rustle: a few faint ticks, thinning out as the net settles
-    // (spacing fixed by where it went in, so the same ball sounds the same)
-    const n = 5 + Math.round(pace * 3);
-    let at = 0.012, seed = Math.abs(Math.round((d.x || 0) * 37 + (d.z || 0) * 91)) + 7;
-    for (let i = 0; i < n; i++) {
-      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
-      const r = seed / 0x7fffffff;
-      grain(t + at, { att: 0.003, dur: 0.018 + r * 0.02, vol: 0.03 * v * Math.pow(0.78, i), type: 'bandpass',
-        f: 2200 + r * 1800, q: 1.6, off: 0.02 + r * 0.4 }, bus);
-      at += 0.022 + r * 0.04 + i * 0.006;
+  // Recorded sounds (in sound/), decoded once the audio starts. The net
+  // is a real tennis ball into a real net: two takes, played in turn.
+  const SAMPLES = { net: ['sound/net-1.wav', 'sound/net-2.wav'] };
+  const samples = {};
+  let netTake = 0;
+  function loadSamples() {
+    for (const k in SAMPLES) {
+      samples[k] = [];
+      SAMPLES[k].forEach((url, i) => {
+        fetch(url).then((r) => r.arrayBuffer())
+          .then((ab) => new Promise((ok, no) => audio.decodeAudioData(ab, ok, no)))
+          .then((buf) => { samples[k][i] = buf; })
+          .catch(() => { /* the sound is optional */ });
+      });
     }
-    if (tape > 0) grain(t, { att: 0.003, dur: 0.05, vol: 0.2 * v * tape, type: 'bandpass', f: 850, f1: 600, q: 0.8, off: 0.3 }, bus);   // the tape
+  }
+  function playSample(t, buf, vol, rate, dest) {
+    const src = audio.createBufferSource(), gn = audio.createGain();
+    src.buffer = buf; src.playbackRate.value = rate;
+    gn.gain.value = vol * SFX_GAIN;
+    src.connect(gn).connect(dest);
+    src.start(t);
+  }
+  // A ball into the net: the recording, louder and a touch brighter the
+  // harder it went in.
+  function netSound(t, d, dist, bus) {
+    const takes = (samples.net || []).filter(Boolean);
+    const pace = CT.clamp(((d.kmh || 90) - 40) / 120, 0, 1);
+    const v = (1 - dist * 0.5) * (0.5 + pace * 0.6);
+    if (!takes.length) { noisy(t, 0.08, 0.05 * v, 'lowpass', 900, 0.7, bus); return; }
+    playSample(t, takes[netTake++ % takes.length], 0.11 * v, 0.94 + pace * 0.12, bus);
   }
   function thump(t, f0, f1, dur, vol, dest) {
     const o = audio.createOscillator(), gn = audio.createGain();
