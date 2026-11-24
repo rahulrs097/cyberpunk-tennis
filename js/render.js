@@ -381,9 +381,11 @@
   }
 
   // Theme: 'cyberpunk' is the flat neon view drawn here; 'concrete' is the
-  // 3D rooftop (js/render3d.js). Graphics levels apply to both.
+  // 3D rooftop (js/render3d.js); 'rain' is that rooftop wet, with puddles
+  // and falling rain. Graphics levels apply to all of them.
   function setTheme(r, theme) {
-    r.want3d = theme === 'concrete';
+    r.want3d = theme === 'concrete' || theme === 'rain';
+    r.wet = theme === 'rain';
     if (r.want3d) load3d(r);
   }
 

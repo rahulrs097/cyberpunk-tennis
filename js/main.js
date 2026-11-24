@@ -54,8 +54,8 @@
   const GFX = { ...VR_GFX, max: 'max' };
   let gfx = 'auto';
   try { const v = localStorage.getItem('ct.gfx'); if (v in GFX) gfx = v; } catch (e) { /* storage is optional */ }
-  // Theme: the neon Cyberpunk court, or the 3D Concrete rooftop
-  const THEMES = ['cyberpunk', 'concrete'];
+  // Theme: the neon Cyberpunk court, the 3D Concrete rooftop, or that rooftop in the rain
+  const THEMES = ['cyberpunk', 'concrete', 'rain'];
   let theme = 'cyberpunk';
   try {
     const v = localStorage.getItem('ct.theme');

@@ -78,20 +78,25 @@ export function create3d(r, R) {
   buildDeck(plain, R);
   buildLamps(plain, R.LAMPS, LITE);
   buildCars(plain, R.CARS, hash);
-  buildCourt(scene, C);
+  const court = buildCourt(scene, C);
   buildNet(scene, C);
   buildLampGlows(scene, R.LAMPS);
+  // the Rain 3D theme (r.wet): falling rain, and the baked ground and lines
+  // swapped for wet ones once the bake has loaded
+  const rain = buildRain(scene);
+  let baked = null, skyTex = null, wet = null;
   if (!PLAIN) {
     // the lower graphics levels (and Auto on a modest phone) load the 2048 px bake: a quarter of the memory
     small = LITE || (!r.max && r.quality < 2);
-    loadBaked(scene, small).then(() => {
+    loadBaked(scene, small).then((b) => {
+      baked = b;
       scene.remove(plain);
       dispose(plain);   // free its meshes and textures on the GPU too
       gl.shadowMap.enabled = false;
       if (scene.environment) scene.environment.dispose();
       scene.environment = null;   // (only the plain cars' paint used it)
     }).catch((e) => console.warn('baked rooftop unavailable', e));
-    loadSkyline(scene).then(() => { scene.remove(skyline, moon); dispose(skyline); dispose(moon); })
+    loadSkyline(scene).then((t) => { skyTex = t; scene.remove(skyline, moon); dispose(skyline); dispose(moon); })
       .catch((e) => console.warn('baked skyline unavailable', e));
   }
   const board = buildBoard(scene, R);
@@ -112,6 +117,36 @@ export function create3d(r, R) {
       composer.addPass(bloom);
     }
     composer.addPass(new OutputPass());
+  }
+
+  // dry or wet; when wet, what the puddles mirror this frame
+  const tmpM = new THREE.Matrix4(), tmpQ = new THREE.Quaternion(), ONE = new THREE.Vector3(1, 1, 1), UP = new THREE.Vector3(0, 1, 0);
+  function makeWet(on, now) {
+    rain.visible = on;
+    if (on) rain.material.uniforms.time.value = (now / 1000) % 1000, rain.material.uniforms.cam.value.copy(cam.position);
+    if (!baked) return;
+    if (on && !wet) wet = { ground: wetGroundMaterial(baked.ground, baked.grain, R.LAMPS), lines: wetLines(court.mat, baked.grain) };
+    baked.deck.material = on ? wet.ground : baked.dry;
+    for (const m of court.meshes) m.material = on ? wet.lines : court.mat;
+    if (!on) return;
+    const u = wet.ground.uniforms;
+    u.camPos.value.copy(cam.position);
+    u.time.value = (now / 1000) % 1000;
+    u.sky.value = skyTex; u.skyOn.value = skyTex ? 1 : 0;
+    board.sign.updateWorldMatrix(true, false);
+    u.board.value = board.tex; u.boardInv.value.copy(board.sign.matrixWorld).invert();
+    u.boardOn.value = board.on(); u.boardSize.value.set(R.BOARD.w, R.BOARD.h);
+    players.forEach((pl, i) => {
+      const c = pl.card;
+      u.cardOn.value[i] = c.visible ? 1 : 0;
+      u['card' + i].value = pl.tex;
+      // the card stood upright, turned to the camera only round the vertical:
+      // a sprite tilted back with the camera would mirror leaning over
+      tmpQ.setFromAxisAngle(UP, Math.atan2(cam.position.x - c.position.x, cam.position.z - c.position.z));
+      u.cardInv.value[i].copy(tmpM.compose(c.position, tmpQ, ONE.clone().setScalar(c.scale.x))).invert();
+    });
+    u.ballOn.value = ball.mesh.visible ? 1 : 0;
+    u.ball.value.set(ball.mesh.position.x, ball.mesh.position.y, ball.mesh.position.z, ball.mesh.scale.x);
   }
 
   let level = null, levelKey = '';
@@ -144,6 +179,7 @@ export function create3d(r, R) {
       board.update(r, f);
       for (const p of g.players) players[p.side].update(r, g, p, r.view === 'first' && p.side === human, cam);
       ball.update(r, g, cam);
+      makeWet(!!r.wet, now);
       if (composer) composer.render(); else gl.render(scene, cam);
     },
   };
@@ -303,12 +339,15 @@ async function loadBaked(scene, small) {
   const grain = concreteTex();
   grain.wrapS = grain.wrapT = THREE.RepeatWrapping;
   grain.anisotropy = 4;
-  const deck = flat(new THREE.PlaneGeometry(G.x1 - G.x0, G.y1 - G.y0), bakedMaterial(ground, 0.85, 0, { map: grain, repeat: [(G.x1 - G.x0) / 2.5, (G.y1 - G.y0) / 2.5], amount: 0.4, desat: 0.15 }), (G.x0 + G.x1) / 2, (G.y0 + G.y1) / 2, 0);
+  // (the Rain theme's wet ground repeats this look: wetGroundMaterial)
+  const dry = bakedMaterial(ground, 0.85, 0, { map: grain, repeat: [(G.x1 - G.x0) / 2.5, (G.y1 - G.y0) / 2.5], amount: 0.4, desat: 0.15 });
+  const deck = flat(new THREE.PlaneGeometry(G.x1 - G.x0, G.y1 - G.y0), dry, (G.x0 + G.x1) / 2, (G.y0 + G.y1) / 2, 0);
   // the roof beyond the baked part, dark
   const beyond = flat(new THREE.PlaneGeometry(90, G.y1 - G.y0), new THREE.MeshBasicMaterial({ color: 0x07070b }), 0, (G.y0 + G.y1) / 2, -0.01);
   const mat = bakedMaterial(atlas);
   gltf.scene.traverse((o) => { if (o.isMesh) o.material = mat; });
   scene.add(beyond, deck, gltf.scene);
+  return { deck, dry, ground, grain };
 }
 
 // towers round the horizon, windows as an emissive texture
@@ -379,6 +418,7 @@ function loadSkyline(scene) {
     skirt.position.y = 5 + R * Math.sin(LAT0 * Math.PI / 180) - R * 0.495;
     skirt.renderOrder = -1;
     scene.add(skirt);
+    return t;
   });
 }
 
@@ -429,12 +469,16 @@ function buildCourt(scene, C) {
   const lines = [[-D, -L, D, -L, B], [-D, L, D, L, B], [-D, -L, -D, L], [D, -L, D, L], [-S, -L, -S, L], [S, -L, S, L],
     [-S, -C.SL, S, -C.SL], [-S, C.SL, S, C.SL], [0, -C.SL, 0, C.SL], [0, -L, 0, -L + 0.3], [0, L, 0, L - 0.3]];
   const mat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.85, 0.95, 1.0) });
+  const meshes = [];
   for (const [x1, y1, x2, y2, w0 = C.LW] of lines) {
     const w = Math.max(w0, 0.07);   // a touch wider than real, so far lines don't break up
     const len = Math.hypot(x2 - x1, y2 - y1) + w;
     const along = x1 === x2;
-    scene.add(flat(new THREE.PlaneGeometry(along ? w : len, along ? len : w), mat, (x1 + x2) / 2, (y1 + y2) / 2, 0.011));
+    const m = flat(new THREE.PlaneGeometry(along ? w : len, along ? len : w), mat, (x1 + x2) / 2, (y1 + y2) / 2, 0.011);
+    meshes.push(m);
+    scene.add(m);
   }
+  return { mat, meshes };
 }
 
 function buildNet(scene, C) {
@@ -534,8 +578,9 @@ function buildBoard(scene, R) {
   post.position.y = B.z / 2;
   grp.add(sign, post);
   scene.add(grp);
-  let lastSrc = null, lastKey;
+  let lastSrc = null, lastKey, lit = 1;
   return {
+    sign, tex, on: () => lit,
     update(r, f) {
       grp.position.copy(V(f * B.x, f * B.y, 0));
       // the sign's left end is at (u = 0) and it turns by B.turn, far end to the right
@@ -546,6 +591,7 @@ function buildBoard(scene, R) {
         lastSrc = src; lastKey = src.key;
       }
       mat.color.setScalar(BOARD_DIM * on);
+      lit = on;
     },
   };
 }
@@ -572,6 +618,7 @@ function buildPlayer(scene) {
   const q = new THREE.Quaternion();
   let drawn = -1e9;
   return {
+    card, tex,
     update(r, g, p, hidden, cam) {
       card.visible = shadow.visible = ring.visible = !hidden;
       if (hidden) return;
@@ -621,6 +668,7 @@ function buildBall(scene) {
   scene.add(ball, glow, shadow, trail);
   const cp = new THREE.Vector3(), a = new THREE.Vector3(), d = new THREE.Vector3(), side = new THREE.Vector3(), view = new THREE.Vector3();
   return {
+    mesh: ball,
     update(r, g, cam) {
       const b = g.ball, on = !!b.active;
       ball.visible = glow.visible = shadow.visible = trail.visible = on;
@@ -667,4 +715,224 @@ function buildBall(scene) {
       tg.attributes.color.needsUpdate = true;
     },
   };
+}
+
+// ---------------- rain (Settings > Theme > Rain 3D) ----------------
+// The baked rooftop, wet. The ground's light is baked, so the wet look is
+// a shader on top of that bake: wet asphalt is darker and a little glossy,
+// and puddles are dark mirrors. What they mirror is traced in the shader,
+// not drawn twice: the baked city (by direction), the billboard and the
+// players (a ray to their flat cards), the ball (a ray to a sphere) and the
+// lamp lenses (a glossy highlight). Rain falls round the camera, and drops
+// ring the puddles.
+const WET = { N: 6, card: 2 };
+
+// where the puddles are: value noise over the baked ground, deep spots
+// above 0.5. Fewer and smaller on the court, so the ball stays easy to read.
+function puddleTex(C) {
+  const G = GROUND, W = 1024, H = Math.round(W * (G.y1 - G.y0) / (G.x1 - G.x0));
+  let seed = 11;
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  const v = new Float32Array(W * H);
+  for (const [f, a] of [[8, 0.5], [17, 0.3], [35, 0.17], [70, 0.1], [150, 0.05]]) {
+    const fx = Math.round(f * 1.5), fy = Math.round(f * H / W * 1.5) + 1;
+    const g = Array.from({ length: (fx + 1) * (fy + 1) }, rnd);
+    const at = (i, j) => g[j * (fx + 1) + i];
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const px = (x / W) * fx, py = (y / H) * fy, i = Math.floor(px), j = Math.floor(py);
+      let tx = px - i, ty = py - j; tx = tx * tx * (3 - 2 * tx); ty = ty * ty * (3 - 2 * ty);
+      v[y * W + x] += ((at(i, j) * (1 - tx) + at(i + 1, j) * tx) * (1 - ty) + (at(i, j + 1) * (1 - tx) + at(i + 1, j + 1) * tx) * ty - 0.5) * a;
+    }
+  }
+  const t = canvasTex(W, H, (g) => {
+    const id = g.createImageData(W, H);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const gx = G.x0 + (x / W) * (G.x1 - G.x0), gy = G.y1 - (y / H) * (G.y1 - G.y0);
+      // inside the court (and a little round it), shallower
+      const cin = Math.max(0, 1 - Math.max(Math.abs(gx) - C.DW - 1, Math.abs(gy) - C.HL - 2, 0) / 2);
+      const d = v[y * W + x] * 1.6 + 0.5 - cin * 0.1;
+      const c = Math.max(0, Math.min(255, d * 255)), k = (y * W + x) * 4;
+      id.data[k] = id.data[k + 1] = id.data[k + 2] = c; id.data[k + 3] = 255;
+    }
+    g.putImageData(id, 0, 0);
+  }, false);
+  t.anisotropy = 4;
+  return t;
+}
+
+function wetGroundMaterial(ground, grain, LAMPS) {
+  const G = GROUND;
+  const lamps = LAMPS.map(([x, y]) => V(x * 0.75, y, 7.37));
+  // the baked lamp colours: amber, and the pink and cyan paled half to white (scene.py)
+  const cols = LAMPS.map(([, , c]) => { const k = new THREE.Color(c); return /ffb04a/i.test(c) ? k : k.lerp(new THREE.Color(1, 1, 1), 0.5); });
+  const u = THREE.UniformsUtils.merge([THREE.UniformsLib.fog, {
+    camPos: { value: new THREE.Vector3() },
+    time: { value: 0 },
+    lampPos: { value: lamps }, lampCol: { value: cols },
+    sky: { value: null }, skyOn: { value: 0 },
+    board: { value: null }, boardInv: { value: new THREE.Matrix4() }, boardOn: { value: 0 }, boardSize: { value: new THREE.Vector2(1, 1) },
+    card0: { value: null }, card1: { value: null },
+    cardInv: { value: [new THREE.Matrix4(), new THREE.Matrix4()] }, cardOn: { value: [0, 0] },
+    ball: { value: new THREE.Vector4(0, -10, 0, 0.05) }, ballOn: { value: 0 },
+  }]);
+  u.map = { value: ground }; u.grain = { value: grain }; u.puddles = { value: puddleTex(CT.R2D.COURT) };
+  const m = new THREE.ShaderMaterial({
+    uniforms: u, fog: true,
+    defines: { NL: lamps.length, GX0: G.x0.toFixed(2), GW: (G.x1 - G.x0).toFixed(2), GY0: G.y0.toFixed(2), GH: (G.y1 - G.y0).toFixed(2),
+      CW: CARD_W.toFixed(2), CUP: CARD_UP.toFixed(2), CDN: CARD_DOWN.toFixed(2), SKY_DIM: '0.55', BOARD_K: BOARD_DIM.toFixed(2) },
+    vertexShader: `
+      varying vec2 vUv; varying vec3 vW;
+      #include <fog_pars_vertex>
+      void main() {
+        vUv = uv;
+        vec4 w = modelMatrix * vec4(position, 1.0);
+        vW = w.xyz;
+        vec4 mvPosition = viewMatrix * w;
+        gl_Position = projectionMatrix * mvPosition;
+        #include <fog_vertex>
+      }`,
+    fragmentShader: `
+      uniform sampler2D map, grain, puddles, sky, board, card0, card1;
+      uniform vec3 camPos; uniform float time;
+      uniform vec3 lampPos[NL]; uniform vec3 lampCol[NL];
+      uniform float skyOn, boardOn; uniform mat4 boardInv; uniform vec2 boardSize;
+      uniform mat4 cardInv[2]; uniform float cardOn[2];
+      uniform vec4 ball; uniform float ballOn;
+      varying vec2 vUv; varying vec3 vW;
+      #include <fog_pars_fragment>
+      const float PI = 3.14159265;
+      float h21(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+      // a hit on a flat card (plane z = 0 of its own space): rgba, a = 0 for a miss
+      vec4 hitCard(mat4 inv, vec3 p, vec3 d, vec2 lo, vec2 hi, sampler2D tex, float lod) {
+        vec3 o = (inv * vec4(p, 1.0)).xyz, r = mat3(inv) * d;
+        if (abs(r.z) < 1e-4) return vec4(0.0);
+        float t = -o.z / r.z;
+        vec2 q = o.xy + r.xy * t;
+        if (t < 0.0 || q.x < lo.x || q.y < lo.y || q.x > hi.x || q.y > hi.y) return vec4(0.0);
+        return textureLod(tex, (q - lo) / (hi - lo), lod);
+      }
+      void main() {
+        // the baked ground, as the dry theme draws it (bakedMaterial: gain 0.85, grain 0.4, desat 0.15)
+        vec3 base = texture2D(map, vUv).rgb * 0.85;
+        vec2 gUv = vUv * vec2(GW / 2.5, GH / 2.5);
+        float g0 = texture2D(grain, gUv).r;
+        base *= 1.0 + (g0 - 0.5) * 0.8;
+        base = mix(base, vec3(dot(base, vec3(0.3, 0.59, 0.11))), 0.15);
+        // how deep the water is here; the grain's pits fill first
+        float deep = texture2D(puddles, vUv).r - (g0 - 0.5) * 0.12;
+        float pud = smoothstep(0.64, 0.7, deep);
+        float damp = smoothstep(0.4, 0.66, deep);
+        // the surface's tilt: rough asphalt from the grain, flat water with rain rings
+        // (from a softer mip, so the grain doesn't sparkle and shimmer as the camera moves)
+        float e = 1.5 / 512.0, gc = texture2D(grain, gUv, 1.5).r;
+        float gx = texture2D(grain, gUv + vec2(e, 0.0), 1.5).r - gc, gy = texture2D(grain, gUv + vec2(0.0, e), 1.5).r - gc;
+        vec3 n = normalize(vec3(-gx * 3.5, 1.0, gy * 3.5));
+        vec2 gp = vW.xz * 2.5;   // rings: one drop per 40 cm cell, a ring every 0.8 s or so
+        vec2 cell = floor(gp), f = fract(gp) - 0.5;
+        float ph = h21(cell), age = fract(time * 1.3 + ph);
+        vec2 off = vec2(h21(cell + 7.1), h21(cell + 3.7)) - 0.5;
+        float dr = length(f - off * 0.5), rad = age * 0.45;
+        float ring = sin(clamp((dr - rad) * 40.0, -PI, PI)) * (1.0 - age) * step(abs(dr - rad), 0.08);
+        vec3 nw = normalize(vec3((f - off * 0.5).x / max(dr, 1e-3) * ring * 0.12, 1.0, (f - off * 0.5).y / max(dr, 1e-3) * ring * 0.12));
+        n = normalize(mix(n, nw, pud));
+        float rough = mix(0.22, 0.03, pud);
+        // what the surface mirrors
+        vec3 v = normalize(vW - camPos);
+        vec3 rd = reflect(v, n);
+        rd.y = max(rd.y, 0.002);
+        float lod = rough * 9.0;
+        // the night sky, and the baked city where the strip is (loadSkyline: -4..14 degrees)
+        vec3 env = mix(vec3(0.02, 0.022, 0.05), vec3(0.09, 0.05, 0.11), exp(-rd.y * 6.0));
+        if (skyOn > 0.5) {
+          float lat = degrees(asin(rd.y));
+          vec2 su = vec2(atan(rd.x, -rd.z) / (2.0 * PI) + 0.5, (lat + 4.0) / 18.0);
+          if (su.y < 1.0) { vec4 s = textureLod(sky, su, lod); env = mix(env, s.rgb * SKY_DIM, s.a); }
+        }
+        if (boardOn > 0.0) {
+          vec4 b = hitCard(boardInv, vW, rd, -boardSize * 0.5, boardSize * 0.5, board, lod);
+          env = mix(env, b.rgb * BOARD_K * boardOn, b.a);
+        }
+        if (cardOn[0] > 0.5) { vec4 c = hitCard(cardInv[0], vW, rd, vec2(-CW * 0.5, -CDN), vec2(CW * 0.5, CUP), card0, lod * 0.5); env = mix(env, c.rgb, c.a); }
+        if (cardOn[1] > 0.5) { vec4 c = hitCard(cardInv[1], vW, rd, vec2(-CW * 0.5, -CDN), vec2(CW * 0.5, CUP), card1, lod * 0.5); env = mix(env, c.rgb, c.a); }
+        if (ballOn > 0.5) {
+          vec3 oc = vW - ball.xyz;
+          float bb = dot(oc, rd), cc = dot(oc, oc) - ball.w * ball.w * mix(4.0, 1.0, pud);
+          if (bb < 0.0 && bb * bb > cc) env = vec3(0.95, 1.15, 0.3) * mix(0.6, 1.0, pud);
+        }
+        // the lamp lenses: a glossy highlight each (GGX)
+        vec3 spec = vec3(0.0);
+        float a2 = rough * rough * rough * rough + 1e-5;
+        for (int i = 0; i < NL; i++) {
+          vec3 l = lampPos[i] - vW;
+          float dl = length(l); l /= dl;
+          vec3 h = normalize(l - v);
+          float nh = max(dot(n, h), 0.0), q = nh * nh * (a2 - 1.0) + 1.0;
+          spec += lampCol[i] * (a2 / (PI * q * q)) * max(dot(n, l), 0.0) * 40.0 / (dl * dl);
+        }
+        // more mirror at a glancing look (Fresnel); water mirrors more than wet asphalt
+        float cosv = max(dot(n, -v), 0.0);
+        float fr = 0.02 + 0.98 * pow(1.0 - cosv, 5.0);
+        float k = mix(0.18 + 0.6 * fr, 0.35 + 0.65 * fr, pud);
+        vec3 col = base * mix(0.62, 0.22, pud) * mix(1.0, 0.8, damp) * (1.0 - k * 0.5) + env * k + spec * mix(0.15 + 0.35 * fr, 1.0, pud);
+        gl_FragColor = vec4(col, 1.0);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+        #include <fog_fragment>
+      }`,
+  });
+  return m;
+}
+
+// wet court lines: worn and patchy, the paint darker where the grain is deep
+function wetLines(mat, grain) {
+  const m = mat.clone();
+  m.onBeforeCompile = (sh) => {
+    sh.uniforms.grain = { value: grain };
+    sh.vertexShader = 'varying vec3 vW;\n' + sh.vertexShader.replace('#include <project_vertex>', '#include <project_vertex>\n vW = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+    sh.fragmentShader = 'uniform sampler2D grain;\nvarying vec3 vW;\n' + sh.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
+      float patchy = smoothstep(0.38, 0.62, texture2D(grain, vW.xz / 7.0).r);
+      float fine = texture2D(grain, vW.xz / 0.9).r;
+      diffuseColor.rgb *= mix(0.4, 0.95, patchy) * (0.7 + fine * 0.6);`);
+  };
+  return m;
+}
+
+// rain: thin streaks in a 24 m box that moves with the camera; the falling
+// is done on the GPU, so it costs one draw call
+function buildRain(scene) {
+  const N = 1400, BOX = 24, TOP = 12, LEN = 0.55;
+  const pos = new Float32Array(N * 6), seed = new Float32Array(N * 2 * 4);
+  let s = 3;
+  const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647);
+  for (let i = 0; i < N; i++) {
+    const x = rnd() * BOX, z = rnd() * BOX, y = rnd() * TOP, sp = 0.8 + rnd() * 0.4;
+    for (let k = 0; k < 2; k++) { pos.set([x, y + k * LEN, z], i * 6 + k * 3); seed.set([x, y, z, sp], i * 8 + k * 4); }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('seed', new THREE.BufferAttribute(seed, 4));
+  const mat = new THREE.ShaderMaterial({
+    uniforms: { time: { value: 0 }, cam: { value: new THREE.Vector3() } },
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+    vertexShader: `
+      attribute vec4 seed; uniform float time; uniform vec3 cam; varying float vA;
+      void main() {
+        float top = position.y - seed.y;   // 0 at the streak's foot, LEN at its head
+        vec3 p = vec3(seed.x, seed.y, seed.z);
+        // fall at 9 m/s, slanting a little, wrapped in a box round the camera
+        p.y = mod(p.y - time * 9.0 * seed.w, ${TOP.toFixed(1)});
+        p.x += p.y * 0.08;
+        p.xz = mod(p.xz - cam.xz + ${(BOX / 2).toFixed(1)}, ${BOX.toFixed(1)}) + cam.xz - ${(BOX / 2).toFixed(1)};
+        p.y += top;
+        vec4 mv = viewMatrix * vec4(p, 1.0);
+        vA = (1.0 - smoothstep(6.0, ${(BOX / 2).toFixed(1)}, length(mv.xyz))) * smoothstep(0.6, 2.0, length(mv.xyz)) * (0.4 + top * 1.2);
+        gl_Position = projectionMatrix * mv;
+      }`,
+    fragmentShader: `varying float vA; void main() { gl_FragColor = vec4(vec3(0.55, 0.62, 0.75) * vA * 0.32, 1.0); }`,
+  });
+  const lines = new THREE.LineSegments(geo, mat);
+  lines.frustumCulled = false;
+  lines.renderOrder = 2;
+  scene.add(lines);
+  return lines;
 }
