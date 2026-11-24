@@ -259,6 +259,7 @@
     CT.Music.setOn(musicOn);
     CT.Music.start(audio, master);
     loadSamples();
+    updateRain();
   }
   function blip(freq, dur, type, gain, slide, at) {
     if (!audio || muted) return;
@@ -401,6 +402,37 @@
     const take = (samples.rumble || [])[0];
     if (!take) return;
     try { playSample(audio.currentTime + 0.3, take, 0.3, 0.9 + Math.random() * 0.15, master); } catch (e) { /* audio is optional */ }
+  }
+
+  // Rain 3D's rain: a steady recording, looped under everything while the
+  // wet court is showing (Rahul: the silence felt wrong). Fetched the first
+  // time it's needed; it fades in and out with the theme and the sound switch.
+  const RAIN_URL = 'sound/rain-loop.mp3', RAIN_VOL = 0.55;
+  let rainGain = null, rainAsked = false;
+  function updateRain() {
+    if (!audio) return;
+    const on = theme === 'rain' && !muted;
+    if (on && !rainAsked) {
+      rainAsked = true;
+      rainGain = audio.createGain();
+      rainGain.gain.value = 0;
+      rainGain.connect(master);
+      fetch(RAIN_URL).then((r) => r.arrayBuffer())
+        .then((ab) => new Promise((ok, no) => audio.decodeAudioData(ab, ok, no)))
+        .then((buf) => {
+          const src = audio.createBufferSource();
+          // (Freesound 238431 PhilllChabbb, CC0: 30 s cut to loop with a crossfade,
+          // padded 50 ms each side so the loop never lands on the mp3's edges)
+          src.buffer = buf; src.loop = true;
+          src.loopStart = 0.05; src.loopEnd = Math.max(0.1, buf.duration - 0.05);
+          src.connect(rainGain);
+          src.start(0, 0.05);
+          updateRain();
+        })
+        .catch(() => { /* the sound is optional */ });
+      return;
+    }
+    if (rainGain) rainGain.gain.setTargetAtTime(on ? RAIN_VOL : 0, audio.currentTime, 0.6);
   }
 
   function playSample(t, buf, vol, rate, dest) {
@@ -1901,6 +1933,7 @@
     muted = !on;
     try { localStorage.setItem('ct.sfx', on ? '1' : '0'); } catch (e) { /* storage is optional */ }
     document.querySelectorAll('[data-sfx]').forEach((b) => b.setAttribute('aria-pressed', String(on)));
+    updateRain();
   }
 
   let quitArmed = 0;   // when Quit was first tapped in an online match
@@ -1940,6 +1973,7 @@
     document.querySelectorAll('[data-theme]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.theme === value)));
     $('courtPill').textContent = 'Court: ' + THEME_NAME[value];
     CT.setTheme(renderer, value);
+    updateRain();
   }
 
   function setBall(value) {
