@@ -104,6 +104,7 @@ export function create3d(r, R) {
   const ball = buildBall(scene);
 
   const cam = new THREE.PerspectiveCamera(50, 1, 0.3, 2400);
+  const storm = buildStorm(scene, cam, hash);
   // the composer draws into a multisampled target, so edges stay smooth
   let composer, bloom;
   function makeComposer(w, h, dpr, samples) {
@@ -206,6 +207,7 @@ export function create3d(r, R) {
       for (const p of g.players) players[p.side].update(r, g, p, r.view === 'first' && p.side === human, cam);
       ball.update(r, g, cam);
       makeWet(!!r.wet, now, r);
+      storm.update(r, now, f, sky.stars, !!r.wet);
       if (composer) composer.render(); else gl.render(scene, cam);
     },
   };
@@ -291,6 +293,7 @@ function buildSky(scene, hash) {
   const sg = new THREE.BufferGeometry();
   sg.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
   const stars = new THREE.Points(sg, new THREE.PointsMaterial({ color: 0xe6ebff, size: 1.3, sizeAttenuation: false, fog: false, transparent: true, opacity: 0.75 }));
+  stars.renderOrder = -3;   // (behind the storm's clouds and the city)
   scene.add(stars);
   // the moon, ahead and to the right, a little above the skyline
   const dir = V(Math.sin(0.45), Math.cos(0.45), 0).normalize();
@@ -304,6 +307,165 @@ function buildSky(scene, hash) {
   const g = new THREE.Group(); g.add(moon, halo);
   scene.remove(moon, halo); scene.add(g);
   return { moon: g, dome, stars };
+}
+
+// ---------------- Rain 3D's storm ----------------
+// Clouds that roll in as winners pile up, lightning just after a winner and
+// a faint flash over everything (render.js stormEvent says when). Clouds:
+// one dome with a tiling noise seen as a flat layer overhead, so it
+// thickens towards the horizon. Nothing here is drawn in a clear sky.
+function cloudTex(hash) {
+  const N = 256, v = new Float32Array(N * N);
+  for (const [f, a] of [[4, 0.5], [8, 0.25], [16, 0.14], [32, 0.07], [64, 0.04]]) {
+    const g = Array.from({ length: f * f }, (_, i) => hash(i * 1.37 + f * 7.1));
+    const at = (i, j) => g[((j % f + f) % f) * f + ((i % f + f) % f)];
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+      const fx = (x / N) * f, fy = (y / N) * f, i = Math.floor(fx), j = Math.floor(fy);
+      let tx = fx - i, ty = fy - j; tx = tx * tx * (3 - 2 * tx); ty = ty * ty * (3 - 2 * ty);
+      v[y * N + x] += a * ((at(i, j) * (1 - tx) + at(i + 1, j) * tx) * (1 - ty) + (at(i, j + 1) * (1 - tx) + at(i + 1, j + 1) * tx) * ty);
+    }
+  }
+  const t = canvasTex(N, N, (c) => {
+    const im = c.createImageData(N, N);
+    for (let i = 0; i < N * N; i++) { const k = Math.max(0, Math.min(255, (v[i] - 0.1) * 255 / 0.85)); im.data[i * 4] = im.data[i * 4 + 1] = im.data[i * 4 + 2] = k; im.data[i * 4 + 3] = 255; }
+    c.putImageData(im, 0, 0);
+  }, false);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  return t;
+}
+
+// a strike's envelope: a bright stroke and a few return strokes, about half
+// a second; for someone who asked their phone for less motion, one soft swell
+const PULSES = [[0, 1], [0.07, 0.55], [0.19, 0.85], [0.34, 0.35]];
+function flashAt(t, calm) {
+  if (t < 0) return 0;
+  if (calm) return t < 0.8 ? 0.45 * Math.sin(Math.PI * t / 0.8) : 0;
+  let e = 0;
+  for (const [s, a] of PULSES) if (t >= s) e += a * Math.exp(-(t - s) / 0.045);
+  return Math.min(1, e);
+}
+
+function buildStorm(scene, cam, hash) {
+  const grp = new THREE.Group();
+  grp.visible = false;
+  scene.add(grp);
+  const u = {
+    map: { value: cloudTex(hash) }, cover: { value: 0 }, drift: { value: 0 },
+    flash: { value: 0 }, flashDir: { value: new THREE.Vector3(0, 0.3, -1).normalize() },
+  };
+  const clouds = new THREE.Mesh(new THREE.SphereGeometry(950, 48, 16, 0, Math.PI * 2, 0, THREE.MathUtils.degToRad(88)), new THREE.ShaderMaterial({
+    uniforms: u, transparent: true, depthWrite: false, side: THREE.BackSide, fog: false,
+    vertexShader: 'varying vec3 vDir; void main() { vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+    fragmentShader: `uniform sampler2D map; uniform float cover, drift, flash; uniform vec3 flashDir; varying vec3 vDir;
+      void main() {
+        // the layer seen as a flat ceiling, so it bunches up towards the horizon
+        vec2 p = vDir.xz / (vDir.y + 0.12) * 0.22 + vec2(drift, drift * 0.35);
+        float n = texture2D(map, p).r * 0.7 + texture2D(map, p * 2.7 + 0.3).r * 0.3;
+        float a = smoothstep(1.0 - cover * 1.15, 1.15 - cover * 1.15, n) * smoothstep(0.02, 0.16, vDir.y);
+        // dark, a little purple from the city below; lit from inside by a strike
+        vec3 c = mix(vec3(0.075, 0.045, 0.1), vec3(0.03, 0.032, 0.05), smoothstep(0.08, 0.5, vDir.y)) * (0.35 + 1.3 * n * n);
+        float near = pow(max(dot(vDir, flashDir), 0.0), 6.0);
+        c += flash * vec3(0.5, 0.55, 0.8) * (0.06 + 1.3 * near) * n * n * 1.6;
+        gl_FragColor = vec4(c, a * 0.96);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }`,
+  }));
+  clouds.renderOrder = -2;   // after the stars, before the city strip
+  grp.add(clouds);
+
+  // the bolt: a jagged ribbon from the cloud base to the city, rebuilt each strike
+  const boltMat = new THREE.MeshBasicMaterial({ color: hdr(0xdfe6ff, 5), transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false, side: THREE.DoubleSide });
+  const bolt = new THREE.Mesh(new THREE.BufferGeometry(), boltMat);
+  bolt.frustumCulled = false;
+  bolt.renderOrder = 2;
+  grp.add(bolt);
+  const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: radial, color: 0x9fb0ff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+  grp.add(glow);
+  function makeBolt(dir, dist, seed) {
+    let k = seed * 13.1;
+    const rnd = () => hash(k += 1.618) - 0.5;
+    const side = new THREE.Vector3(-dir.z, 0, dir.x);   // across the view
+    // a far strike is shorter and finer on the screen; it goes down into the city, never onto a roof near us
+    const far = (dist - 150) / 550;
+    const top = dist * (0.42 - 0.2 * far), bot = 2 + dist * 0.02, w = 0.3 + dist * 0.0015;
+    const pos = [];
+    const strand = (from, to, n, width, wander) => {
+      let prev = from.clone();
+      for (let i = 1; i <= n; i++) {
+        const t = i / n;
+        const p = from.clone().lerp(to, t);
+        if (i < n) p.addScaledVector(side, rnd() * wander).y += rnd() * wander * 0.3;
+        const ww = width * (1 - t * 0.5);
+        const a0 = prev.clone().addScaledVector(side, -ww), a1 = prev.clone().addScaledVector(side, ww);
+        const b0 = p.clone().addScaledVector(side, -ww), b1 = p.clone().addScaledVector(side, ww);
+        pos.push(...a0.toArray(), ...a1.toArray(), ...b1.toArray(), ...a0.toArray(), ...b1.toArray(), ...b0.toArray());
+        if (i === Math.round(n * 0.35) || i === Math.round(n * 0.6)) branch.push(p.clone());
+        prev = p;
+      }
+    };
+    const branch = [];
+    const start = dir.clone().multiplyScalar(dist).setY(top), end = dir.clone().multiplyScalar(dist).setY(bot);
+    end.addScaledVector(side, rnd() * dist * 0.15);
+    strand(start, end, 14, w, dist * 0.05);
+    for (const b of branch.slice(0, 2)) {
+      const to = b.clone().addScaledVector(side, rnd() * dist * 0.25).setY(b.y - (top - bot) * (0.2 + 0.15 * (rnd() + 0.5)));
+      strand(b, to, 6, w * 0.45, dist * 0.03);
+    }
+    bolt.geometry.dispose();
+    bolt.geometry = new THREE.BufferGeometry();
+    bolt.geometry.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    glow.position.copy(start);
+    glow.scale.setScalar(dist * 0.5);
+  }
+
+  // a faint wash of light over the whole view in the flash, in front of the camera
+  const wash = new THREE.Mesh(new THREE.PlaneGeometry(4, 4), new THREE.MeshBasicMaterial({ color: 0xb8c4ff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthTest: false, depthWrite: false, fog: false, toneMapped: false }));
+  wash.position.z = -0.5;
+  wash.renderOrder = 10;
+  wash.visible = false;
+  cam.add(wash);
+  scene.add(cam);
+
+  let cur = null, lastT = 0;
+  return {
+    update(r, now, f, stars, on) {
+      const s = r.storm;
+      grp.visible = on && !!s && (s.cover > 0.005 || s.clouds > 0 || !!cur);
+      wash.visible = false;
+      stars.material.opacity = 0.75;
+      if (!on || !s) return;
+      const t = now / 1000, dt = Math.min(0.1, Math.max(0, t - lastT));
+      lastT = t;
+      // the clouds roll in (or drift off) over a few seconds
+      s.cover += (s.clouds - s.cover) * Math.min(1, dt * 0.35);
+      u.cover.value = s.cover;
+      u.drift.value = (t * 0.004) % 100;
+      stars.material.opacity = 0.75 * (1 - Math.min(1, s.cover * 1.4));
+      if (s.strikes.length && t >= s.strikes[0].at) {
+        cur = s.strikes.shift();
+        // somewhere ahead over the city, left or right of the far end
+        const a = (hash(cur.n * 3.7 + 1) - 0.5) * 0.8;
+        cur.dir = V(Math.sin(a) * f, Math.cos(a) * f, 0).normalize();
+        makeBolt(cur.dir, cur.dist, cur.n + 1);
+        u.flashDir.value.copy(cur.dir).setY(0.35).normalize();
+      }
+      let e = 0;
+      if (cur) {
+        const age = t - cur.at;
+        e = flashAt(age, CT.CALM);
+        if (age > 1) cur = null;
+      }
+      const k = cur ? 1 - (cur.dist - 150) / 550 * 0.6 : 0;   // a near strike lights more
+      u.flash.value = e * k;
+      boltMat.opacity = Math.min(1, e * 1.6);
+      bolt.visible = !!cur;
+      glow.material.opacity = e * 0.6;
+      glow.visible = !!cur;
+      wash.visible = e > 0.01;
+      wash.material.opacity = e * k * (r.vr ? 0.035 : 0.06);
+    },
+  };
 }
 
 // a soft glow round each lamp head, which bloom can't make on its own on a small screen

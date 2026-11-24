@@ -363,6 +363,46 @@
       });
     }
   }
+  // Rain 3D's thunder: real recordings (CC0, Freesound 672776 DaniloSFX and
+  // 436794 roboroo for the cracks, 404842 hifijohn for the distant rumble),
+  // fetched the first time a Rain 3D match starts
+  const THUNDER = { crack: ['sound/thunder-crack-1.mp3', 'sound/thunder-crack-2.mp3'], rumble: ['sound/thunder-rumble.mp3'] };
+  let thunderAsked = false, crackTake = 0;
+  function loadThunder() {
+    if (thunderAsked || !audio) return;
+    thunderAsked = true;
+    for (const k in THUNDER) {
+      samples[k] = [];
+      THUNDER[k].forEach((url, i) => {
+        fetch(url).then((r) => r.arrayBuffer())
+          .then((ab) => new Promise((ok, no) => audio.decodeAudioData(ab, ok, no)))
+          .then((buf) => { samples[k][i] = buf; })
+          .catch(() => { /* the sound is optional */ });
+      });
+    }
+  }
+  // a strike `dist` m away: the crack arrives at the speed of sound, and a
+  // far one is quieter and duller (the air takes the top off it)
+  function thunder(dist) {
+    if (!audio || muted) return;
+    const takes = (samples.crack || []).filter(Boolean);
+    if (!takes.length) return;
+    try {
+      const t = audio.currentTime + dist / 343, far = CT.clamp((dist - 150) / 550, 0, 1);
+      const lp = audio.createBiquadFilter();
+      lp.type = 'lowpass'; lp.frequency.value = 9000 - far * 7800;
+      lp.connect(master);
+      playSample(t, takes[crackTake++ % takes.length], 0.5 - far * 0.3, 1, lp);
+    } catch (e) { /* audio is optional */ }
+  }
+  // an unforced error: the sky grumbles, low and far off
+  function rumble() {
+    if (!audio || muted) return;
+    const take = (samples.rumble || [])[0];
+    if (!take) return;
+    try { playSample(audio.currentTime + 0.3, take, 0.3, 0.9 + Math.random() * 0.15, master); } catch (e) { /* audio is optional */ }
+  }
+
   function playSample(t, buf, vol, rate, dest) {
     const src = audio.createBufferSource(), gn = audio.createGain();
     src.buffer = buf; src.playbackRate.value = rate;
@@ -570,6 +610,25 @@
   const BOARD_BEATEN = ['OUCH', '#ff3fb4'];
   const LONG_RALLY = 8;   // shots in a rally that get a WOW
   let rallyShots = 0;
+  // Rain 3D's storm follows the play: a winner or ace brings lightning (closer
+  // for an ace, a smash or a power shot) and builds the clouds, an unforced
+  // error only rumbles (render.js stormEvent)
+  let lastHit = null;
+  function stormPoint(d) {
+    if (theme !== 'rain') return;
+    loadThunder();
+    const h = lastHit || {};
+    lastHit = null;
+    if (d.text === 'Ace' || d.text === 'Winner') {
+      const near = d.text === 'Ace' ? 0.75 : /overhead|power/i.test(h.kind || '') ? 1 : CT.clamp(((h.kmh || 90) - 70) / 90, 0.15, 0.7);
+      thunder(CT.stormEvent(renderer, 'strike', near));
+      return;
+    }
+    CT.stormEvent(renderer, 'point');
+    // (a miss under pressure, stretched, jammed or on the run, is forced: no rumble)
+    const unforced = d.text === 'Double fault' || ((d.text === 'Out' || d.text === 'Net') && h.kind && h.kind !== 'serve' && !h.stretched && !h.note);
+    if (unforced) rumble();
+  }
   // Close calls go up on the billboard as a close-up of the ball's mark
   // against the line: outs that missed by up to CLOSE_OUT (m), ins that kept no more
   // than CLOSE_IN of the ball on the line. They stay up over the point's word.
@@ -619,6 +678,7 @@
     if (type === 'hit') {
       lineCallShown = false;
       rallyShots = d.kind === 'serve' ? 1 : rallyShots + 1;
+      lastHit = d;
       if (!tut && (rallyShots === LONG_RALLY || (d.perfect && d.side === me && /power|overhead/i.test(d.kind)))) CT.showBillboard(renderer, 'WOW', '#ff3fb4', 1.8);
       realSfx('hit', d);
       if (d.side === me) {
@@ -659,6 +719,7 @@
       if (!seen && !net && d.result !== 'set' && tipNo < TIPS.length * 2) setHint(TIPS[tipNo++ % TIPS.length], true);
       if (word && !lineCallShown) CT.showBillboard(renderer, word[0], word[1], 2.6);
       realSfx(youWon ? 'won' : 'lost', d);
+      stormPoint(d);
       updateHud();
     } else if (type === 'serveReady') {
       lineCallShown = false;
@@ -1648,6 +1709,10 @@
     // a room code box left focused would keep the on-screen keyboard live
     if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
     const inVR = view === 'vr' && !cfg.drill;
+    // a new match starts under clear stars
+    CT.stormEvent(renderer, 'reset');
+    lastHit = null;
+    if (theme === 'rain') loadThunder();
     goFullscreen(inVR ? 'landscape' : 'portrait');
     showFull(isFullscreen());   // turns on when the browser says it went full screen
     CT.Music.setPlaying(true);

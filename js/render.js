@@ -389,6 +389,23 @@
     if (r.want3d) load3d(r);
   }
 
+  // Rain 3D's storm, driven by the play (Rahul, 2026-11-24). A match starts
+  // under clear stars; each winner or ace adds cloud and brings a lightning
+  // strike just after the point, and every point lets a little cloud drift
+  // away, so a run of errors clears the sky again. `near` (0-1): how
+  // emphatic the shot was, so how close the strike. Returns the strike's
+  // distance in metres (for the thunder's delay), or 0.
+  function stormEvent(r, kind, near) {
+    const s = r.storm || (r.storm = { clouds: 0, cover: 0, strikes: [], n: 0 });
+    if (kind === 'reset') { s.clouds = 0; s.cover = 0; s.strikes.length = 0; return 0; }
+    s.clouds = Math.max(0, s.clouds - 0.08);
+    if (kind !== 'strike') return 0;
+    s.clouds = Math.min(1, s.clouds + 0.3);
+    const dist = 700 - 550 * Math.max(0, Math.min(1, near));
+    s.strikes.push({ at: performance.now() / 1000 + 0.12, dist, n: s.n++ });
+    return dist;
+  }
+
   // Settings' Ball: 'neon' (glowing, with a bright tail) or 'real' (felt, a seam, no glow)
   function setBall(r, look) { r.realBall = look === 'real'; }
 
@@ -2175,6 +2192,8 @@
   CT.setQuality = setQuality;
   CT.setTheme = setTheme;
   CT.setBall = setBall;
+  CT.stormEvent = stormEvent;
+  CT.CALM = CALM;
   CT.renderGame = render;
   // for js/render3d.js
   CT.R2D = { COURT, PAL, LAMPS, CARS, BOARD, BOARD_TEX, LOT_EDGE, LOT_BACK, STALL_IN, STALL_OUT, STALL_W, SPRITE_SCALE, hash, proj, sizeAt, playerPose, boardSource };
