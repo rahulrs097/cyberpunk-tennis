@@ -363,7 +363,12 @@ async function loadBaked(scene, small, R) {
   const dry = bakedMaterial(ground, 0.85, 0, { map: grain, repeat: [(G.x1 - G.x0) / 2.5, (G.y1 - G.y0) / 2.5], amount: 0.4, desat: 0.15 });
   const deck = flat(new THREE.PlaneGeometry(G.x1 - G.x0, G.y1 - G.y0), dry, (G.x0 + G.x1) / 2, (G.y0 + G.y1) / 2, 0);
   // the roof beyond the baked part, dark
-  const beyond = flat(new THREE.PlaneGeometry(90, G.y1 - G.y0), new THREE.MeshBasicMaterial({ color: 0x07070b }), 0, (G.y0 + G.y1) / 2, -0.01);
+  // (only either side of the bake: a plane under the whole deck fought it for
+  // depth, as dark bands flickering past the net where the screen's depth
+  // buffer is coarse, as it is on phones at Smooth, which draws straight to it)
+  const dark = new THREE.MeshBasicMaterial({ color: 0x07070b });
+  const side = 45 + G.x0, beyond = new THREE.Group();
+  for (const x of [-45 + side / 2, 45 - side / 2]) beyond.add(flat(new THREE.PlaneGeometry(side, G.y1 - G.y0), dark, x, (G.y0 + G.y1) / 2, 0));
   const mat = bakedMaterial(atlas);
   gltf.scene.traverse((o) => { if (o.isMesh) o.material = mat; });
   scene.add(beyond, deck, gltf.scene);
