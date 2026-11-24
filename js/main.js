@@ -57,6 +57,10 @@
   // Theme: the neon Cyberpunk court, the 3D Concrete rooftop, or that rooftop in the rain
   const THEMES = ['cyberpunk', 'concrete', 'rain'];
   // Ball: the neon ball (with its glow and tail) or a real felt one
+  // Settings' Storm (Rain 3D): lightning, thunder and clouds that follow the
+  // play, and rain that starts with the first winner. Off: it just rains.
+  let stormOn = true;
+  try { stormOn = localStorage.getItem('ct.storm') !== '0'; } catch (e) { /* storage is optional */ }
   let ballLook = 'neon';
   try { if (localStorage.getItem('ct.ball') === 'real') ballLook = 'real'; } catch (e) { /* storage is optional */ }
   const THEME_NAME = { cyberpunk: 'Cyberpunk', concrete: 'Concrete 3D', rain: 'Rain 3D' };
@@ -411,7 +415,8 @@
   let rainGain = null, rainAsked = false;
   function updateRain() {
     if (!audio) return;
-    const on = theme === 'rain' && !muted;
+    // (with the storm on, a match is dry until the first winner's lightning)
+    const on = theme === 'rain' && !muted && !(renderer.storm && renderer.storm.rain === 0);
     if (on && !rainAsked) {
       rainAsked = true;
       rainGain = audio.createGain();
@@ -432,7 +437,7 @@
         .catch(() => { /* the sound is optional */ });
       return;
     }
-    if (rainGain) rainGain.gain.setTargetAtTime(on ? RAIN_VOL : 0, audio.currentTime, 0.6);
+    if (rainGain) rainGain.gain.setTargetAtTime(on ? RAIN_VOL : 0, audio.currentTime, on ? 1.4 : 0.6);
   }
 
   function playSample(t, buf, vol, rate, dest) {
@@ -647,13 +652,14 @@
   // error only rumbles (render.js stormEvent)
   let lastHit = null;
   function stormPoint(d) {
-    if (theme !== 'rain') return;
+    if (theme !== 'rain' || !stormOn) return;
     loadThunder();
     const h = lastHit || {};
     lastHit = null;
     if (d.text === 'Ace' || d.text === 'Winner') {
       const near = d.text === 'Ace' ? 0.75 : /overhead|power/i.test(h.kind || '') ? 1 : CT.clamp(((h.kmh || 90) - 70) / 90, 0.15, 0.7);
       thunder(CT.stormEvent(renderer, 'strike', near));
+      updateRain();   // (the first one brings the rain)
       return;
     }
     CT.stormEvent(renderer, 'point');
@@ -1651,6 +1657,9 @@
     if (typeof note !== 'string') note = '';
     $('menuNote').textContent = note;
     $('menuNote').hidden = !note;
+    // behind the menu it just rains
+    CT.stormEvent(renderer, 'reset', 1);
+    updateRain();
     $('tutBtn').hidden = seen;
     // nothing from the match is left showing through the menu
     $('msg').hidden = true; msgTimer = 0;
@@ -1741,8 +1750,10 @@
     // a room code box left focused would keep the on-screen keyboard live
     if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
     const inVR = view === 'vr' && !cfg.drill;
-    // a new match starts under clear stars
-    CT.stormEvent(renderer, 'reset');
+    // a new match starts under clear stars, dry until the first winner (a
+    // lesson or practice, or the storm switched off: raining from the start)
+    CT.stormEvent(renderer, 'reset', stormOn && !cfg.drill ? 0 : 1);
+    updateRain();
     lastHit = null;
     if (theme === 'rain') loadThunder();
     goFullscreen(inVR ? 'landscape' : 'portrait');
@@ -1976,6 +1987,14 @@
     updateRain();
   }
 
+  function setStorm(on) {
+    stormOn = on;
+    try { localStorage.setItem('ct.storm', on ? '1' : '0'); } catch (e) { /* storage is optional */ }
+    document.querySelectorAll('[data-storm]').forEach((b) => b.setAttribute('aria-pressed', String((b.dataset.storm === 'on') === on)));
+    // switched off mid-match: the sky clears and it rains
+    if (!on) { CT.stormEvent(renderer, 'reset', 1); updateRain(); }
+  }
+
   function setBall(value) {
     ballLook = value;
     try { localStorage.setItem('ct.ball', value); } catch (e) { /* storage is optional */ }
@@ -2185,6 +2204,8 @@
     setTheme(theme);
     document.querySelectorAll('[data-ball]').forEach((b) => b.addEventListener('click', () => setBall(b.dataset.ball)));
     setBall(ballLook);
+    document.querySelectorAll('[data-storm]').forEach((b) => b.addEventListener('click', () => setStorm(b.dataset.storm === 'on')));
+    setStorm(stormOn);
     document.querySelectorAll('[data-vr-lens-step]').forEach((b) => b.addEventListener('click', () => setLens(vrFit.lens + Number(b.dataset.vrLensStep))));
     setLens(vrFit.lens);
     for (const key of ['fov', 'gfx']) {

@@ -131,7 +131,9 @@ export function create3d(r, R) {
     // Smooth has no glow pass); here the rain thins with it, and Cardboard VR,
     // drawing every frame twice, gets the least
     const lite = !!r.vr || r.quality === 0;
-    rain.geometry.setDrawRange(0, 2 * Math.round(RAIN_N * (r.vr ? 0.35 : r.quality === 0 ? 0.45 : r.quality === 1 ? 0.7 : 1)));
+    // (and in a match with the storm on, the rain only starts with the first winner's lightning)
+    const pour = r.storm ? r.storm.pour : 1;
+    rain.geometry.setDrawRange(0, 2 * Math.round(RAIN_N * pour * (r.vr ? 0.35 : r.quality === 0 ? 0.45 : r.quality === 1 ? 0.7 : 1)));
     if (on) rain.material.uniforms.time.value = (now / 1000) % 1000, rain.material.uniforms.cam.value.copy(cam.position);
     board.setWet(on);
     if (!baked) return;
@@ -157,6 +159,7 @@ export function create3d(r, R) {
     u.camPos.value.copy(cam.position);
     if (!on) return;
     u.time.value = (now / 1000) % 1000;
+    u.rainAmt.value = r.storm ? r.storm.pour : 1;
     u.sky.value = skyTex; u.skyOn.value = skyTex ? 1 : 0;
     board.sign.updateWorldMatrix(true, false);
     u.board.value = board.tex; u.boardInv.value.copy(board.sign.matrixWorld).invert();
@@ -439,6 +442,7 @@ function buildStorm(scene, cam, hash) {
       lastT = t;
       // the clouds roll in (or drift off) over a few seconds
       s.cover += (s.clouds - s.cover) * Math.min(1, dt * 0.35);
+      s.pour += (s.rain - s.pour) * Math.min(1, dt * 0.45);   // the rain sets in over a few seconds
       u.cover.value = s.cover;
       u.drift.value = (t * 0.004) % 100;
       stars.material.opacity = 0.75 * (1 - Math.min(1, s.cover * 1.4));
@@ -1252,7 +1256,7 @@ function groundMaterial(ground, grain, LAMPS, wet) {
   const cols = LAMPS.map(([, , c]) => { const k = new THREE.Color(c); return /ffb04a/i.test(c) ? k : k.lerp(new THREE.Color(1, 1, 1), 0.5); });
   const u = THREE.UniformsUtils.merge([THREE.UniformsLib.fog, {
     camPos: { value: new THREE.Vector3() },
-    time: { value: 0 },
+    time: { value: 0 }, rainAmt: { value: 1 },
     lampPos: { value: lamps }, lampCol: { value: cols },
     sky: { value: null }, skyOn: { value: 0 },
     board: { value: null }, boardInv: { value: new THREE.Matrix4() }, boardOn: { value: 0 }, boardSize: { value: new THREE.Vector2(1, 1) },
@@ -1285,7 +1289,7 @@ function groundMaterial(ground, grain, LAMPS, wet) {
       }`,
     fragmentShader: `
       uniform sampler2D map, grain, asphalt, asphaltN, puddles, sky, board, card0, card1;
-      uniform vec3 camPos; uniform float time;
+      uniform vec3 camPos; uniform float time, rainAmt;
       uniform vec3 lampPos[NL]; uniform vec3 lampCol[NL];
       uniform float skyOn, boardOn; uniform mat4 boardInv; uniform vec2 boardSize;
       uniform mat4 cardInv[2]; uniform float cardOn[2];
@@ -1328,7 +1332,7 @@ function groundMaterial(ground, grain, LAMPS, wet) {
         float ph = h21(cell), age = fract(time * 1.3 + ph);
         vec2 off = vec2(h21(cell + 7.1), h21(cell + 3.7)) - 0.5;
         float dr = length(f - off * 0.5), rad = age * 0.45;
-        float ring = sin(clamp((dr - rad) * 40.0, -PI, PI)) * (1.0 - age) * step(abs(dr - rad), 0.08);
+        float ring = sin(clamp((dr - rad) * 40.0, -PI, PI)) * (1.0 - age) * step(abs(dr - rad), 0.08) * step(h21(cell + 1.3), rainAmt);   // (fewer drops while the rain starts)
         vec3 nw = normalize(vec3((f - off * 0.5).x / max(dr, 1e-3) * ring * 0.12, 1.0, (f - off * 0.5).y / max(dr, 1e-3) * ring * 0.12));
         n = normalize(mix(n, nw, pud));
         // water sits in the pits, so they are glossier than the stone tops
