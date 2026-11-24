@@ -56,7 +56,8 @@
   try { const v = localStorage.getItem('ct.gfx'); if (v in GFX) gfx = v; } catch (e) { /* storage is optional */ }
   // Theme: the neon Cyberpunk court, the 3D Concrete rooftop, or that rooftop in the rain
   const THEMES = ['cyberpunk', 'concrete', 'rain'];
-  let theme = 'cyberpunk';
+  const THEME_NAME = { cyberpunk: 'Cyberpunk', concrete: 'Concrete 3D', rain: 'Rain 3D' };
+  let theme = null;   // (none saved: Rain 3D for a new player, see below)
   try {
     const v = localStorage.getItem('ct.theme');
     if (THEMES.includes(v)) theme = v;
@@ -77,6 +78,9 @@
   // the tutorial is done or a match is finished ('ct.seen').
   let seen = false;
   try { seen = localStorage.getItem('ct.seen') === '1' || CT.achievementStats(ach, 'all').played > 0 || CT.loadHistory().length > 0; } catch (e) { /* storage is optional */ }
+  // new players start on Rain 3D; someone who played before the theme was
+  // saved keeps the court they knew
+  if (!theme) theme = seen ? 'cyberpunk' : 'rain';
   function markSeen() {
     seen = true;
     try { localStorage.setItem('ct.seen', '1'); } catch (e) { /* storage is optional */ }
@@ -1870,6 +1874,7 @@
     theme = value;
     try { localStorage.setItem('ct.theme', value); } catch (e) { /* storage is optional */ }
     document.querySelectorAll('[data-theme]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.theme === value)));
+    $('courtPill').textContent = 'Court: ' + THEME_NAME[value];
     CT.setTheme(renderer, value);
   }
 
@@ -2067,6 +2072,11 @@
     document.querySelectorAll('[data-gfx]').forEach((b) => b.addEventListener('click', () => setGfx(b.dataset.gfx)));
     setGfx(gfx);
     document.querySelectorAll('[data-theme]').forEach((b) => b.addEventListener('click', () => setTheme(b.dataset.theme)));
+    // the menu's court pill steps through the themes: Rain 3D, Concrete 3D, Cyberpunk
+    $('courtPill').addEventListener('click', () => {
+      const order = ['rain', 'concrete', 'cyberpunk'];
+      setTheme(order[(order.indexOf(theme) + 1) % order.length]);
+    });
     setTheme(theme);
     document.querySelectorAll('[data-vr-lens-step]').forEach((b) => b.addEventListener('click', () => setLens(vrFit.lens + Number(b.dataset.vrLensStep))));
     setLens(vrFit.lens);

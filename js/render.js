@@ -1746,6 +1746,7 @@
     }
     const len = u * 0.2, rx = u * 0.085, ry = u * 0.11;
     const col = p.ch.colors.glow;
+    if (r.want3d) { drawRacketLit(ctx, r, hx, hy, ang, u, len, rx, ry, col); return; }
     ctx.save();
     ctx.translate(hx, hy);
     ctx.rotate(ang);
@@ -1765,6 +1766,60 @@
     ctx.shadowColor = col; ctx.shadowBlur = r.quality ? u * 0.03 : 0;
     ctx.strokeStyle = col; ctx.lineWidth = u * 0.014;   // frame
     ctx.beginPath(); ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+  }
+
+  // The first-person racket in the 3D themes: a graphite frame lit from the
+  // lamps overhead (a pale top edge, dark underneath), a shaded grip, strings
+  // that catch a little light, and a soft shadow under it instead of a neon
+  // glow, so it sits in the night scene; the player's colour stays as a thin
+  // trim. Same pose and size as drawRacketView's.
+  function drawRacketLit(ctx, r, hx, hy, ang, u, len, rx, ry, col) {
+    ctx.save();
+    ctx.translate(hx, hy);
+    ctx.rotate(ang);
+    ctx.lineCap = 'round';
+    // light comes from above the screen whatever the swing: its direction in the racket's turned frame
+    const lx = -Math.sin(ang), ly = -Math.cos(ang);
+    const shade = (x0, y0, k, a, b) => {
+      const gr = ctx.createLinearGradient(x0 + lx * k, y0 + ly * k, x0 - lx * k, y0 - ly * k);
+      gr.addColorStop(0, a); gr.addColorStop(1, b);
+      return gr;
+    };
+    ctx.shadowColor = 'rgba(0,0,0,0.55)'; ctx.shadowBlur = u * 0.025;
+    ctx.shadowOffsetX = u * 0.008; ctx.shadowOffsetY = u * 0.014;
+    // grip: dark leather, a rounder pale side towards the light
+    ctx.strokeStyle = shade(0, 0, u * 0.016, '#4a4658', '#121019'); ctx.lineWidth = u * 0.034;
+    ctx.beginPath(); ctx.moveTo(0, u * 0.06); ctx.lineTo(0, -len + ry * 0.2); ctx.stroke();
+    ctx.shadowColor = 'transparent';
+    ctx.strokeStyle = 'rgba(0,0,0,0.35)'; ctx.lineWidth = u * 0.004;   // grip wrap
+    ctx.beginPath();
+    for (let i = 0; i < 6; i++) { const y = u * 0.05 - i * u * 0.022; ctx.moveTo(-u * 0.016, y); ctx.lineTo(u * 0.016, y - u * 0.01); }
+    ctx.stroke();
+    // throat
+    ctx.strokeStyle = '#2a2934'; ctx.lineWidth = u * 0.011;
+    ctx.beginPath(); ctx.moveTo(0, -len * 0.45); ctx.lineTo(-rx * 0.5, -len - ry * 0.3); ctx.moveTo(0, -len * 0.45); ctx.lineTo(rx * 0.5, -len - ry * 0.3); ctx.stroke();
+    ctx.translate(0, -len - ry);
+    // strings, a little lit towards the top
+    ctx.beginPath(); ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
+    ctx.save(); ctx.clip();
+    ctx.fillStyle = 'rgba(10,12,20,0.18)'; ctx.fill();
+    ctx.strokeStyle = shade(0, 0, ry, 'rgba(225,230,240,0.42)', 'rgba(140,150,170,0.18)'); ctx.lineWidth = Math.max(1, u * 0.0022);
+    ctx.beginPath();
+    for (let i = -4; i <= 4; i++) { ctx.moveTo(i * rx / 5, -ry); ctx.lineTo(i * rx / 5, ry); ctx.moveTo(-rx, i * ry / 5); ctx.lineTo(rx, i * ry / 5); }
+    ctx.stroke();
+    ctx.restore();
+    // the frame: graphite, with its shadow on the court below
+    ctx.shadowColor = 'rgba(0,0,0,0.5)'; ctx.shadowBlur = u * 0.03;
+    ctx.shadowOffsetX = u * 0.01; ctx.shadowOffsetY = u * 0.018;
+    ctx.strokeStyle = '#17161f'; ctx.lineWidth = u * 0.02;
+    ctx.beginPath(); ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2); ctx.stroke();
+    ctx.shadowColor = 'transparent';
+    // its lit top edge and the colour trim on its face
+    ctx.strokeStyle = shade(0, 0, ry, 'rgba(205,212,228,0.85)', 'rgba(60,62,80,0)'); ctx.lineWidth = u * 0.007;
+    ctx.beginPath(); ctx.ellipse(0, 0, rx + u * 0.005, ry + u * 0.005, 0, 0, Math.PI * 2); ctx.stroke();
+    ctx.globalAlpha = 0.7; ctx.strokeStyle = col; ctx.lineWidth = u * 0.004;
+    ctx.beginPath(); ctx.ellipse(0, 0, rx - u * 0.004, ry - u * 0.004, 0, 0, Math.PI * 2); ctx.stroke();
     ctx.restore();
   }
 
