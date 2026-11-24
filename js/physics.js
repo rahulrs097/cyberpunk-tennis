@@ -117,6 +117,7 @@
     if (!(opts && opts.noNet) && b.inFlight && !b.netted && Math.sign(prevY) !== Math.sign(p.y) && prevY !== 0) {
       if (Math.abs(p.x) < COURT.POST_X && p.z < netHeight(p.x) + PHYS.R) {
         // Into the tape: the ball dies and drops back on the hitter's side.
+        b.netSpeed = sp;   // how hard it went in (for the sound)
         p.y = Math.sign(prevY) * 0.06;
         v.y = -v.y * 0.08; v.x *= 0.3; v.z = Math.min(v.z, 0) * 0.3;
         b.spin = 0; b.side = 0; b.netted = true;

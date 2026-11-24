@@ -251,6 +251,7 @@
     master.connect(makeup).connect(audio.destination);
     CT.Music.setOn(musicOn);
     CT.Music.start(audio, master);
+    loadSamples();
   }
   function blip(freq, dur, type, gain, slide, at) {
     if (!audio || muted) return;
@@ -320,7 +321,7 @@
   // Sounds from the far end are quieter and duller. dist is 0 at your
   // baseline and 1 at the far one.
   let sfxNoise = null;
-  function noisy(t, dur, vol, type, f, q, dest) {
+  function noiseBuf() {
     if (!sfxNoise) {
       const len = audio.sampleRate * 0.5;
       sfxNoise = audio.createBuffer(1, len, audio.sampleRate);
@@ -328,13 +329,48 @@
       let s = 4242;
       for (let i = 0; i < len; i++) { s = (s * 1103515245 + 12345) & 0x7fffffff; d[i] = (s / 0x7fffffff) * 2 - 1; }
     }
+    return sfxNoise;
+  }
+  function noisy(t, dur, vol, type, f, q, dest) {
     const src = audio.createBufferSource(), fl = audio.createBiquadFilter(), gn = audio.createGain();
-    src.buffer = sfxNoise;
+    src.buffer = noiseBuf();
     fl.type = type; fl.frequency.value = f; fl.Q.value = q;
     gn.gain.setValueAtTime(vol * SFX_GAIN, t);
     gn.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     src.connect(fl).connect(gn).connect(dest);
     src.start(t); src.stop(t + dur + 0.02);
+  }
+  // Recorded sounds (in sound/), decoded once the audio starts. The net
+  // is a real tennis ball into a real net: two takes, played in turn.
+  const SAMPLES = { net: ['sound/net-1.wav', 'sound/net-2.wav'] };
+  const samples = {};
+  let netTake = 0;
+  function loadSamples() {
+    for (const k in SAMPLES) {
+      samples[k] = [];
+      SAMPLES[k].forEach((url, i) => {
+        fetch(url).then((r) => r.arrayBuffer())
+          .then((ab) => new Promise((ok, no) => audio.decodeAudioData(ab, ok, no)))
+          .then((buf) => { samples[k][i] = buf; })
+          .catch(() => { /* the sound is optional */ });
+      });
+    }
+  }
+  function playSample(t, buf, vol, rate, dest) {
+    const src = audio.createBufferSource(), gn = audio.createGain();
+    src.buffer = buf; src.playbackRate.value = rate;
+    gn.gain.value = vol * SFX_GAIN;
+    src.connect(gn).connect(dest);
+    src.start(t);
+  }
+  // A ball into the net: the recording, louder and a touch brighter the
+  // harder it went in.
+  function netSound(t, d, dist, bus) {
+    const takes = (samples.net || []).filter(Boolean);
+    const pace = CT.clamp(((d.kmh || 90) - 40) / 120, 0, 1);
+    const v = (1 - dist * 0.5) * (0.5 + pace * 0.6);
+    if (!takes.length) { noisy(t, 0.08, 0.05 * v, 'lowpass', 900, 0.7, bus); return; }
+    playSample(t, takes[netTake++ % takes.length], 0.11 * v, 0.94 + pace * 0.12, bus);
   }
   function thump(t, f0, f1, dur, vol, dest) {
     const o = audio.createOscillator(), gn = audio.createGain();
@@ -381,9 +417,8 @@
         thump(t, 170, 90, 0.05, 0.08 * v, bus);
       } else if (kind === 'net') {
         const s = placeAt(t, soundAt(d));
-        const bus = s ? s.dest : master;
-        noisy(t, 0.16, 0.05, 'lowpass', 700, 0.7, bus);
-        thump(t, 110, 60, 0.12, 0.06, bus);
+        const dist = s ? s.dist : 0.5;
+        netSound(t, d, dist, s ? s.dest : distBus(t, dist));
       } else if (kind === 'fault') {
         thump(t, 330, 300, 0.35, 0.03, master);
       } else if (kind === 'won') {

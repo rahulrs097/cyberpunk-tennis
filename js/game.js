@@ -1245,8 +1245,11 @@
     }
   }
 
-  // where the ball met the net (for 3D sound)
-  function netAt(g) { const b = g.ball.pos; return { x: +b.x.toFixed(2), y: 0, z: +b.z.toFixed(2) }; }
+  // where and how hard (kmh) the ball met the net, for its sound
+  function netAt(g) {
+    const b = g.ball.pos;
+    return { x: +b.x.toFixed(2), y: 0, z: +b.z.toFixed(2), kmh: Math.round((g.ball.netSpeed || 0) * 3.6) };
+  }
 
   function onBounce(g) {
     const b = g.ball;
