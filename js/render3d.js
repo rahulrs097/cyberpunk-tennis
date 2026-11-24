@@ -975,7 +975,10 @@ function buildBoard(scene, R) {
     // the haze below: the sign's lower edge colour, falling off towards the roof
     glow(B.w * 1.2, B.z, B.z / 2, 0.4, `void main() {
       vec3 c = textureLod(map, vec2(clamp((vUv.x - 0.5) * 1.2 + 0.5, 0.0, 1.0), 0.15), 6.0).rgb;
-      float f = pow(vUv.y, 1.6) * smoothstep(0.0, 0.25, min(vUv.x, 1.0 - vUv.x));
+      // (clamped: with multisampling an edge pixel can be shaded just outside
+      // the quad, where vUv.y < 0, and pow() of a negative is NaN, which the
+      // glow pass then smears into a big black box)
+      float f = pow(clamp(vUv.y, 0.0, 1.0), 1.6) * smoothstep(0.0, 0.25, min(vUv.x, 1.0 - vUv.x));
       gl_FragColor = vec4(c * f * 0.35 * k, 1.0);
     }`);
   }
@@ -1347,7 +1350,7 @@ function groundMaterial(ground, grain, LAMPS, wet) {
         // the night sky, and the baked city where the strip is (loadSkyline: -4..14 degrees)
         vec3 env = mix(vec3(0.02, 0.022, 0.05), vec3(0.09, 0.05, 0.11), exp(-rd.y * 6.0));
         if (WET > 0 && skyOn > 0.5) {
-          float lat = degrees(asin(rd.y));
+          float lat = degrees(asin(min(rd.y, 1.0)));
           vec2 su = vec2(atan(rd.x, -rd.z) / (2.0 * PI) + 0.5, (lat + 4.0) / 18.0);
           if (su.y < 1.0) { vec4 s = textureLod(sky, su, lod); env = mix(env, s.rgb * SKY_DIM, s.a); }
         }
@@ -1373,7 +1376,7 @@ function groundMaterial(ground, grain, LAMPS, wet) {
           spec += lampCol[i] * (a2 / (PI * q * q)) * max(dot(n, l), 0.0) * 40.0 / (dl * dl);
         }
         // more mirror at a glancing look (Fresnel); water mirrors more than wet asphalt
-        float cosv = max(dot(n, -v), 0.0);
+        float cosv = clamp(dot(n, -v), 0.0, 1.0);   // (pow below of a negative would be NaN)
         float fr = 0.02 + 0.98 * pow(1.0 - cosv, 5.0);
         float k = mix(0.12 + 0.45 * fr, 0.35 + 0.65 * fr, pud);
         vec3 col = base * mix(0.62, 0.22, pud) * mix(1.0, 0.8, damp) * (1.0 - k * 0.5) + env * k + spec * mix(0.07 + 0.22 * fr, 1.0, pud);
