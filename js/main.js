@@ -320,7 +320,7 @@
   // Sounds from the far end are quieter and duller. dist is 0 at your
   // baseline and 1 at the far one.
   let sfxNoise = null;
-  function noisy(t, dur, vol, type, f, q, dest) {
+  function noiseBuf() {
     if (!sfxNoise) {
       const len = audio.sampleRate * 0.5;
       sfxNoise = audio.createBuffer(1, len, audio.sampleRate);
@@ -328,13 +328,54 @@
       let s = 4242;
       for (let i = 0; i < len; i++) { s = (s * 1103515245 + 12345) & 0x7fffffff; d[i] = (s / 0x7fffffff) * 2 - 1; }
     }
+    return sfxNoise;
+  }
+  function noisy(t, dur, vol, type, f, q, dest) {
     const src = audio.createBufferSource(), fl = audio.createBiquadFilter(), gn = audio.createGain();
-    src.buffer = sfxNoise;
+    src.buffer = noiseBuf();
     fl.type = type; fl.frequency.value = f; fl.Q.value = q;
     gn.gain.setValueAtTime(vol * SFX_GAIN, t);
     gn.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     src.connect(fl).connect(gn).connect(dest);
     src.start(t); src.stop(t + dur + 0.02);
+  }
+  // A shaped noise burst: att seconds up, then down over dur, its filter
+  // sliding from f to f1, read from off seconds into the noise (so bursts
+  // played together don't sound alike).
+  function grain(t, o, dest) {
+    const src = audio.createBufferSource(), fl = audio.createBiquadFilter(), gn = audio.createGain();
+    src.buffer = noiseBuf();
+    fl.type = o.type; fl.Q.value = o.q;
+    fl.frequency.setValueAtTime(o.f, t);
+    if (o.f1) fl.frequency.exponentialRampToValueAtTime(o.f1, t + o.att + o.dur);
+    gn.gain.setValueAtTime(0.0001, t);
+    gn.gain.exponentialRampToValueAtTime(o.vol * SFX_GAIN, t + o.att);
+    gn.gain.exponentialRampToValueAtTime(0.0001, t + o.att + o.dur);
+    src.connect(fl).connect(gn).connect(dest);
+    src.start(t, o.off || 0); src.stop(t + o.att + o.dur + 0.02);
+  }
+  // A ball into a net: no hard knock (there's nothing solid to knock), but
+  // a soft cloth thud as the mesh takes it, a low whoomp as the net bellies
+  // out and swings back, and the cords rustling against each other. A ball
+  // that catches the top gets a dull slap of the tape too.
+  function netSound(t, d, dist, bus) {
+    const pace = CT.clamp(((d.kmh || 90) - 40) / 120, 0, 1);
+    const tape = d.tape || 0;
+    const v = (1 - dist * 0.5) * (0.55 + pace * 0.6);
+    grain(t, { att: 0.004, dur: 0.07, vol: 0.55 * v, type: 'lowpass', f: 420, f1: 140, q: 0.5 }, bus);            // the mesh takes the ball
+    grain(t + 0.01, { att: 0.03, dur: 0.22 + pace * 0.1, vol: 0.22 * v, type: 'bandpass', f: 480, f1: 170, q: 0.9, off: 0.11 }, bus);   // the net bellies out
+    // the cords rustle: a few faint ticks, thinning out as the net settles
+    // (spacing fixed by where it went in, so the same ball sounds the same)
+    const n = 5 + Math.round(pace * 3);
+    let at = 0.012, seed = Math.abs(Math.round((d.x || 0) * 37 + (d.z || 0) * 91)) + 7;
+    for (let i = 0; i < n; i++) {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      const r = seed / 0x7fffffff;
+      grain(t + at, { att: 0.003, dur: 0.018 + r * 0.02, vol: 0.03 * v * Math.pow(0.78, i), type: 'bandpass',
+        f: 2200 + r * 1800, q: 1.6, off: 0.02 + r * 0.4 }, bus);
+      at += 0.022 + r * 0.04 + i * 0.006;
+    }
+    if (tape > 0) grain(t, { att: 0.003, dur: 0.05, vol: 0.2 * v * tape, type: 'bandpass', f: 850, f1: 600, q: 0.8, off: 0.3 }, bus);   // the tape
   }
   function thump(t, f0, f1, dur, vol, dest) {
     const o = audio.createOscillator(), gn = audio.createGain();
@@ -381,9 +422,8 @@
         thump(t, 170, 90, 0.05, 0.08 * v, bus);
       } else if (kind === 'net') {
         const s = placeAt(t, soundAt(d));
-        const bus = s ? s.dest : master;
-        noisy(t, 0.16, 0.05, 'lowpass', 700, 0.7, bus);
-        thump(t, 110, 60, 0.12, 0.06, bus);
+        const dist = s ? s.dist : 0.5;
+        netSound(t, d, dist, s ? s.dest : distBus(t, dist));
       } else if (kind === 'fault') {
         thump(t, 330, 300, 0.35, 0.03, master);
       } else if (kind === 'won') {

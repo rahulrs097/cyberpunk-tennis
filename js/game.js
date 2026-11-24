@@ -1245,8 +1245,14 @@
     }
   }
 
-  // where the ball met the net (for 3D sound)
-  function netAt(g) { const b = g.ball.pos; return { x: +b.x.toFixed(2), y: 0, z: +b.z.toFixed(2) }; }
+  // where and how hard the ball met the net (for its sound): kmh going
+  // in, and tape 1 when it caught the white band at the top, 0 in the mesh
+  function netAt(g) {
+    const b = g.ball.pos;
+    const below = CT.netHeight(b.x) + PHYS.R - b.z;
+    return { x: +b.x.toFixed(2), y: 0, z: +b.z.toFixed(2),
+      kmh: Math.round((g.ball.netSpeed || 0) * 3.6), tape: +clamp(1 - below / 0.12, 0, 1).toFixed(2) };
+  }
 
   function onBounce(g) {
     const b = g.ball;
