@@ -125,7 +125,10 @@ export function create3d(r, R) {
     rain.visible = on;
     if (on) rain.material.uniforms.time.value = (now / 1000) % 1000, rain.material.uniforms.cam.value.copy(cam.position);
     if (!baked) return;
-    if (on && !wet) wet = { ground: wetGroundMaterial(baked.ground, baked.grain, R.LAMPS), lines: wetLines(court.mat, baked.grain) };
+    if (on && !wet) {
+      const ground = wetGroundMaterial(baked.ground, baked.grain, R.LAMPS);
+      wet = { ground, lines: wetLines(court.mat, baked.grain, ground.uniforms.asphalt.value) };
+    }
     baked.deck.material = on ? wet.ground : baked.dry;
     for (const m of court.meshes) m.material = on ? wet.lines : court.mat;
     if (!on) return;
@@ -775,7 +778,14 @@ function wetGroundMaterial(ground, grain, LAMPS) {
     cardInv: { value: [new THREE.Matrix4(), new THREE.Matrix4()] }, cardOn: { value: [0, 0] },
     ball: { value: new THREE.Vector4(0, -10, 0, 0.05) }, ballOn: { value: 0 },
   }]);
-  u.map = { value: ground }; u.grain = { value: grain }; u.puddles = { value: puddleTex(CT.R2D.COURT) };
+  u.map = { value: ground }; u.grain = { value: grain };
+  // the scanned asphalt: Poly Haven's Asphalt Floor (CC0), 1k (models/rain/README.md)
+  const tl = new THREE.TextureLoader();
+  for (const [k, f] of [['asphalt', 'asphalt.jpg'], ['asphaltN', 'asphalt_nor.jpg']]) {
+    const t = tl.load('models/rain/' + f);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 4;
+    u[k] = { value: t };
+  } u.puddles = { value: puddleTex(CT.R2D.COURT) };
   const m = new THREE.ShaderMaterial({
     uniforms: u, fog: true,
     defines: { NL: lamps.length, GX0: G.x0.toFixed(2), GW: (G.x1 - G.x0).toFixed(2), GY0: G.y0.toFixed(2), GH: (G.y1 - G.y0).toFixed(2),
@@ -792,7 +802,7 @@ function wetGroundMaterial(ground, grain, LAMPS) {
         #include <fog_vertex>
       }`,
     fragmentShader: `
-      uniform sampler2D map, grain, puddles, sky, board, card0, card1;
+      uniform sampler2D map, grain, asphalt, asphaltN, puddles, sky, board, card0, card1;
       uniform vec3 camPos; uniform float time;
       uniform vec3 lampPos[NL]; uniform vec3 lampCol[NL];
       uniform float skyOn, boardOn; uniform mat4 boardInv; uniform vec2 boardSize;
@@ -813,20 +823,23 @@ function wetGroundMaterial(ground, grain, LAMPS) {
       }
       void main() {
         // the baked ground, as the dry theme draws it (bakedMaterial: gain 0.85, grain 0.4, desat 0.15)
+        // the scanned asphalt (models/rain: r = albedo, g = roughness, b = height;
+        // a 2.35 m tile), over the baked light; the procedural grain at a
+        // 10 m scale breaks up the tile's repeat in the distance
+        vec2 aUv = vW.xz / 2.35;
+        vec3 as = texture2D(asphalt, aUv).rgb;
+        float g0 = texture2D(grain, vUv * vec2(GW / 10.0, GH / 10.0)).r;
         vec3 base = texture2D(map, vUv).rgb * 0.85;
-        vec2 gUv = vUv * vec2(GW / 2.5, GH / 2.5);
-        float g0 = texture2D(grain, gUv).r;
-        base *= 1.0 + (g0 - 0.5) * 0.8;
+        base *= mix(1.0, as.r / 0.51, 0.9) * (1.0 + (g0 - 0.5) * 0.5);
         base = mix(base, vec3(dot(base, vec3(0.3, 0.59, 0.11))), 0.15);
-        // how deep the water is here; the grain's pits fill first
-        float deep = texture2D(puddles, vUv).r - (g0 - 0.5) * 0.12;
+        // how deep the water is here; the asphalt's low spots fill first
+        float deep = texture2D(puddles, vUv).r - (as.b - 0.62) * 0.3;
         float pud = smoothstep(0.64, 0.7, deep);
         float damp = smoothstep(0.4, 0.66, deep);
-        // the surface's tilt: rough asphalt from the grain, flat water with rain rings
-        // (from a softer mip, so the grain doesn't sparkle and shimmer as the camera moves)
-        float e = 1.5 / 512.0, gc = texture2D(grain, gUv, 1.5).r;
-        float gx = texture2D(grain, gUv + vec2(e, 0.0), 1.5).r - gc, gy = texture2D(grain, gUv + vec2(0.0, e), 1.5).r - gc;
-        vec3 n = normalize(vec3(-gx * 3.5, 1.0, gy * 3.5));
+        // the surface's tilt: the scan's normal map, flat water with rain rings
+        // (a softer mip, so the grit doesn't sparkle and shimmer as the camera moves)
+        vec3 tn = texture2D(asphaltN, aUv, 1.0).xyz * 2.0 - 1.0;
+        vec3 n = normalize(vec3(tn.x * 1.1, tn.z, -tn.y * 1.1));
         vec2 gp = vW.xz * 2.5;   // rings: one drop per 40 cm cell, a ring every 0.8 s or so
         vec2 cell = floor(gp), f = fract(gp) - 0.5;
         float ph = h21(cell), age = fract(time * 1.3 + ph);
@@ -835,7 +848,8 @@ function wetGroundMaterial(ground, grain, LAMPS) {
         float ring = sin(clamp((dr - rad) * 40.0, -PI, PI)) * (1.0 - age) * step(abs(dr - rad), 0.08);
         vec3 nw = normalize(vec3((f - off * 0.5).x / max(dr, 1e-3) * ring * 0.12, 1.0, (f - off * 0.5).y / max(dr, 1e-3) * ring * 0.12));
         n = normalize(mix(n, nw, pud));
-        float rough = mix(0.22, 0.03, pud);
+        // water sits in the pits, so they are glossier than the stone tops
+        float rough = mix(mix(0.16, 0.36, smoothstep(0.5, 0.75, as.b)) * (0.8 + as.g * 0.25), 0.03, pud);
         // what the surface mirrors
         vec3 v = normalize(vW - camPos);
         vec3 rd = reflect(v, n);
@@ -872,8 +886,8 @@ function wetGroundMaterial(ground, grain, LAMPS) {
         // more mirror at a glancing look (Fresnel); water mirrors more than wet asphalt
         float cosv = max(dot(n, -v), 0.0);
         float fr = 0.02 + 0.98 * pow(1.0 - cosv, 5.0);
-        float k = mix(0.18 + 0.6 * fr, 0.35 + 0.65 * fr, pud);
-        vec3 col = base * mix(0.62, 0.22, pud) * mix(1.0, 0.8, damp) * (1.0 - k * 0.5) + env * k + spec * mix(0.15 + 0.35 * fr, 1.0, pud);
+        float k = mix(0.12 + 0.45 * fr, 0.35 + 0.65 * fr, pud);
+        vec3 col = base * mix(0.62, 0.22, pud) * mix(1.0, 0.8, damp) * (1.0 - k * 0.5) + env * k + spec * mix(0.1 + 0.3 * fr, 1.0, pud);
         gl_FragColor = vec4(col, 1.0);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
@@ -884,15 +898,17 @@ function wetGroundMaterial(ground, grain, LAMPS) {
 }
 
 // wet court lines: worn and patchy, the paint darker where the grain is deep
-function wetLines(mat, grain) {
+function wetLines(mat, grain, asphalt) {
   const m = mat.clone();
   m.onBeforeCompile = (sh) => {
     sh.uniforms.grain = { value: grain };
+    sh.uniforms.asphalt = { value: asphalt };
     sh.vertexShader = 'varying vec3 vW;\n' + sh.vertexShader.replace('#include <project_vertex>', '#include <project_vertex>\n vW = (modelMatrix * vec4(transformed, 1.0)).xyz;');
-    sh.fragmentShader = 'uniform sampler2D grain;\nvarying vec3 vW;\n' + sh.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
+    sh.fragmentShader = 'uniform sampler2D grain, asphalt;\nvarying vec3 vW;\n' + sh.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
       float patchy = smoothstep(0.38, 0.62, texture2D(grain, vW.xz / 7.0).r);
-      float fine = texture2D(grain, vW.xz / 0.9).r;
-      diffuseColor.rgb *= mix(0.4, 0.95, patchy) * (0.7 + fine * 0.6);`);
+      // the asphalt's grit shows through the paint
+      vec3 as = texture2D(asphalt, vW.xz / 2.35).rgb;
+      diffuseColor.rgb *= mix(0.4, 0.95, patchy) * mix(1.0, as.r / 0.51, 0.7) * smoothstep(0.3, 0.6, as.b + 0.15);`);
   };
   return m;
 }
