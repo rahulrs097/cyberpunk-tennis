@@ -58,7 +58,7 @@
   const THEMES = ['cyberpunk', 'concrete', 'rain'];
   // Ball: the neon ball (with its glow and tail) or a real felt one
   // Settings' Storm toggle (Rain 3D): lightning, thunder and clouds that follow the
-  // play, and rain that starts with the first winner. Off: it just rains.
+  // play, and rain that starts after the first winner's thunder. Off: no rain at all.
   let stormOn = true;
   try { stormOn = localStorage.getItem('ct.storm') !== '0'; } catch (e) { /* storage is optional */ }
   let ballLook = 'neon';
@@ -411,12 +411,13 @@
   // Rain 3D's rain: a steady recording, looped under everything while the
   // wet court is showing (Rahul: the silence felt wrong). Fetched the first
   // time it's needed; it fades in and out with the theme and the sound switch.
-  const RAIN_URL = 'sound/rain-loop.mp3', RAIN_VOL = 0.55;
+  const RAIN_URL = 'sound/rain-loop.mp3', RAIN_VOL = 0.38;   // (Rahul: a little under the hits)
   let rainGain = null, rainAsked = false;
   function updateRain() {
     if (!audio) return;
     // (with the storm on, a match is dry until the first winner's lightning)
-    const on = theme === 'rain' && !muted && !(renderer.storm && renderer.storm.rain === 0);
+    const st = renderer.storm;
+    const on = theme === 'rain' && !muted && !(st && st.rain === 0 && !(st.rainFrom && performance.now() / 1000 >= st.rainFrom));
     if (on && !rainAsked) {
       rainAsked = true;
       rainGain = audio.createGain();
@@ -659,7 +660,9 @@
     if (d.text === 'Ace' || d.text === 'Winner') {
       const near = d.text === 'Ace' ? 0.75 : /overhead|power/i.test(h.kind || '') ? 1 : CT.clamp(((h.kmh || 90) - 70) / 90, 0.15, 0.7);
       thunder(CT.stormEvent(renderer, 'strike', near));
-      updateRain();   // (the first one brings the rain)
+      // (the first one brings the rain, after its thunder)
+      const st = renderer.storm;
+      if (st && st.rainFrom) setTimeout(updateRain, Math.max(0, st.rainFrom * 1000 - performance.now()) + 50);
       return;
     }
     CT.stormEvent(renderer, 'point');
@@ -1657,8 +1660,8 @@
     if (typeof note !== 'string') note = '';
     $('menuNote').textContent = note;
     $('menuNote').hidden = !note;
-    // behind the menu it just rains
-    CT.stormEvent(renderer, 'reset', 1);
+    // behind the menu it just rains (with the storm off, Rain 3D is dry: no rain at all)
+    CT.stormEvent(renderer, 'reset', stormOn ? 1 : 0);
     updateRain();
     $('tutBtn').hidden = seen;
     // nothing from the match is left showing through the menu
@@ -1804,8 +1807,8 @@
     if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
     const inVR = view === 'vr' && !cfg.drill;
     // a new match starts under clear stars, dry until the first winner (a
-    // lesson or practice, or the storm switched off: raining from the start)
-    CT.stormEvent(renderer, 'reset', stormOn && !cfg.drill ? 0 : 1);
+    // lesson or practice: raining from the start; the storm off: no rain at all)
+    CT.stormEvent(renderer, 'reset', stormOn && cfg.drill ? 1 : 0);
     updateRain();
     lastHit = null;
     if (theme === 'rain') loadThunder();
@@ -2046,7 +2049,8 @@
     try { localStorage.setItem('ct.storm', on ? '1' : '0'); } catch (e) { /* storage is optional */ }
     document.querySelectorAll('[data-storm]').forEach((b) => b.setAttribute('aria-pressed', String(on)));
     // switched off mid-match: the sky clears and it rains
-    if (!on) { CT.stormEvent(renderer, 'reset', 1); updateRain(); }
+    // (off: no rain at all; on behind the menu: rain)
+    if (!on || !$('menu').hidden) { CT.stormEvent(renderer, 'reset', on ? 1 : 0); updateRain(); }
   }
 
   function setBall(value) {
