@@ -700,6 +700,44 @@ function buildCars(scene, CARS, hash) {
 }
 
 // ---------------- billboard ----------------
+// The building next door that the billboard stands on: a flat roof `drop`
+// metres below ours with a low parapet, and dark walls with a few lit
+// windows going down to the street. In the billboard's own frame: x along
+// the sign, z out of its face (towards the court), the roof's top at -drop.
+function buildNextDoor(w, d, drop) {
+  const g = new THREE.Group();
+  const H = 60;
+  let seed = 23;
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  const win = canvasTex(128, 256, (c) => {
+    c.fillStyle = '#0d0e14'; c.fillRect(0, 0, 128, 256);
+    for (let y = 4; y < 256; y += 9) for (let x = 3; x < 128; x += 8) {
+      const h = rnd();
+      c.fillStyle = h > 0.93 ? '#ffcf8a' : h > 0.9 ? '#9fc8ff' : '#14161e';
+      c.fillRect(x, y, 5, 5);
+    }
+  });
+  win.wrapS = win.wrapT = THREE.RepeatWrapping;
+  win.repeat.set(w / 12, H / 12);
+  const wall = new THREE.MeshBasicMaterial({ map: win });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(w, H, d), [wall, wall, new THREE.MeshBasicMaterial({ color: 0x24252b }), wall, wall, wall]);
+  body.position.set(0, -drop - H / 2, 0);
+  g.add(body);
+  // the parapet round its roof, and a couple of roof boxes
+  const lip = new THREE.MeshBasicMaterial({ color: 0x2c2d34 });
+  for (const [bw, bd, x, z] of [[w, 0.25, 0, d / 2], [w, 0.25, 0, -d / 2], [0.25, d, w / 2, 0], [0.25, d, -w / 2, 0]]) {
+    const p = new THREE.Mesh(new THREE.BoxGeometry(bw, 0.9, bd), lip);
+    p.position.set(x, -drop + 0.45, z);
+    g.add(p);
+  }
+  for (const [bw, bh, bd, x, z] of [[2.4, 1.4, 1.8, -w * 0.38, -d * 0.25], [1.6, 1.0, 1.6, w * 0.4, d * 0.2]]) {
+    const b = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, bd), new THREE.MeshBasicMaterial({ color: 0x1b1c22 }));
+    b.position.set(x, -drop + bh / 2, z);
+    g.add(b);
+  }
+  return g;
+}
+
 const BOARD_DIM = 0.6;   // the one neon accent left, kept soft against the concrete
 function buildBoard(scene, R) {
   const B = R.BOARD;
@@ -733,13 +771,18 @@ function buildBoard(scene, R) {
   const glowU = { map: { value: tex }, k: { value: 1 } };
   {
     const m = metalMat(), T = 0.22, D = 0.3;
+    // The sign stands past our roof's edge, so its legs go down to the roof
+    // of the building next door (NEXT m lower), which carries it
+    const NEXT = 2.2, LEG = B.z + NEXT;
     for (const [w, h, x, y] of [[B.w + 2 * T, T, 0, B.z + B.h + T / 2], [B.w + 2 * T, T, 0, B.z - T / 2], [T, B.h, -(B.w + T) / 2, cy], [T, B.h, (B.w + T) / 2, cy],
-      [0.28, B.z, -B.w * 0.3, B.z / 2], [0.28, B.z, B.w * 0.3, B.z / 2]]) {
-      const bar = new THREE.Mesh(new THREE.BoxGeometry(w, h, D), m);
+      [0.28, LEG, -B.w * 0.3, B.z - LEG / 2], [0.28, LEG, B.w * 0.3, B.z - LEG / 2],
+      [B.w * 0.6, 0.16, 0, B.z * 0.45], [0.8, 0.08, -B.w * 0.3, -NEXT + 0.04], [0.8, 0.08, B.w * 0.3, -NEXT + 0.04]]) {
+      const bar = new THREE.Mesh(new THREE.BoxGeometry(w, h, D * (h < 0.1 ? 2.5 : 1)), m);
       bar.position.set(x, y, -0.06);
       grp.add(bar);
     }
     post.visible = false;   // (the legs hold it now)
+    grp.add(buildNextDoor(B.w + 8, 14, NEXT));
   }
   function buildWet() {
     wetBuilt = true;
