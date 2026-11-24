@@ -368,15 +368,17 @@
     return { close };
   }
 
-  // An online player's profile: a name (16 letters at most) and a 32×32
-  // picture (a PNG data URL), kept on the phone and sent to the other phone
-  // when a match connects. Whatever arrives is checked again here, so a
-  // made-up message can't put anything else on the other player's sign.
-  const NAME_MAX = 16, PIC_SIDE = 32, PIC_MAX = 12000;
+  // An online player's profile: a name (16 letters at most) and a 96×96
+  // picture (a JPEG data URL; older phones saved 32×32 PNGs, still fine), kept
+  // on the phone and sent to the other phone when a match connects. PIC_MAX
+  // keeps the hello message well under the relay's 16 KB limit
+  // (server/relay.js). Whatever arrives is checked again here, so a made-up
+  // message can't put anything else on the other player's sign.
+  const NAME_MAX = 16, PIC_SIDE = 96, PIC_MAX = 12000;
   function cleanProfile(p) {
     const name = p && typeof p.name === 'string'
       ? p.name.replace(/[\u0000-\u001f\u007f-\u009f]/g, '').replace(/\s+/g, ' ').trim().slice(0, NAME_MAX) : '';
-    const pic = p && typeof p.pic === 'string' && p.pic.length <= PIC_MAX && /^data:image\/png;base64,[A-Za-z0-9+/]+=*$/.test(p.pic) ? p.pic : '';
+    const pic = p && typeof p.pic === 'string' && p.pic.length <= PIC_MAX && /^data:image\/(png|jpeg);base64,[A-Za-z0-9+/]+=*$/.test(p.pic) ? p.pic : '';
     return { name, pic };
   }
 

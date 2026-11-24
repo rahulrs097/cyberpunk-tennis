@@ -56,7 +56,15 @@
   try { const v = localStorage.getItem('ct.gfx'); if (v in GFX) gfx = v; } catch (e) { /* storage is optional */ }
   // Theme: the neon Cyberpunk court, the 3D Concrete rooftop, or that rooftop in the rain
   const THEMES = ['cyberpunk', 'concrete', 'rain'];
-  let theme = 'cyberpunk';
+  // Ball: the neon ball (with its glow and tail) or a real felt one
+  // Settings' Storm toggle (Rain 3D): lightning, thunder and clouds that follow the
+  // play, and rain that starts with the first winner. Off: it just rains.
+  let stormOn = true;
+  try { stormOn = localStorage.getItem('ct.storm') !== '0'; } catch (e) { /* storage is optional */ }
+  let ballLook = 'neon';
+  try { if (localStorage.getItem('ct.ball') === 'real') ballLook = 'real'; } catch (e) { /* storage is optional */ }
+  const THEME_NAME = { cyberpunk: 'Cyberpunk', concrete: 'Concrete 3D', rain: 'Rain 3D' };
+  let theme = null;   // (none saved: Rain 3D for a new player, see below)
   try {
     const v = localStorage.getItem('ct.theme');
     if (THEMES.includes(v)) theme = v;
@@ -77,6 +85,9 @@
   // the tutorial is done or a match is finished ('ct.seen').
   let seen = false;
   try { seen = localStorage.getItem('ct.seen') === '1' || CT.achievementStats(ach, 'all').played > 0 || CT.loadHistory().length > 0; } catch (e) { /* storage is optional */ }
+  // new players start on Rain 3D; someone who played before the theme was
+  // saved keeps the court they knew
+  if (!theme) theme = seen ? 'cyberpunk' : 'rain';
   function markSeen() {
     seen = true;
     try { localStorage.setItem('ct.seen', '1'); } catch (e) { /* storage is optional */ }
@@ -252,6 +263,7 @@
     CT.Music.setOn(musicOn);
     CT.Music.start(audio, master);
     loadSamples();
+    updateRain();
   }
   function blip(freq, dur, type, gain, slide, at) {
     if (!audio || muted) return;
@@ -356,6 +368,78 @@
       });
     }
   }
+  // Rain 3D's thunder: real recordings (CC0, Freesound 672776 DaniloSFX and
+  // 436794 roboroo for the cracks, 404842 hifijohn for the distant rumble),
+  // fetched the first time a Rain 3D match starts
+  const THUNDER = { crack: ['sound/thunder-crack-1.mp3', 'sound/thunder-crack-2.mp3'], rumble: ['sound/thunder-rumble.mp3'] };
+  let thunderAsked = false, crackTake = 0;
+  function loadThunder() {
+    if (thunderAsked || !audio) return;
+    thunderAsked = true;
+    for (const k in THUNDER) {
+      samples[k] = [];
+      THUNDER[k].forEach((url, i) => {
+        fetch(url).then((r) => r.arrayBuffer())
+          .then((ab) => new Promise((ok, no) => audio.decodeAudioData(ab, ok, no)))
+          .then((buf) => { samples[k][i] = buf; })
+          .catch(() => { /* the sound is optional */ });
+      });
+    }
+  }
+  // a strike `dist` m away: the crack arrives at the speed of sound, and a
+  // far one is quieter and duller (the air takes the top off it)
+  function thunder(dist) {
+    if (!audio || muted) return;
+    const takes = (samples.crack || []).filter(Boolean);
+    if (!takes.length) return;
+    try {
+      const t = audio.currentTime + dist / 343, far = CT.clamp((dist - 150) / 550, 0, 1);
+      const lp = audio.createBiquadFilter();
+      lp.type = 'lowpass'; lp.frequency.value = 9000 - far * 7800;
+      lp.connect(master);
+      playSample(t, takes[crackTake++ % takes.length], 0.5 - far * 0.3, 1, lp);
+    } catch (e) { /* audio is optional */ }
+  }
+  // an unforced error: the sky grumbles, low and far off
+  function rumble() {
+    if (!audio || muted) return;
+    const take = (samples.rumble || [])[0];
+    if (!take) return;
+    try { playSample(audio.currentTime + 0.3, take, 0.3, 0.9 + Math.random() * 0.15, master); } catch (e) { /* audio is optional */ }
+  }
+
+  // Rain 3D's rain: a steady recording, looped under everything while the
+  // wet court is showing (Rahul: the silence felt wrong). Fetched the first
+  // time it's needed; it fades in and out with the theme and the sound switch.
+  const RAIN_URL = 'sound/rain-loop.mp3', RAIN_VOL = 0.55;
+  let rainGain = null, rainAsked = false;
+  function updateRain() {
+    if (!audio) return;
+    // (with the storm on, a match is dry until the first winner's lightning)
+    const on = theme === 'rain' && !muted && !(renderer.storm && renderer.storm.rain === 0);
+    if (on && !rainAsked) {
+      rainAsked = true;
+      rainGain = audio.createGain();
+      rainGain.gain.value = 0;
+      rainGain.connect(master);
+      fetch(RAIN_URL).then((r) => r.arrayBuffer())
+        .then((ab) => new Promise((ok, no) => audio.decodeAudioData(ab, ok, no)))
+        .then((buf) => {
+          const src = audio.createBufferSource();
+          // (Freesound 238431 PhilllChabbb, CC0: 30 s cut to loop with a crossfade,
+          // padded 50 ms each side so the loop never lands on the mp3's edges)
+          src.buffer = buf; src.loop = true;
+          src.loopStart = 0.05; src.loopEnd = Math.max(0.1, buf.duration - 0.05);
+          src.connect(rainGain);
+          src.start(0, 0.05);
+          updateRain();
+        })
+        .catch(() => { /* the sound is optional */ });
+      return;
+    }
+    if (rainGain) rainGain.gain.setTargetAtTime(on ? RAIN_VOL : 0, audio.currentTime, on ? 1.4 : 0.6);
+  }
+
   function playSample(t, buf, vol, rate, dest) {
     const src = audio.createBufferSource(), gn = audio.createGain();
     src.buffer = buf; src.playbackRate.value = rate;
@@ -393,6 +477,8 @@
     const base = me === 0 ? -CT.COURT.HL : CT.COURT.HL;
     return Math.min(1, Math.abs(y - base) / (2 * CT.COURT.HL));
   }
+  // the game's sounds, in every mode (Rahul, 2026-11-24: only the zen ones,
+  // no neon blips): a real racket and ball, a net, quiet chimes for points
   function realSfx(kind, d) {
     if (!audio || muted) return;
     try {
@@ -561,6 +647,26 @@
   const BOARD_BEATEN = ['OUCH', '#ff3fb4'];
   const LONG_RALLY = 8;   // shots in a rally that get a WOW
   let rallyShots = 0;
+  // Rain 3D's storm follows the play: a winner or ace brings lightning (closer
+  // for an ace, a smash or a power shot) and builds the clouds, an unforced
+  // error only rumbles (render.js stormEvent)
+  let lastHit = null;
+  function stormPoint(d) {
+    if (theme !== 'rain' || !stormOn) return;
+    loadThunder();
+    const h = lastHit || {};
+    lastHit = null;
+    if (d.text === 'Ace' || d.text === 'Winner') {
+      const near = d.text === 'Ace' ? 0.75 : /overhead|power/i.test(h.kind || '') ? 1 : CT.clamp(((h.kmh || 90) - 70) / 90, 0.15, 0.7);
+      thunder(CT.stormEvent(renderer, 'strike', near));
+      updateRain();   // (the first one brings the rain)
+      return;
+    }
+    CT.stormEvent(renderer, 'point');
+    // (a miss under pressure, stretched, jammed or on the run, is forced: no rumble)
+    const unforced = d.text === 'Double fault' || ((d.text === 'Out' || d.text === 'Net') && h.kind && h.kind !== 'serve' && !h.stretched && !h.note);
+    if (unforced) rumble();
+  }
   // Close calls go up on the billboard as a close-up of the ball's mark
   // against the line: outs that missed by up to CLOSE_OUT (m), ins that kept no more
   // than CLOSE_IN of the ball on the line. They stay up over the point's word.
@@ -610,8 +716,9 @@
     if (type === 'hit') {
       lineCallShown = false;
       rallyShots = d.kind === 'serve' ? 1 : rallyShots + 1;
+      lastHit = d;
       if (!tut && (rallyShots === LONG_RALLY || (d.perfect && d.side === me && /power|overhead/i.test(d.kind)))) CT.showBillboard(renderer, 'WOW', '#ff3fb4', 1.8);
-      if (zenOn()) realSfx('hit', d); else blip(d.kind === 'overhead' || d.kind === 'serve' ? 220 : 330, 0.07, 'square', 0.09, 140, soundAt(d));
+      realSfx('hit', d);
       if (d.side === me) {
         const kind = { fh: 'Forehand', bh: 'Backhand' }[d.wing];
         const label = d.kind === 'serve' ? 'Serve' : d.kind === 'overhead' ? 'Overhead' : d.kind === 'volley' ? kind + ' volley' : d.kind === 'power' ? 'Power ' + kind.toLowerCase() : d.kind === 'powerVolley' ? 'Power ' + kind.toLowerCase() + ' volley' : kind;
@@ -623,20 +730,20 @@
       }
       hintForState();
     } else if (type === 'bounce') {
-      if (zenOn()) realSfx('bounce', d); else blip(120, 0.05, 'sine', 0.07, 0, soundAt(d, true));
+      realSfx('bounce', d);
       if (net && net.role === 'guest') game.marks.push({ x: d.x, y: d.y, age: 0 });
     } else if (type === 'lineCall') {
       if (d.m > CLOSE_OUT || d.m < -CLOSE_IN) return;
       CT.showLineCall(renderer, d, 3);
       lineCallShown = true;
     } else if (type === 'net') {
-      if (zenOn()) realSfx('net', d); else blip(90, 0.12, 'sawtooth', 0.05, 0, soundAt(d));
+      realSfx('net', d);
     } else if (type === 'whiff') {
       if (d.side === me) showShot([{ text: d.reason, cls: 'bad' }]);
     } else if (type === 'fault') {
       if (boardScore()) CT.showBillboard(renderer, d.text === 'Net' || d.text === 'Serve clock' ? d.text.toUpperCase() : 'FAULT', '#ffc23d', 1.6);
       showMsg(d.text === 'Net' || d.text === 'Serve clock' ? d.text : 'Fault', 'Second serve', 'warn');
-      if (zenOn()) realSfx('fault', d); else blip(160, 0.2, 'sawtooth', 0.05, 90);
+      realSfx('fault', d);
     } else if (type === 'point') {
       if (tut) { onDrill({ ok: d.winner === me, text: d.winner === me ? 'Point' : d.text }); updateHud(); return; }
       const youWon = d.winner === me;
@@ -649,7 +756,8 @@
       setGhost(null);
       if (!seen && !net && d.result !== 'set' && tipNo < TIPS.length * 2) setHint(TIPS[tipNo++ % TIPS.length], true);
       if (word && !lineCallShown) CT.showBillboard(renderer, word[0], word[1], 2.6);
-      if (zenOn()) realSfx(youWon ? 'won' : 'lost', d); else blip(youWon ? 520 : 200, 0.25, 'triangle', 0.08, youWon ? 780 : 120);
+      realSfx(youWon ? 'won' : 'lost', d);
+      stormPoint(d);
       updateHud();
     } else if (type === 'serveReady') {
       lineCallShown = false;
@@ -963,13 +1071,10 @@
     playShot(CT.VR.autoShot(game, me, hold >= CT.VR.POWER_HOLD));
   }
 
-  // the countdown's beeps: [seconds before the moment to let go, pitch]
-  const VR_TICKS = [[0.5, 660], [0.25, 660], [0, 1320]];
-
   // VR is for matches; the tutorial's lessons need their hints on screen.
   function enterVR() {
     if (!vr) {
-      vr = { head: CT.VR.createHead(), wait: true, press: null, ignoreUp: false, pad: false, lastT: null };
+      vr = { head: CT.VR.createHead(), wait: true, press: null, ignoreUp: false, pad: false };
       CT.VR.startHead(vr.head);
       CT.VR.keepAwake(true);
       document.body.classList.add('vr');
@@ -1003,13 +1108,7 @@
     try { for (const gp of navigator.getGamepads ? navigator.getGamepads() : []) if (gp && gp.buttons[0] && gp.buttons[0].pressed) down = true; } catch (e) { /* no gamepads here */ }
     if (down !== vr.pad) { vr.pad = down; if (down) vrPress(); else vrRelease(); }
     v.charge = vr.press === null ? 0 : Math.min(1, (performance.now() - vr.press) / 1000 / CT.VR.POWER_HOLD);
-    // a countdown you can hear wherever you're looking: two ticks, then a
-    // higher one on the moment to let go
-    const hit = !paused && !vr.wait && !vr.home ? CT.VR.timeToHit(game, me, CT.incomingInfo(game, me)) : null;
-    if (hit && hit.reach && vr.lastT !== null) {
-      for (const [at, freq] of VR_TICKS) if (vr.lastT > at && hit.t <= at) blip(freq, 0.06, 'sine', 0.06);
-    }
-    vr.lastT = hit && hit.reach ? hit.t : null;
+    // (no countdown beeps before a shot: Rahul found them noisy, 2026-11-24)
     v.prompt = ''; v.sub = '';
     // held upright it isn't in a headset, so a button on the screen gets you out
     const upright = window.innerHeight > window.innerWidth;
@@ -1336,7 +1435,7 @@
   }
 
   // Your profile in the menu: a name box and a picture you pick, cut to a
-  // 32×32 square from its middle.
+  // 96×96 square from its middle.
   function saveProfile() {
     try { localStorage.setItem('ct.profile', JSON.stringify(profile)); } catch (e) { /* storage is optional */ }
   }
@@ -1356,7 +1455,10 @@
       g.imageSmoothingQuality = 'high';
       g.drawImage(img, (img.naturalWidth - side) / 2, (img.naturalHeight - side) / 2, side, side, 0, 0, S, S);
       URL.revokeObjectURL(url);
-      const p = CT.Net.cleanProfile({ name: profile.name, pic: c.toDataURL('image/png') });
+      // a JPEG, as good as fits the size limit (about 4-8 KB for a photo)
+      let pic = '';
+      for (const q of [0.88, 0.8, 0.7, 0.6, 0.5, 0.4]) { pic = c.toDataURL('image/jpeg', q); if (pic.length <= 12000) break; }
+      const p = CT.Net.cleanProfile({ name: profile.name, pic });
       if (!p.pic) return;
       profile = p;
       saveProfile();
@@ -1555,6 +1657,9 @@
     if (typeof note !== 'string') note = '';
     $('menuNote').textContent = note;
     $('menuNote').hidden = !note;
+    // behind the menu it just rains
+    CT.stormEvent(renderer, 'reset', 1);
+    updateRain();
     $('tutBtn').hidden = seen;
     // nothing from the match is left showing through the menu
     $('msg').hidden = true; msgTimer = 0;
@@ -1578,7 +1683,7 @@
     game = CT.createGame({ p0: 'octopus', p1: 'philosopher', timeScale: 0.6, control: ['cpu', 'cpu'], onEvent: () => {} });
     // (the court stands still behind the headset's menu: a rally seen through
     // a moving player's eyes, with nobody moving you, makes you feel sick)
-    if (keepVR) { vr.home = true; vr.end = null; vr.wait = false; vr.press = null; vr.lastT = null; }
+    if (keepVR) { vr.home = true; vr.end = null; vr.wait = false; vr.press = null; }
     applyZen();
     reloadIfNewBuild();
   }
@@ -1645,6 +1750,12 @@
     // a room code box left focused would keep the on-screen keyboard live
     if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
     const inVR = view === 'vr' && !cfg.drill;
+    // a new match starts under clear stars, dry until the first winner (a
+    // lesson or practice, or the storm switched off: raining from the start)
+    CT.stormEvent(renderer, 'reset', stormOn && !cfg.drill ? 0 : 1);
+    updateRain();
+    lastHit = null;
+    if (theme === 'rain') loadThunder();
     goFullscreen(inVR ? 'landscape' : 'portrait');
     showFull(isFullscreen());   // turns on when the browser says it went full screen
     CT.Music.setPlaying(true);
@@ -1833,6 +1944,7 @@
     muted = !on;
     try { localStorage.setItem('ct.sfx', on ? '1' : '0'); } catch (e) { /* storage is optional */ }
     document.querySelectorAll('[data-sfx]').forEach((b) => b.setAttribute('aria-pressed', String(on)));
+    updateRain();
   }
 
   let quitArmed = 0;   // when Quit was first tapped in an online match
@@ -1870,7 +1982,24 @@
     theme = value;
     try { localStorage.setItem('ct.theme', value); } catch (e) { /* storage is optional */ }
     document.querySelectorAll('[data-theme]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.theme === value)));
+    $('courtPill').textContent = 'Court: ' + THEME_NAME[value];
     CT.setTheme(renderer, value);
+    updateRain();
+  }
+
+  function setStorm(on) {
+    stormOn = on;
+    try { localStorage.setItem('ct.storm', on ? '1' : '0'); } catch (e) { /* storage is optional */ }
+    document.querySelectorAll('[data-storm]').forEach((b) => b.setAttribute('aria-pressed', String(on)));
+    // switched off mid-match: the sky clears and it rains
+    if (!on) { CT.stormEvent(renderer, 'reset', 1); updateRain(); }
+  }
+
+  function setBall(value) {
+    ballLook = value;
+    try { localStorage.setItem('ct.ball', value); } catch (e) { /* storage is optional */ }
+    document.querySelectorAll('[data-ball]').forEach((b) => b.setAttribute('aria-pressed', String(value === 'real')));
+    CT.setBall(renderer, value);
   }
 
   // Lens spacing in mm, from Settings' - and + or the headset's menu; in VR
@@ -2067,7 +2196,16 @@
     document.querySelectorAll('[data-gfx]').forEach((b) => b.addEventListener('click', () => setGfx(b.dataset.gfx)));
     setGfx(gfx);
     document.querySelectorAll('[data-theme]').forEach((b) => b.addEventListener('click', () => setTheme(b.dataset.theme)));
+    // the menu's court pill steps through the themes: Rain 3D, Concrete 3D, Cyberpunk
+    $('courtPill').addEventListener('click', () => {
+      const order = ['rain', 'concrete', 'cyberpunk'];
+      setTheme(order[(order.indexOf(theme) + 1) % order.length]);
+    });
     setTheme(theme);
+    document.querySelectorAll('[data-ball]').forEach((b) => b.addEventListener('click', () => setBall(ballLook === 'real' ? 'neon' : 'real')));
+    setBall(ballLook);
+    document.querySelectorAll('[data-storm]').forEach((b) => b.addEventListener('click', () => setStorm(!stormOn)));
+    setStorm(stormOn);
     document.querySelectorAll('[data-vr-lens-step]').forEach((b) => b.addEventListener('click', () => setLens(vrFit.lens + Number(b.dataset.vrLensStep))));
     setLens(vrFit.lens);
     for (const key of ['fov', 'gfx']) {

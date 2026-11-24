@@ -204,7 +204,7 @@
   // once it's past): the ball reaching you, or on your serve the top of the
   // toss. null when there's nothing coming. In a headset you're often
   // looking at your target, not the ball, so this drives a ring round the
-  // middle of your view and a countdown of beeps.
+  // middle of your view.
   function timeToHit(g, side, info) {
     const b = g.ball;
     if (g.phase === 'toss' && g.server === side && b.active) {

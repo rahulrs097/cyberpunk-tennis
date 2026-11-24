@@ -33,7 +33,7 @@ const SHELL = [
 const SHELL_URLS = new Set(SHELL.map((p) => new URL(p, self.registration.scope).href));
 // The 3D graphics level's files: not fetched at install (most never use
 // them), but kept once they have been, so 3D works offline after that.
-const LAZY = /\/(js\/render3d\.js|vendor\/three\/.+\.js|models\/.+)$/;
+const LAZY = /\/(js\/render3d\.js|vendor\/three\/.+\.js|models\/.+|sound\/(thunder-.+|rain-loop)\.mp3)$/;
 // Google Fonts: the stylesheet and the font files, kept once seen
 const FONT_HOSTS = ['fonts.googleapis.com', 'fonts.gstatic.com'];
 

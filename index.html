@@ -190,6 +190,10 @@
   .title span { display: block; color: var(--pink); text-shadow: 0 0 20px rgba(255,63,180,0.7); }
   .title b { color: var(--cyan); text-shadow: 0 0 20px rgba(37,217,255,0.6); font-weight: 900; }
   .lede { color: var(--muted); font-size: 14px; line-height: 1.45; margin: 0; }
+  /* the menu's court switch: small and quiet, one tap to the next theme */
+  .pill { justify-self: center; align-self: center; padding: 6px 14px; min-height: 32px; border-radius: 999px; border: 1px solid var(--line); background: transparent; color: var(--muted); font: 500 13px var(--ui); letter-spacing: 0.02em; cursor: pointer; }
+  .pill::after { content: ' \21BB'; opacity: 0.7; }
+  .pill:active { color: var(--ink); border-color: var(--muted); }
   .label { font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); }
   .picks { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .pick {
@@ -379,6 +383,7 @@
         <span class="af">Topspin attacker, quickest feet</span>
       </button>
     </div>
+    <button class="pill" id="courtPill" aria-label="Change court">Court: Rain 3D</button>
     <button class="btn primary" id="resumeMatch" hidden>Resume match<small id="resumeScore"></small></button>
     <div class="panel">
       <div class="label">CPU level</div>
@@ -416,6 +421,8 @@
       <button data-sfx aria-pressed="true">Sound</button>
       <button data-zen aria-pressed="false">Zen</button>
       <button data-full aria-pressed="true">Full screen</button>
+      <button data-ball aria-pressed="false">Real ball</button>
+      <button data-storm aria-pressed="true">Storm</button>
     </div>
     <div class="opts">
       <div class="label">Theme</div>
@@ -552,7 +559,7 @@
           <li>Look down the court and press the button to start.</li>
           <li>Watch the ball and press as it arrives: where the shot goes is picked for you, and automove does the running. A small ring on the ball closes as it comes.</li>
           <li>For a power shot, press early, hold, and let go as the ball arrives. The ring in the middle of your view fills when the hold is long enough.</li>
-          <li>If you look away, an arrow points to the ball, and two ticks then a high beep count you down.</li>
+          <li>If you look away, an arrow points to the ball.</li>
           <li>On your serve, press to toss, then press again at the top.</li>
           <li>Look down at your feet and press to pause. Turn to Exit VR on the left, Resume ahead or Quit on the right, and press. The end of a match works the same way.</li>
           <li>Look straight up and press to recentre, then look down the court and press again.</li>

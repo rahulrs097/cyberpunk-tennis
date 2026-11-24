@@ -389,6 +389,29 @@
     if (r.want3d) load3d(r);
   }
 
+  // Rain 3D's storm, driven by the play (Rahul, 2026-11-24). A match starts
+  // under clear stars; each winner or ace adds cloud and brings a lightning
+  // strike just after the point, and every point lets a little cloud drift
+  // away, so a run of errors clears the sky again. The rain holds off until
+  // the first strike. `near` (0-1): how
+  // emphatic the shot was, so how close the strike. Returns the strike's
+  // distance in metres (for the thunder's delay), or 0.
+  function stormEvent(r, kind, near) {
+    const s = r.storm || (r.storm = { clouds: 0, cover: 0, strikes: [], n: 0, rain: 1, pour: 1 });
+    // ('reset': a new match; near is 1 when it rains from the start, as with the storm off)
+    if (kind === 'reset') { s.clouds = 0; s.cover = 0; s.strikes.length = 0; s.rain = s.pour = near ? 1 : 0; return 0; }
+    s.clouds = Math.max(0, s.clouds - 0.08);
+    if (kind !== 'strike') return 0;
+    s.clouds = Math.min(1, s.clouds + 0.3);
+    s.rain = 1;   // the first winner's lightning brings the rain
+    const dist = 700 - 550 * Math.max(0, Math.min(1, near));
+    s.strikes.push({ at: performance.now() / 1000 + 0.12, dist, n: s.n++ });
+    return dist;
+  }
+
+  // Settings' Ball: 'neon' (glowing, with a bright tail) or 'real' (felt, a seam, no glow)
+  function setBall(r, look) { r.realBall = look === 'real'; }
+
   // The 3D view is a separate module (and three.js), fetched the first time
   // it's picked. Until it's ready, or if the phone has no WebGL, the flat
   // view carries on.
@@ -591,7 +614,7 @@
   BOARD_PHOTO.src = 'img/billboard.jpg';
 
   // In an online match the sign shows the other player instead: their name
-  // and 32×32 picture (CT.showOpponent), or just the name with no picture.
+  // and 96×96 picture (CT.showOpponent), or just the name with no picture.
   // what the sign says now: the latest word until it expires, else the
   // photo (or just the tag until the photo has loaded). Online, a slow
   // ping takes the tag's place, and a match paused for lag says so over
@@ -674,8 +697,8 @@
     if (!led) ctx.strokeRect(8, 8, W - 16, H - 16);
     if (!cur.score) {
       const sw = img.naturalWidth, sh = Math.min(img.naturalHeight, sw);
-      // a player's 32×32 picture is blown up as crisp pixels
-      ctx.imageSmoothingEnabled = img === BOARD_PHOTO;
+      // an old 32×32 player picture is blown up as crisp pixels; a 96×96 one is smoothed
+      ctx.imageSmoothingEnabled = img === BOARD_PHOTO || img.naturalWidth >= 64;
       ctx.drawImage(img, 0, photoStep(now, img) * sh / side, sw, sh, m, m, side, side);
       ctx.imageSmoothingEnabled = true;
       ctx.beginPath(); ctx.moveTo(m + side + 3, 8); ctx.lineTo(m + side + 3, H - 8); ctx.stroke();
@@ -1066,6 +1089,54 @@
   }
   const BOARD_ANIMS = { parking: animParking, tentacle: animTentacle, thought: animThought, rocket: animRocket };
 
+  // The building next door, under the billboard: as wide as the sign plus
+  // 8 m, 14 m deep, its roof NEXT_DROP below ours (the same block as in the
+  // 3D themes). A dark box with a few lit windows, only the sides facing us.
+  const NEXT_DROP = 2.2, NEXT_H = 60;
+  const NEXT_WIN = [];
+  for (let i = 0; i < 70; i++) NEXT_WIN.push([hash(i * 3.1 + 0.7), hash(i * 5.3 + 1.9), hash(i * 7.7 + 2.3)]);
+  function drawNextDoor(ctx, r, f, ca, sa) {
+    const B = BOARD, hw = (B.w + 8) / 2, hd = 7;
+    const cx = f * B.x, cy = f * B.y, top = -NEXT_DROP, bot = top - NEXT_H;
+    // a corner from (u across the sign, v away from the court)
+    const nx = -sa, ny = ca;
+    const P = (u, v, z) => proj(r, cx + u * ca + v * nx, cy + u * sa + v * ny, z);
+    const quad = (a, b, c, d) => {
+      if (a.behind || b.behind || c.behind || d.behind) return false;
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.lineTo(c.x, c.y); ctx.lineTo(d.x, d.y); ctx.closePath();
+      return true;
+    };
+    const cam = r.cam;
+    // the walls: [u0, v0, u1, v1, outward x, outward y]
+    const walls = [[-hw, -hd, hw, -hd, -nx, -ny], [hw, -hd, hw, hd, ca, sa], [hw, hd, -hw, hd, nx, ny], [-hw, hd, -hw, -hd, -ca, -sa]];
+    ctx.save();
+    ctx.lineJoin = 'round';
+    walls.forEach(([u0, v0, u1, v1, ox, oy], wi) => {
+      const mx = cx + (u0 + u1) / 2 * ca + (v0 + v1) / 2 * nx, my = cy + (u0 + u1) / 2 * sa + (v0 + v1) / 2 * ny;
+      if ((cam.x - mx) * ox + (cam.y - my) * oy <= 0) return;   // faces away
+      if (!quad(P(u0, v0, top), P(u1, v1, top), P(u1, v1, bot), P(u0, v0, bot))) return;
+      ctx.fillStyle = wi % 2 ? '#0f0e19' : '#13121f';
+      ctx.fill();
+      // a few lit windows in its top floors
+      const len = Math.hypot(u1 - u0, v1 - v0);
+      for (const [a, b, c] of NEXT_WIN) {
+        if (c > 0.22 || (a * 4 + wi) % 1 > 0.6) continue;
+        const t = a, z = top - 1.2 - Math.floor(b * 9) * 3;
+        const w0 = t - 0.9 / len, w1 = t + 0.9 / len;
+        const L = (q, zz) => P(u0 + (u1 - u0) * q, v0 + (v1 - v0) * q, zz);
+        if (!quad(L(w0, z), L(w1, z), L(w1, z - 1.3), L(w0, z - 1.3))) continue;
+        ctx.fillStyle = c < 0.06 ? 'rgba(159,200,255,0.55)' : 'rgba(255,207,138,0.5)';
+        ctx.fill();
+      }
+    });
+    // its roof, with a parapet edge
+    if (quad(P(-hw, -hd, top), P(hw, -hd, top), P(hw, hd, top), P(-hw, hd, top))) {
+      ctx.fillStyle = '#1e1d2c'; ctx.fill();
+      ctx.strokeStyle = '#3d3b55'; ctx.lineWidth = Math.max(1.5, (P(0, 0, top).s || 0) * 0.35); ctx.stroke();
+    }
+    ctx.restore();
+  }
+
   function drawBillboard(ctx, r) {
     const B = BOARD, z1 = B.z + B.h;
     // an online guest plays from the other end, so the sign stands over
@@ -1077,10 +1148,18 @@
     const tl = at(0, z1), tr = at(1, z1);
     if (tl.behind || tr.behind) return;
     if (Math.max(tl.x, tr.x) < 0 || Math.min(tl.x, tr.x) > r.W) return;
-    // the pylon it stands on, down into the skyline
-    const pb = at(0.5, 0), pt = at(0.5, B.z);
-    ctx.strokeStyle = '#1c1b2a'; ctx.lineWidth = Math.max(2, (pt.s || 0) * 0.5);
-    ctx.beginPath(); ctx.moveTo(pb.x, pb.y); ctx.lineTo(pt.x, pt.y); ctx.stroke();
+    // it stands past our roof's edge, on the roof of the building next door
+    drawNextDoor(ctx, r, f, ca, sa);
+    // two legs down to that roof, with a brace between them
+    ctx.strokeStyle = '#2a2938'; ctx.lineCap = 'butt';
+    for (const u of [0.2, 0.8]) {
+      const pb = at(u, -NEXT_DROP), pt = at(u, B.z);
+      ctx.lineWidth = Math.max(1.5, (pt.s || 0) * 0.28);
+      ctx.beginPath(); ctx.moveTo(pb.x, pb.y); ctx.lineTo(pt.x, pt.y); ctx.stroke();
+    }
+    const b0 = at(0.2, B.z * 0.45), b1 = at(0.8, B.z * 0.45);
+    ctx.lineWidth = Math.max(1, (b0.s || 0) * 0.16);
+    ctx.beginPath(); ctx.moveTo(b0.x, b0.y); ctx.lineTo(b1.x, b1.y); ctx.stroke();
     const { src, on } = boardSource(r);
     const W = BOARD_TEX.w, H = BOARD_TEX.h, N = 10, sw = W / N;
     const base = ctx.getTransform();   // (in VR: one eye's half of the screen, turned with your head)
@@ -1482,7 +1561,8 @@
       for (let i = 1; i < g.trail.length; i++) {
         const s = segment(r, [g.trail[i - 1].x, g.trail[i - 1].y, g.trail[i - 1].z], [g.trail[i].x, g.trail[i].y, g.trail[i].z]);
         if (!s) continue;
-        ctx.strokeStyle = `rgba(228,255,74,${(i / g.trail.length) * 0.45})`;
+        // (the real ball leaves only a faint streak)
+        ctx.strokeStyle = r.realBall ? `rgba(225,232,170,${(i / g.trail.length) ** 2 * 0.18})` : `rgba(228,255,74,${(i / g.trail.length) * 0.45})`;
         ctx.lineWidth = Math.max(r.vr ? 0.6 : 1.5, 0.08 * s[1].s) * (i / g.trail.length);
         ctx.beginPath(); ctx.moveTo(s[0].x, s[0].y); ctx.lineTo(s[1].x, s[1].y); ctx.stroke();
       }
@@ -1502,9 +1582,28 @@
       rad = Math.min(r.H * 0.04, Math.max(2.8, 0.075 * p.s));   // capped when it flies past your face
       gr = rad * 4;
     }
+    if (r.realBall) { drawRealBall(ctx, p.x, p.y, rad, g); return; }
     ctx.drawImage(glowSprite(r, PAL.ballGlow, 0.8), p.x - gr, p.y - gr, gr * 2, gr * 2);
     ctx.fillStyle = PAL.ball;
     ctx.beginPath(); ctx.arc(p.x, p.y, rad, 0, Math.PI * 2); ctx.fill();
+  }
+
+  // A real tennis ball: optic-yellow felt lit from above, dark underneath,
+  // and (when it's big enough to see) its white seam turning with the spin
+  function drawRealBall(ctx, x, y, rad, g) {
+    const gr = ctx.createRadialGradient(x - rad * 0.35, y - rad * 0.45, rad * 0.1, x, y, rad);
+    gr.addColorStop(0, '#e6f25a'); gr.addColorStop(0.6, '#b9cc2c'); gr.addColorStop(1, '#55600e');
+    ctx.fillStyle = gr;
+    ctx.beginPath(); ctx.arc(x, y, rad, 0, Math.PI * 2); ctx.fill();
+    if (rad < 3) return;
+    const a = (g.time || 0) * 9;
+    ctx.save();
+    ctx.beginPath(); ctx.arc(x, y, rad, 0, Math.PI * 2); ctx.clip();
+    ctx.strokeStyle = 'rgba(245,245,230,0.85)'; ctx.lineWidth = Math.max(0.8, rad * 0.12);
+    ctx.beginPath();
+    ctx.arc(x + Math.cos(a) * rad * 0.95, y + Math.sin(a) * rad * 0.95, rad * 0.75, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
   }
 
   function ringOnBall(r, b) {
@@ -2095,6 +2194,9 @@
   CT.setVR = setVR;
   CT.setQuality = setQuality;
   CT.setTheme = setTheme;
+  CT.setBall = setBall;
+  CT.stormEvent = stormEvent;
+  CT.CALM = CALM;
   CT.renderGame = render;
   // for js/render3d.js
   CT.R2D = { COURT, PAL, LAMPS, CARS, BOARD, BOARD_TEX, LOT_EDGE, LOT_BACK, STALL_IN, STALL_OUT, STALL_W, SPRITE_SCALE, hash, proj, sizeAt, playerPose, boardSource };

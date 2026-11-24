@@ -70,7 +70,7 @@ export function create3d(r, R) {
     pm.dispose();
   }
 
-  const moon = buildSky(scene, hash);
+  const sky = buildSky(scene, hash), moon = sky.moon;
   const skyline = buildSkyline(scene, hash);
   // the simple lit scenery, until (or unless) the baked rooftop has loaded
   const plain = new THREE.Group();
@@ -100,10 +100,11 @@ export function create3d(r, R) {
       .catch((e) => console.warn('baked skyline unavailable', e));
   }
   const board = buildBoard(scene, R);
-  const players = [0, 1].map(() => buildPlayer(scene));
+  const players = [0, 1].map(() => buildPlayer(scene, R.LAMPS));
   const ball = buildBall(scene);
 
   const cam = new THREE.PerspectiveCamera(50, 1, 0.3, 2400);
+  const storm = buildStorm(scene, cam, hash);
   // the composer draws into a multisampled target, so edges stay smooth
   let composer, bloom;
   function makeComposer(w, h, dpr, samples) {
@@ -124,8 +125,15 @@ export function create3d(r, R) {
   // Concrete 3D and Rain 3D share the scanned asphalt, worn lines, steel net
   // posts and wire net once the bake has loaded; Rain adds water and glow
   const look = {};
-  function makeWet(on, now) {
+  function makeWet(on, now, r) {
     rain.visible = on;
+    // Auto steps the graphics level down on a phone that can't keep up (and
+    // Smooth has no glow pass); here the rain thins with it, and Cardboard VR,
+    // drawing every frame twice, gets the least
+    const lite = !!r.vr || r.quality === 0;
+    // (and in a match with the storm on, the rain only starts with the first winner's lightning)
+    const pour = r.storm ? r.storm.pour : 1;
+    rain.geometry.setDrawRange(0, 2 * Math.round(RAIN_N * pour * (r.vr ? 0.35 : r.quality === 0 ? 0.45 : r.quality === 1 ? 0.7 : 1)));
     if (on) rain.material.uniforms.time.value = (now / 1000) % 1000, rain.material.uniforms.cam.value.copy(cam.position);
     board.setWet(on);
     if (!baked) return;
@@ -151,21 +159,23 @@ export function create3d(r, R) {
     u.camPos.value.copy(cam.position);
     if (!on) return;
     u.time.value = (now / 1000) % 1000;
+    u.rainAmt.value = r.storm ? r.storm.pour : 1;
     u.sky.value = skyTex; u.skyOn.value = skyTex ? 1 : 0;
     board.sign.updateWorldMatrix(true, false);
     u.board.value = board.tex; u.boardInv.value.copy(board.sign.matrixWorld).invert();
-    u.boardOn.value = board.on() * 1.6;   // (brighter in the rain, as Rain's board is)
+    // (at the lite levels the puddles mirror only the sky and city: no billboard, players or ball)
+    u.boardOn.value = lite ? 0 : board.on() * 1.6;   // (brighter in the rain, as Rain's board is)
     u.boardSize.value.set(R.BOARD.w, R.BOARD.h);
     players.forEach((pl, i) => {
       const c = pl.card;
-      u.cardOn.value[i] = c.visible ? 1 : 0;
+      u.cardOn.value[i] = c.visible && !lite ? 1 : 0;
       u['card' + i].value = pl.tex;
       // the card stood upright, turned to the camera only round the vertical:
       // a sprite tilted back with the camera would mirror leaning over
       tmpQ.setFromAxisAngle(UP, Math.atan2(cam.position.x - c.position.x, cam.position.z - c.position.z));
       u.cardInv.value[i].copy(tmpM.compose(c.position, tmpQ, ONE.clone().setScalar(c.scale.x))).invert();
     });
-    u.ballOn.value = ball.mesh.visible ? 1 : 0;
+    u.ballOn.value = ball.mesh.visible && !lite ? 1 : 0;
     u.ball.value.set(ball.mesh.position.x, ball.mesh.position.y, ball.mesh.position.z, ball.mesh.scale.x);
   }
 
@@ -199,7 +209,8 @@ export function create3d(r, R) {
       board.update(r, f);
       for (const p of g.players) players[p.side].update(r, g, p, r.view === 'first' && p.side === human, cam);
       ball.update(r, g, cam);
-      makeWet(!!r.wet, now);
+      makeWet(!!r.wet, now, r);
+      storm.update(r, now, f, sky.stars, !!r.wet);
       if (composer) composer.render(); else gl.render(scene, cam);
     },
   };
@@ -245,6 +256,20 @@ const blob = canvasTex(64, 64, (g) => {
   g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
 });
 
+// a shadow cast along the ground: darkest at the feet (the texture's top),
+// soft at the sides, fading out towards its far end
+const castTex = canvasTex(64, 128, (g) => {
+  const id = g.createImageData(64, 128);
+  for (let y = 0; y < 128; y++) for (let x = 0; x < 64; x++) {
+    const t = y / 127, sx = Math.abs(x - 31.5) / 32;
+    const w = 1 - t * 0.45;   // narrower towards the tip
+    const side = Math.max(0, 1 - Math.pow(sx / w, 2));
+    const a = Math.min(1, 1.25 * side * Math.pow(1 - t, 0.8) * Math.min(1, (t + 0.04) / 0.1));
+    id.data[(y * 64 + x) * 4 + 3] = Math.round(255 * a);
+  }
+  g.putImageData(id, 0, 0);
+});
+
 function flat(geo, mat, x, y, z) {
   const m = new THREE.Mesh(geo, mat);
   m.rotation.x = -Math.PI / 2;
@@ -260,7 +285,9 @@ function buildSky(scene, hash) {
     gr.addColorStop(0.505, '#4a1d4f'); gr.addColorStop(1, '#120818');
     g.fillStyle = gr; g.fillRect(0, 0, 16, 512);
   });
-  scene.add(new THREE.Mesh(new THREE.SphereGeometry(1100, 32, 16), new THREE.MeshBasicMaterial({ map: tex, side: THREE.BackSide, fog: false, depthWrite: false })));
+  const dome = new THREE.Mesh(new THREE.SphereGeometry(1100, 32, 16), new THREE.MeshBasicMaterial({ map: tex, side: THREE.BackSide, fog: false, depthWrite: false }));
+  dome.userData.clear = tex;
+  scene.add(dome);
   const pts = [];
   for (let i = 0; i < 1400; i++) {
     const a = hash(i * 1.7) * Math.PI * 2, e = 0.05 + hash(i * 2.3 + 9) * 1.4;
@@ -268,7 +295,9 @@ function buildSky(scene, hash) {
   }
   const sg = new THREE.BufferGeometry();
   sg.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
-  scene.add(new THREE.Points(sg, new THREE.PointsMaterial({ color: 0xe6ebff, size: 1.3, sizeAttenuation: false, fog: false, transparent: true, opacity: 0.75 })));
+  const stars = new THREE.Points(sg, new THREE.PointsMaterial({ color: 0xe6ebff, size: 1.3, sizeAttenuation: false, fog: false, transparent: true, opacity: 0.75 }));
+  stars.renderOrder = -3;   // (behind the storm's clouds and the city)
+  scene.add(stars);
   // the moon, ahead and to the right, a little above the skyline
   const dir = V(Math.sin(0.45), Math.cos(0.45), 0).normalize();
   const at = (d, h) => dir.clone().multiplyScalar(d).setY(h);
@@ -280,7 +309,167 @@ function buildSky(scene, hash) {
   scene.add(halo);
   const g = new THREE.Group(); g.add(moon, halo);
   scene.remove(moon, halo); scene.add(g);
-  return g;
+  return { moon: g, dome, stars };
+}
+
+// ---------------- Rain 3D's storm ----------------
+// Clouds that roll in as winners pile up, lightning just after a winner and
+// a faint flash over everything (render.js stormEvent says when). Clouds:
+// one dome with a tiling noise seen as a flat layer overhead, so it
+// thickens towards the horizon. Nothing here is drawn in a clear sky.
+function cloudTex(hash) {
+  const N = 256, v = new Float32Array(N * N);
+  for (const [f, a] of [[4, 0.5], [8, 0.25], [16, 0.14], [32, 0.07], [64, 0.04]]) {
+    const g = Array.from({ length: f * f }, (_, i) => hash(i * 1.37 + f * 7.1));
+    const at = (i, j) => g[((j % f + f) % f) * f + ((i % f + f) % f)];
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+      const fx = (x / N) * f, fy = (y / N) * f, i = Math.floor(fx), j = Math.floor(fy);
+      let tx = fx - i, ty = fy - j; tx = tx * tx * (3 - 2 * tx); ty = ty * ty * (3 - 2 * ty);
+      v[y * N + x] += a * ((at(i, j) * (1 - tx) + at(i + 1, j) * tx) * (1 - ty) + (at(i, j + 1) * (1 - tx) + at(i + 1, j + 1) * tx) * ty);
+    }
+  }
+  const t = canvasTex(N, N, (c) => {
+    const im = c.createImageData(N, N);
+    for (let i = 0; i < N * N; i++) { const k = Math.max(0, Math.min(255, (v[i] - 0.1) * 255 / 0.85)); im.data[i * 4] = im.data[i * 4 + 1] = im.data[i * 4 + 2] = k; im.data[i * 4 + 3] = 255; }
+    c.putImageData(im, 0, 0);
+  }, false);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  return t;
+}
+
+// a strike's envelope: a bright stroke and a few return strokes, about half
+// a second; for someone who asked their phone for less motion, one soft swell
+const PULSES = [[0, 1], [0.07, 0.55], [0.19, 0.85], [0.34, 0.35]];
+function flashAt(t, calm) {
+  if (t < 0) return 0;
+  if (calm) return t < 0.8 ? 0.45 * Math.sin(Math.PI * t / 0.8) : 0;
+  let e = 0;
+  for (const [s, a] of PULSES) if (t >= s) e += a * Math.exp(-(t - s) / 0.045);
+  return Math.min(1, e);
+}
+
+function buildStorm(scene, cam, hash) {
+  const grp = new THREE.Group();
+  grp.visible = false;
+  scene.add(grp);
+  const u = {
+    map: { value: cloudTex(hash) }, cover: { value: 0 }, drift: { value: 0 },
+    flash: { value: 0 }, flashDir: { value: new THREE.Vector3(0, 0.3, -1).normalize() },
+  };
+  const clouds = new THREE.Mesh(new THREE.SphereGeometry(950, 48, 16, 0, Math.PI * 2, 0, THREE.MathUtils.degToRad(88)), new THREE.ShaderMaterial({
+    uniforms: u, transparent: true, depthWrite: false, side: THREE.BackSide, fog: false,
+    vertexShader: 'varying vec3 vDir; void main() { vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+    fragmentShader: `uniform sampler2D map; uniform float cover, drift, flash; uniform vec3 flashDir; varying vec3 vDir;
+      void main() {
+        // the layer seen as a flat ceiling, so it bunches up towards the horizon
+        vec2 p = vDir.xz / (vDir.y + 0.12) * 0.22 + vec2(drift, drift * 0.35);
+        float n = texture2D(map, p).r * 0.7 + texture2D(map, p * 2.7 + 0.3).r * 0.3;
+        float a = smoothstep(1.0 - cover * 1.15, 1.15 - cover * 1.15, n) * smoothstep(0.02, 0.16, vDir.y);
+        // dark, a little purple from the city below; lit from inside by a strike
+        vec3 c = mix(vec3(0.075, 0.045, 0.1), vec3(0.03, 0.032, 0.05), smoothstep(0.08, 0.5, vDir.y)) * (0.35 + 1.3 * n * n);
+        float near = pow(max(dot(vDir, flashDir), 0.0), 6.0);
+        c += flash * vec3(0.5, 0.55, 0.8) * (0.06 + 1.3 * near) * n * n * 1.6;
+        gl_FragColor = vec4(c, a * 0.96);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }`,
+  }));
+  clouds.renderOrder = -2;   // after the stars, before the city strip
+  grp.add(clouds);
+
+  // the bolt: a jagged ribbon from the cloud base to the city, rebuilt each strike
+  const boltMat = new THREE.MeshBasicMaterial({ color: hdr(0xdfe6ff, 5), transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false, side: THREE.DoubleSide });
+  const bolt = new THREE.Mesh(new THREE.BufferGeometry(), boltMat);
+  bolt.frustumCulled = false;
+  bolt.renderOrder = 2;
+  grp.add(bolt);
+  const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: radial, color: 0x9fb0ff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+  grp.add(glow);
+  function makeBolt(dir, dist, seed) {
+    let k = seed * 13.1;
+    const rnd = () => hash(k += 1.618) - 0.5;
+    const side = new THREE.Vector3(-dir.z, 0, dir.x);   // across the view
+    // a far strike is shorter and finer on the screen; it goes down into the city, never onto a roof near us
+    const far = (dist - 150) / 550;
+    const top = dist * (0.42 - 0.2 * far), bot = 2 + dist * 0.02, w = 0.3 + dist * 0.0015;
+    const pos = [];
+    const strand = (from, to, n, width, wander) => {
+      let prev = from.clone();
+      for (let i = 1; i <= n; i++) {
+        const t = i / n;
+        const p = from.clone().lerp(to, t);
+        if (i < n) p.addScaledVector(side, rnd() * wander).y += rnd() * wander * 0.3;
+        const ww = width * (1 - t * 0.5);
+        const a0 = prev.clone().addScaledVector(side, -ww), a1 = prev.clone().addScaledVector(side, ww);
+        const b0 = p.clone().addScaledVector(side, -ww), b1 = p.clone().addScaledVector(side, ww);
+        pos.push(...a0.toArray(), ...a1.toArray(), ...b1.toArray(), ...a0.toArray(), ...b1.toArray(), ...b0.toArray());
+        if (i === Math.round(n * 0.35) || i === Math.round(n * 0.6)) branch.push(p.clone());
+        prev = p;
+      }
+    };
+    const branch = [];
+    const start = dir.clone().multiplyScalar(dist).setY(top), end = dir.clone().multiplyScalar(dist).setY(bot);
+    end.addScaledVector(side, rnd() * dist * 0.15);
+    strand(start, end, 14, w, dist * 0.05);
+    for (const b of branch.slice(0, 2)) {
+      const to = b.clone().addScaledVector(side, rnd() * dist * 0.25).setY(b.y - (top - bot) * (0.2 + 0.15 * (rnd() + 0.5)));
+      strand(b, to, 6, w * 0.45, dist * 0.03);
+    }
+    bolt.geometry.dispose();
+    bolt.geometry = new THREE.BufferGeometry();
+    bolt.geometry.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    glow.position.copy(start);
+    glow.scale.setScalar(dist * 0.5);
+  }
+
+  // a faint wash of light over the whole view in the flash, in front of the camera
+  const wash = new THREE.Mesh(new THREE.PlaneGeometry(4, 4), new THREE.MeshBasicMaterial({ color: 0xb8c4ff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthTest: false, depthWrite: false, fog: false, toneMapped: false }));
+  wash.position.z = -0.5;
+  wash.renderOrder = 10;
+  wash.visible = false;
+  cam.add(wash);
+  scene.add(cam);
+
+  let cur = null, lastT = 0;
+  return {
+    update(r, now, f, stars, on) {
+      const s = r.storm;
+      grp.visible = on && !!s && (s.cover > 0.005 || s.clouds > 0 || !!cur);
+      wash.visible = false;
+      stars.material.opacity = 0.75;
+      if (!on || !s) return;
+      const t = now / 1000, dt = Math.min(0.1, Math.max(0, t - lastT));
+      lastT = t;
+      // the clouds roll in (or drift off) over a few seconds
+      s.cover += (s.clouds - s.cover) * Math.min(1, dt * 0.35);
+      s.pour += (s.rain - s.pour) * Math.min(1, dt * 0.45);   // the rain sets in over a few seconds
+      u.cover.value = s.cover;
+      u.drift.value = (t * 0.004) % 100;
+      stars.material.opacity = 0.75 * (1 - Math.min(1, s.cover * 1.4));
+      if (s.strikes.length && t >= s.strikes[0].at) {
+        cur = s.strikes.shift();
+        // somewhere ahead over the city, left or right of the far end
+        const a = (hash(cur.n * 3.7 + 1) - 0.5) * 0.8;
+        cur.dir = V(Math.sin(a) * f, Math.cos(a) * f, 0).normalize();
+        makeBolt(cur.dir, cur.dist, cur.n + 1);
+        u.flashDir.value.copy(cur.dir).setY(0.35).normalize();
+      }
+      let e = 0;
+      if (cur) {
+        const age = t - cur.at;
+        e = flashAt(age, CT.CALM);
+        if (age > 1) cur = null;
+      }
+      const k = cur ? 1 - (cur.dist - 150) / 550 * 0.6 : 0;   // a near strike lights more
+      u.flash.value = e * k;
+      boltMat.opacity = Math.min(1, e * 1.6);
+      bolt.visible = !!cur;
+      glow.material.opacity = e * 0.6;
+      glow.visible = !!cur;
+      wash.visible = e > 0.01;
+      wash.material.opacity = e * k * (r.vr ? 0.035 : 0.06);
+    },
+  };
 }
 
 // a soft glow round each lamp head, which bloom can't make on its own on a small screen
@@ -677,6 +866,44 @@ function buildCars(scene, CARS, hash) {
 }
 
 // ---------------- billboard ----------------
+// The building next door that the billboard stands on: a flat roof `drop`
+// metres below ours with a low parapet, and dark walls with a few lit
+// windows going down to the street. In the billboard's own frame: x along
+// the sign, z out of its face (towards the court), the roof's top at -drop.
+function buildNextDoor(w, d, drop) {
+  const g = new THREE.Group();
+  const H = 60;
+  let seed = 23;
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  const win = canvasTex(128, 256, (c) => {
+    c.fillStyle = '#0d0e14'; c.fillRect(0, 0, 128, 256);
+    for (let y = 4; y < 256; y += 9) for (let x = 3; x < 128; x += 8) {
+      const h = rnd();
+      c.fillStyle = h > 0.93 ? '#ffcf8a' : h > 0.9 ? '#9fc8ff' : '#14161e';
+      c.fillRect(x, y, 5, 5);
+    }
+  });
+  win.wrapS = win.wrapT = THREE.RepeatWrapping;
+  win.repeat.set(w / 12, H / 12);
+  const wall = new THREE.MeshBasicMaterial({ map: win });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(w, H, d), [wall, wall, new THREE.MeshBasicMaterial({ color: 0x24252b }), wall, wall, wall]);
+  body.position.set(0, -drop - H / 2, 0);
+  g.add(body);
+  // the parapet round its roof, and a couple of roof boxes
+  const lip = new THREE.MeshBasicMaterial({ color: 0x2c2d34 });
+  for (const [bw, bd, x, z] of [[w, 0.25, 0, d / 2], [w, 0.25, 0, -d / 2], [0.25, d, w / 2, 0], [0.25, d, -w / 2, 0]]) {
+    const p = new THREE.Mesh(new THREE.BoxGeometry(bw, 0.9, bd), lip);
+    p.position.set(x, -drop + 0.45, z);
+    g.add(p);
+  }
+  for (const [bw, bh, bd, x, z] of [[2.4, 1.4, 1.8, -w * 0.38, -d * 0.25], [1.6, 1.0, 1.6, w * 0.4, d * 0.2]]) {
+    const b = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, bd), new THREE.MeshBasicMaterial({ color: 0x1b1c22 }));
+    b.position.set(x, -drop + bh / 2, z);
+    g.add(b);
+  }
+  return g;
+}
+
 const BOARD_DIM = 0.6;   // the one neon accent left, kept soft against the concrete
 function buildBoard(scene, R) {
   const B = R.BOARD;
@@ -710,13 +937,18 @@ function buildBoard(scene, R) {
   const glowU = { map: { value: tex }, k: { value: 1 } };
   {
     const m = metalMat(), T = 0.22, D = 0.3;
+    // The sign stands past our roof's edge, so its legs go down to the roof
+    // of the building next door (NEXT m lower), which carries it
+    const NEXT = 2.2, LEG = B.z + NEXT;
     for (const [w, h, x, y] of [[B.w + 2 * T, T, 0, B.z + B.h + T / 2], [B.w + 2 * T, T, 0, B.z - T / 2], [T, B.h, -(B.w + T) / 2, cy], [T, B.h, (B.w + T) / 2, cy],
-      [0.28, B.z, -B.w * 0.3, B.z / 2], [0.28, B.z, B.w * 0.3, B.z / 2]]) {
-      const bar = new THREE.Mesh(new THREE.BoxGeometry(w, h, D), m);
+      [0.28, LEG, -B.w * 0.3, B.z - LEG / 2], [0.28, LEG, B.w * 0.3, B.z - LEG / 2],
+      [B.w * 0.6, 0.16, 0, B.z * 0.45], [0.8, 0.08, -B.w * 0.3, -NEXT + 0.04], [0.8, 0.08, B.w * 0.3, -NEXT + 0.04]]) {
+      const bar = new THREE.Mesh(new THREE.BoxGeometry(w, h, D * (h < 0.1 ? 2.5 : 1)), m);
       bar.position.set(x, y, -0.06);
       grp.add(bar);
     }
     post.visible = false;   // (the legs hold it now)
+    grp.add(buildNextDoor(B.w + 8, 14, NEXT));
   }
   function buildWet() {
     wetBuilt = true;
@@ -777,7 +1009,7 @@ function buildBoard(scene, R) {
 // the metre, feet at (CW/2, FEET), and shown on a card standing at their
 // feet, turned to face the camera, like the flat view's sprite.
 const PPM = 80, CARD_W = 3.6, CARD_UP = 3.0, CARD_DOWN = 0.4;
-function buildPlayer(scene) {
+function buildPlayer(scene, LAMPS) {
   const cv = document.createElement('canvas');
   cv.width = Math.round(CARD_W * PPM); cv.height = Math.round((CARD_UP + CARD_DOWN) * PPM);
   const ctx = cv.getContext('2d');
@@ -788,6 +1020,23 @@ function buildPlayer(scene) {
   const card = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map: tex, transparent: true, alphaTest: 0.02, toneMapped: false }));
   const shadow = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 1.1), new THREE.MeshBasicMaterial({ map: blob, transparent: true, opacity: 0.55, depthWrite: false }));
   shadow.rotation.x = -Math.PI / 2;
+  // what stands the cutout on the asphalt: a small near-black core right
+  // under the feet (contact), and a long soft shadow cast away from the
+  // nearest lamp, as long as that lamp's height makes it
+  const contact = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.3), new THREE.MeshBasicMaterial({ map: blob, transparent: true, opacity: 0.92, depthWrite: false }));
+  shadow.add(contact);
+  contact.position.z = 0.002;
+  // (one from each of the two nearest lamps, as under real floodlights)
+  const casts = [0, 1].map(() => {
+    const pivot = new THREE.Object3D();
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: castTex, transparent: true, opacity: 0.5, depthWrite: false, side: THREE.DoubleSide }));
+    m.rotation.x = -Math.PI / 2;
+    pivot.add(m);
+    scene.add(pivot);
+    return { pivot, m };
+  });
+  const lamps = LAMPS.map(([x, y]) => ({ x: x * 0.75, y }));
+  const LAMP_H = 7.37, BODY_H = 1.6;
   const ring = new THREE.Mesh(new THREE.RingGeometry(0.57, 0.63, 48), new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.6, depthWrite: false }));
   ring.rotation.x = -Math.PI / 2;
   scene.add(card, shadow, ring);
@@ -796,7 +1045,7 @@ function buildPlayer(scene) {
   return {
     card, tex,
     update(r, g, p, hidden, cam) {
-      card.visible = shadow.visible = ring.visible = !hidden;
+      card.visible = shadow.visible = ring.visible = casts[0].pivot.visible = casts[1].pivot.visible = !hidden;
       if (hidden) return;
       const R = CT.R2D;
       const pos = R.proj(r, p.x, p.y, 0);
@@ -818,6 +1067,17 @@ function buildPlayer(scene) {
       cam.getWorldQuaternion(q);
       card.quaternion.copy(q);
       shadow.position.copy(V(p.x, p.y, 0.015));
+      const by = lamps.map((l) => ({ l, d: Math.hypot(l.x - p.x, l.y - p.y) })).sort((a, b) => a.d - b.d);
+      casts.forEach(({ pivot, m }, i) => {
+        const { l, d } = by[i], len = Math.min(4, Math.max(0.7, BODY_H * d / (LAMP_H - BODY_H)));
+        pivot.position.copy(V(p.x, p.y, 0.013 - i * 0.001));
+        // (+z of the pivot points away from the lamp, along the ground)
+        pivot.rotation.y = Math.atan2(p.x - l.x, -(p.y - l.y));
+        m.position.set(0, 0, len * 0.5 - 0.05);
+        m.scale.set(0.9, len, 1);
+        // darker from the nearer lamp, and the shorter the shadow
+        m.material.opacity = Math.min(1, (i ? 0.75 : 1.1) * Math.min(1, 2.2 / len) + 0.15);
+      });
       ring.position.copy(V(p.x, p.y, 0.016));
       ring.material.color.set(p.ch.colors.glow);
     },
@@ -826,8 +1086,47 @@ function buildPlayer(scene) {
 
 // ---------------- ball ----------------
 const TRAIL_MAX = 40;
+const UP3 = new THREE.Vector3(0, 1, 0);
+// Settings' Ball: Neon (glowing, with a bright tail) or Real (r.realBall):
+// optic-yellow felt with its white seam, lit from the lamps above (dark
+// underneath), turning with its spin, no glow, only a faint motion streak
+// so it still reads at pace (the flat view's is render.js drawRealBall).
+function feltTex() {
+  const W = 256, H = 128;
+  let seed = 11;
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  return canvasTex(W, H, (g) => {
+    g.fillStyle = '#c8dc32'; g.fillRect(0, 0, W, H);
+    // fuzz: little light and dark flecks
+    for (let i = 0; i < 2600; i++) {
+      const l = rnd();
+      g.fillStyle = l > 0.5 ? `rgba(240,250,140,${0.25 * rnd()})` : `rgba(90,110,10,${0.25 * rnd()})`;
+      g.fillRect(rnd() * W, rnd() * H, 1 + rnd() * 2, 1 + rnd() * 2);
+    }
+    // the seam: a curve weaving round the ball (in this equirectangular map)
+    g.strokeStyle = 'rgba(245,245,235,0.95)'; g.lineWidth = 3.5;
+    g.beginPath();
+    for (let x = 0; x <= W; x += 2) {
+      const phi = (x / W) * Math.PI * 2, lat = 0.62 * Math.cos(2 * phi);
+      const y = H / 2 - (lat / Math.PI) * H;
+      if (x) g.lineTo(x, y); else g.moveTo(x, y);
+    }
+    g.stroke();
+  });
+}
+
 function buildBall(scene) {
-  const ball = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), new THREE.MeshBasicMaterial({ color: new THREE.Color(0.95, 1.15, 0.3) }));
+  const felt = new THREE.MeshBasicMaterial({ map: feltTex() });
+  felt.onBeforeCompile = (sh) => {
+    sh.vertexShader = 'varying vec3 vWN;\n' + sh.vertexShader.replace('#include <project_vertex>', '#include <project_vertex>\n vWN = normalize(mat3(modelMatrix) * normal);');
+    sh.fragmentShader = 'varying vec3 vWN;\n' + sh.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
+      // lit from the lamps overhead, a little from the city behind; dark underneath
+      vec3 n = normalize(vWN);
+      float lit = 0.22 + 0.95 * max(dot(n, normalize(vec3(0.25, 1.0, 0.35))), 0.0) + 0.15 * max(-n.z, 0.0);
+      diffuseColor.rgb *= lit;`);
+  };
+  const neon = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.95, 1.15, 0.3) });
+  const ball = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 14), neon);
   const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: radial, color: 0xc6ff2e, transparent: true, opacity: 0.22, blending: THREE.AdditiveBlending, depthWrite: false }));
   const shadow = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: blob, transparent: true, opacity: 0.5, depthWrite: false }));
   shadow.rotation.x = -Math.PI / 2;
@@ -847,11 +1146,22 @@ function buildBall(scene) {
     mesh: ball,
     update(r, g, cam) {
       const b = g.ball, on = !!b.active;
-      ball.visible = glow.visible = shadow.visible = trail.visible = on;
+      const real = !!r.realBall;
+      ball.visible = shadow.visible = trail.visible = on;
+      glow.visible = on && !real;
       if (!on) return;
+      ball.material = real ? felt : neon;
       const f = r.cam.f;
       cp.copy(cam.position);
+      const was = ball.position.clone();
       ball.position.copy(V(b.pos.x, b.pos.y, b.pos.z));
+      // turn with its travel, as if rolling forward (topspin), so the seam moves
+      d.copy(ball.position).sub(was);
+      const moved = d.length();
+      if (moved > 1e-4 && moved < 2) {
+        side.crossVectors(UP3, d).normalize();
+        ball.rotateOnWorldAxis(side, Math.min(0.9, moved / 0.033 * 0.35));
+      }
       const dist = Math.max(0.4, ball.position.distanceTo(cp));
       // as in the flat view: twice life size, never under 2.8 px, capped up
       // close. In VR the floor is 0.9 px and the glow follows the true size:
@@ -884,8 +1194,10 @@ function buildBall(scene) {
         const w = Math.max((r.vr ? 0.6 : 1.5) * dd / f, 0.08) * fr * 0.5;
         tpos[i * 6] = a.x + side.x * w; tpos[i * 6 + 1] = a.y + side.y * w; tpos[i * 6 + 2] = a.z + side.z * w;
         tpos[i * 6 + 3] = a.x - side.x * w; tpos[i * 6 + 4] = a.y - side.y * w; tpos[i * 6 + 5] = a.z - side.z * w;
-        const c = fr * 0.45 * (i < n ? 1 : 0);
-        for (const o of [0, 3]) { tcol[i * 6 + o] = 0.89 * c; tcol[i * 6 + o + 1] = 1.0 * c; tcol[i * 6 + o + 2] = 0.29 * c; }
+        // (the real ball leaves a faint motion streak, the neon one a bright tail)
+        const c = (real ? fr * fr * 0.16 : fr * 0.45) * (i < n ? 1 : 0);
+        const tc = real ? [0.85, 0.9, 0.55] : [0.89, 1.0, 0.29];
+        for (const o of [0, 3]) { tcol[i * 6 + o] = tc[0] * c; tcol[i * 6 + o + 1] = tc[1] * c; tcol[i * 6 + o + 2] = tc[2] * c; }
       }
       tg.attributes.position.needsUpdate = true;
       tg.attributes.color.needsUpdate = true;
@@ -944,7 +1256,7 @@ function groundMaterial(ground, grain, LAMPS, wet) {
   const cols = LAMPS.map(([, , c]) => { const k = new THREE.Color(c); return /ffb04a/i.test(c) ? k : k.lerp(new THREE.Color(1, 1, 1), 0.5); });
   const u = THREE.UniformsUtils.merge([THREE.UniformsLib.fog, {
     camPos: { value: new THREE.Vector3() },
-    time: { value: 0 },
+    time: { value: 0 }, rainAmt: { value: 1 },
     lampPos: { value: lamps }, lampCol: { value: cols },
     sky: { value: null }, skyOn: { value: 0 },
     board: { value: null }, boardInv: { value: new THREE.Matrix4() }, boardOn: { value: 0 }, boardSize: { value: new THREE.Vector2(1, 1) },
@@ -977,7 +1289,7 @@ function groundMaterial(ground, grain, LAMPS, wet) {
       }`,
     fragmentShader: `
       uniform sampler2D map, grain, asphalt, asphaltN, puddles, sky, board, card0, card1;
-      uniform vec3 camPos; uniform float time;
+      uniform vec3 camPos; uniform float time, rainAmt;
       uniform vec3 lampPos[NL]; uniform vec3 lampCol[NL];
       uniform float skyOn, boardOn; uniform mat4 boardInv; uniform vec2 boardSize;
       uniform mat4 cardInv[2]; uniform float cardOn[2];
@@ -1020,7 +1332,7 @@ function groundMaterial(ground, grain, LAMPS, wet) {
         float ph = h21(cell), age = fract(time * 1.3 + ph);
         vec2 off = vec2(h21(cell + 7.1), h21(cell + 3.7)) - 0.5;
         float dr = length(f - off * 0.5), rad = age * 0.45;
-        float ring = sin(clamp((dr - rad) * 40.0, -PI, PI)) * (1.0 - age) * step(abs(dr - rad), 0.08);
+        float ring = sin(clamp((dr - rad) * 40.0, -PI, PI)) * (1.0 - age) * step(abs(dr - rad), 0.08) * step(h21(cell + 1.3), rainAmt);   // (fewer drops while the rain starts)
         vec3 nw = normalize(vec3((f - off * 0.5).x / max(dr, 1e-3) * ring * 0.12, 1.0, (f - off * 0.5).y / max(dr, 1e-3) * ring * 0.12));
         n = normalize(mix(n, nw, pud));
         // water sits in the pits, so they are glossier than the stone tops
@@ -1110,8 +1422,9 @@ function wornLines(mat, grain, asphalt, wet) {
 
 // rain: thin streaks in a 24 m box that moves with the camera; the falling
 // is done on the GPU, so it costs one draw call
+const RAIN_N = 1400;   // streaks at the top graphics levels
 function buildRain(scene) {
-  const N = 1400, BOX = 24, TOP = 12, LEN = 0.55;
+  const N = RAIN_N, BOX = 24, TOP = 12, LEN = 0.55;
   const pos = new Float32Array(N * 6), seed = new Float32Array(N * 2 * 4);
   let s = 3;
   const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647);
