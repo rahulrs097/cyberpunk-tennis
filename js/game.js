@@ -11,6 +11,12 @@
   const CONTACT_AHEAD = 0.35;   // ideal contact point in front of the body
   const OUTER = 2.5;            // a swipe more than this many windows off whiffs
   const REACT = 0.24;           // split-step: seconds before an auto-moving player can react to a shot
+  // Until it has reacted to a shot the CPU can only block a ball that comes
+  // at its body (within BLOCK_REACH m); its full reach comes back over the
+  // next REACH_ARM seconds as it gets the racket across. A smash from the
+  // net is on it before it has reacted, so only one hit at it comes back.
+  const BLOCK_REACH = 0.5;
+  const REACH_ARM = 0.2;
   const ACCEL = 8;              // m/s² from a standstill to top speed
   const AIM_FULL = 0.6;         // a swipe this many radians off straight aims at the sideline
   const NET_ZONE = 7.5;
@@ -377,6 +383,11 @@
     return Math.abs(b.pos.x - p.x) <= p.ch.reach &&
       b.pos.z <= p.ch.maxZ &&
       Math.abs(p.fwd * (b.pos.y - p.y)) <= 2.8;
+  }
+
+  // How far to the side the CPU can get its racket to right now.
+  function cpuReach(g, p) {
+    return lerp(BLOCK_REACH, p.ch.reach, clamp((g.time - p.reactUntil) / REACH_ARM, 0, 1));
   }
 
   function incomingTo(g, p) {
@@ -1354,7 +1365,7 @@
   function crossPlay(g, p) {
     const b = g.ball;
     if (g.control[p.side] === 'cpu') {
-      if (c_hasPlan(p) && canReach(g, p)) { cpuHit(g, p); return true; }
+      if (c_hasPlan(p) && canReach(g, p) && Math.abs(b.pos.x - p.x) <= cpuReach(g, p)) { cpuHit(g, p); return true; }
       // got there a step too late: lunge for it anyway
       if (c_hasPlan(p) && Math.abs(b.pos.x - p.x) <= p.ch.reach + 1.2 && b.pos.z <= p.ch.maxZ + 0.5) swingMiss(g, p, 'Out of reach');
     } else if (p.pending) {

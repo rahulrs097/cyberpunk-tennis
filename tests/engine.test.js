@@ -1303,3 +1303,31 @@ test('the engine says the moment a player runs past the yellow line', () => {
   assert.equal(parks[0].during, 3);
   assert.ok(Math.abs(parks[0].x) > CT.COURT.PARK);
 });
+
+// A full-pace smash from the net, aimed deep `lx` m to the side of a CPU
+// standing at the net (it passes the CPU about half as far to the side).
+// Does the CPU get a racket on it?
+function smashAtNetPlayer(level, lx) {
+  const CT = loadEngine(3);
+  let g = null;
+  const hits = [];
+  g = CT.createGame({ p0: 'philosopher', p1: 'octopus', control: ['human', 'cpu'], autoMove: [false, false], ...levelOpts(CT, level),
+    onEvent: (t, d) => { if (g && t === 'hit') hits.push(d.side); } });
+  g.phase = 'rally';
+  const h = g.players[0], c = g.players[1];
+  h.x = h.tx = 0; h.y = h.ty = -3;
+  c.atNet = true;
+  const s = CT._netCover(g, c); c.x = c.tx = s.x; c.y = c.ty = s.y;
+  const b = g.ball;
+  b.pos = { x: 0, y: -2.65, z: 2.8 }; b.vel = { x: 0, y: -1, z: -1 }; b.spin = 0; b.side = 0;
+  b.active = true; b.inFlight = true; b.bounces = 0; b.lastHitter = 1; b.isServe = false; b.netted = false;
+  CT._applyShot(g, h, CT._computeShot(g, h, { aim: 0, landX: c.x + lx, pace: 1, spinDir: 1, curve: 0, depth: 1 }, 0));
+  for (let i = 0; i < 120 && g.phase === 'rally' && !hits.includes(1); i++) CT.updateGame(g, 1 / 60);
+  return hits.includes(1);
+}
+
+test('a smash from the net beats a Pro CPU at the net unless it is hit at its body', () => {
+  assert.ok(!smashAtNetPlayer('pro', 3), 'no time to get the racket across to a smash 1.5 m away');
+  assert.ok(!smashAtNetPlayer('pro', -3));
+  assert.ok(smashAtNetPlayer('pro', 0.4), 'one at its body is blocked');
+});
