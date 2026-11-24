@@ -401,8 +401,10 @@ function buildSkyline(scene, hash) {
 // strip from LAT0 to LAT1 degrees round the court, its centre straight down
 // the court (+y), on a band of a big sphere.
 function loadSkyline(scene) {
-  const LAT0 = -4, LAT1 = 14, R = 1000, NU = 96, NV = 6, DIM = 0.55;   // must match tools/rooftop-bake/skyline.py
-  return new THREE.TextureLoader().loadAsync(BAKED + 'skyline.png').then((t) => {
+  const LAT0 = -4, LAT1 = 14, R = 1000, NU = 96, NV = 6, DIM = 0.7;   // must match tools/rooftop-bake/skyline.py
+  // a real city at night: Poly Haven's Shanghai Bund HDRI (CC0), its Pudong
+  // skyline cut into the same strip (tools/rooftop-bake/README.md)
+  return new THREE.TextureLoader().loadAsync(BAKED + 'skyline_city.png').then((t) => {
     t.colorSpace = THREE.SRGBColorSpace;
     t.anisotropy = 4;
     const pos = [], uv = [], idx = [];
@@ -590,6 +592,17 @@ function buildBoard(scene, R) {
   const tex = new THREE.CanvasTexture(document.createElement('canvas'));
   tex.colorSpace = THREE.SRGBColorSpace;
   const mat = new THREE.MeshBasicMaterial({ map: tex, color: new THREE.Color(BOARD_DIM, BOARD_DIM, BOARD_DIM), transparent: true, fog: false, side: THREE.DoubleSide });
+  // a real LED panel: a fine grid of diodes, a little less saturated, and a
+  // faint sheen on its glass from the sky
+  mat.onBeforeCompile = (sh) => {
+    sh.fragmentShader = sh.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
+      vec2 g = vMapUv * vec2(${(B.w / 0.06).toFixed(0)}.0, ${(B.h / 0.06).toFixed(0)}.0);
+      // (the grid fades out once its cells shrink towards a pixel, so it never shimmers)
+      float fade = 1.0 - smoothstep(0.25, 0.5, max(fwidth(g).x, fwidth(g).y));
+      float diode = 1.0 - smoothstep(0.25, 0.5, length(fract(g) - 0.5)) * 0.45 * fade;
+      diffuseColor.rgb = mix(diffuseColor.rgb, vec3(dot(diffuseColor.rgb, vec3(0.3, 0.59, 0.11))), 0.2) * diode;
+      diffuseColor.rgb += vec3(0.02, 0.025, 0.035) * smoothstep(0.4, 1.0, vMapUv.y);`);
+  };
   const sign = new THREE.Mesh(new THREE.PlaneGeometry(B.w, B.h), mat);
   sign.position.y = B.z + B.h / 2;
   const post = new THREE.Mesh(new THREE.BoxGeometry(0.5, B.z, 0.5), new THREE.MeshStandardMaterial({ color: 0x1c1b2a, roughness: 0.6 }));
@@ -975,7 +988,7 @@ function groundMaterial(ground, grain, LAMPS, wet) {
         d = min(d, max(abs(a.y - SL), a.x - SW));
         d = min(d, max(a.x, a.y - SL));
         d = max(d, 0.0);
-        if (WET > 0) col += LINE_GLOW * (exp(-d / 0.05) * 0.3 + exp(-d / 0.2) * 0.04) * mix(0.8, 1.15, max(pud, damp * 0.5));
+        if (WET > 0) col += LINE_GLOW * (exp(-d / 0.06) * 0.45 + exp(-d / 0.22) * 0.07) * mix(0.8, 1.3, max(pud, damp * 0.5));
         gl_FragColor = vec4(col, 1.0);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
@@ -989,7 +1002,7 @@ function groundMaterial(ground, grain, LAMPS, wet) {
 // in the rain they glow pale cyan
 function wornLines(mat, grain, asphalt, wet) {
   const m = mat.clone();
-  if (wet) m.color = new THREE.Color(0.85, 1.12, 1.25);   // pale cyan, a little above white so the glow pass just catches it
+  if (wet) m.color = new THREE.Color(0.95, 1.35, 1.5);   // pale cyan, a little above white so the glow pass just catches it
   m.onBeforeCompile = (sh) => {
     sh.uniforms.grain = { value: grain };
     sh.uniforms.asphalt = { value: asphalt };

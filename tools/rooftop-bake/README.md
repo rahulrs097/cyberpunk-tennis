@@ -55,3 +55,7 @@ python decimate.py out/props.glb ../../models/rooftop/props.glb 0.5   # 77k -> 3
 Also save half-size copies of the two pictures as `ground_2k.jpg` and
 `props_2k.jpg` (quality ~88). The Smooth and Balanced graphics levels load
 those: a quarter of the GPU memory.
+
+## skyline_city.png (the 3D themes' skyline)
+
+`models/rooftop/skyline_city.png` is cut from the **Shanghai Bund** HDRI on Poly Haven (https://polyhaven.com/a/shanghai_bund), licensed CC0, using its tonemapped 8K JPG. To remake it, run `skyline_city.py` from the folder that holds `shanghai_bund.jpg`. It keeps the same -4..14 degree, 4096 x 205 layout as `skyline.py`, so `loadSkyline` in js/render3d.js takes either file.
