@@ -88,7 +88,7 @@ export function create3d(r, R) {
   if (!PLAIN) {
     // the lower graphics levels (and Auto on a modest phone) load the 2048 px bake: a quarter of the memory
     small = LITE || (!r.max && r.quality < 2);
-    loadBaked(scene, small).then((b) => {
+    loadBaked(scene, small, R).then((b) => {
       baked = b;
       scene.remove(plain);
       dispose(plain);   // free its meshes and textures on the GPU too
@@ -129,6 +129,11 @@ export function create3d(r, R) {
     if (on) rain.material.uniforms.time.value = (now / 1000) % 1000, rain.material.uniforms.cam.value.copy(cam.position);
     board.setWet(on);
     if (!baked) return;
+    if (baked.cars) {
+      const d = baked.cars.material.userData;
+      d.wet.value = on ? 1 : 0;
+      if (d.cam) d.cam.value.copy(cam.position);
+    }
     const k = on ? 'wet' : 'dry';
     if (!look[k]) {
       const ground = groundMaterial(baked.ground, baked.grain, R.LAMPS, on);
@@ -149,7 +154,8 @@ export function create3d(r, R) {
     u.sky.value = skyTex; u.skyOn.value = skyTex ? 1 : 0;
     board.sign.updateWorldMatrix(true, false);
     u.board.value = board.tex; u.boardInv.value.copy(board.sign.matrixWorld).invert();
-    u.boardOn.value = board.on() * 1.6;   // (brighter in the rain: Rain's board is) u.boardSize.value.set(R.BOARD.w, R.BOARD.h);
+    u.boardOn.value = board.on() * 1.6;   // (brighter in the rain, as Rain's board is)
+    u.boardSize.value.set(R.BOARD.w, R.BOARD.h);
     players.forEach((pl, i) => {
       const c = pl.card;
       u.cardOn.value[i] = c.visible ? 1 : 0;
@@ -344,7 +350,7 @@ function concreteTex(size = 512) {
   }, false);
 }
 
-async function loadBaked(scene, small) {
+async function loadBaked(scene, small, R) {
   const tl = new THREE.TextureLoader();
   const tex = (f) => tl.loadAsync(BAKED + f).then((t) => { t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; return t; });
   const [ground, atlas, gltf] = await Promise.all([tex(small ? 'ground_2k.jpg' : 'ground.jpg'), tex(small ? 'props_2k.jpg' : 'props.jpg'), new GLTFLoader().loadAsync(BAKED + 'props.glb')]);
@@ -361,7 +367,88 @@ async function loadBaked(scene, small) {
   const mat = bakedMaterial(atlas);
   gltf.scene.traverse((o) => { if (o.isMesh) o.material = mat; });
   scene.add(beyond, deck, gltf.scene);
-  return { deck, dry, ground, grain };
+  const out = { deck, dry, ground, grain, cars: null };
+  // (the cars come a moment later; the roof shows without them till then)
+  loadCars(scene, R, small).then((m) => { out.cars = m; }).catch((e) => console.warn('cars unavailable', e));
+  return out;
+}
+
+// Poly Haven's scanned covered car (CC0, tools/rooftop-bake/README.md) in a
+// third of the bays the bake parks a car in (tools/rooftop-bake/covered_car.py
+// took those baked cars out). One instanced draw. The roof has no live lights, so its
+// shader lights the tarp itself from the six lamps.
+async function loadCars(scene, R, small) {
+  const tl = new THREE.TextureLoader();
+  const [gltf, map, nor] = await Promise.all([new GLTFLoader().loadAsync(BAKED + 'car.glb'), tl.loadAsync(BAKED + 'car.jpg'), tl.loadAsync(BAKED + 'car_nor.jpg')]);
+  map.colorSpace = THREE.SRGBColorSpace;
+  for (const t of [map, nor]) { t.flipY = false; t.anisotropy = small ? 2 : 4; }
+  let geo = null;
+  gltf.scene.traverse((o) => { if (o.isMesh) geo = o.geometry; });
+  const { hash } = R;
+  // the bake's bays: R.CARS, and the outer rows by the roof's sides (tools/rooftop-bake/scene.py)
+  const cars = R.CARS.map((c) => ({ ...c, face: c.sx }));
+  for (const sx of [-1, 1]) {
+    for (let y = -19.5, k = 100; y < 17.5 - 2.6; y += 2.6, k++) {
+      if (hash(k * 2.7 + sx) >= 0.45 && !(sx > 0 && y > 6.5 && y < 15.5)) cars.push({ x: sx * (16.5 + 2.15 + hash(k * 1.9) * 0.3), y: y + 1.3, k, face: -sx });
+    }
+  }
+  // about a third of the bays covered, the rest left as the baked open cars
+  // (the same pick as tools/rooftop-bake/covered_car.py)
+  const covered = cars.filter((c) => hash(c.k * 8.3 + c.face * 1.7) < 0.35);
+  const wet = { value: 0 };
+  const m = new THREE.MeshBasicMaterial({ map });
+  m.userData.wet = wet;
+  const lamps = R.LAMPS.map(([x, y]) => V(x * 0.75, y, 7.37));
+  const cols = R.LAMPS.map(([, , c]) => new THREE.Color(c));
+  m.onBeforeCompile = (sh) => {
+    Object.assign(sh.uniforms, { norMap: { value: nor }, lampPos: { value: lamps }, lampCol: { value: cols }, wet, camPos2: { value: new THREE.Vector3() } });
+    m.userData.cam = sh.uniforms.camPos2;
+    sh.vertexShader = 'varying vec3 vWP, vWN;\n' + sh.vertexShader.replace('#include <project_vertex>', `#include <project_vertex>
+      mat4 wm = modelMatrix;
+      #ifdef USE_INSTANCING
+      wm = wm * instanceMatrix;
+      #endif
+      vWP = (wm * vec4(transformed, 1.0)).xyz;
+      vWN = normalize(mat3(wm) * normal);`);
+    sh.fragmentShader = `varying vec3 vWP, vWN;
+      uniform sampler2D norMap; uniform vec3 lampPos[${lamps.length}], lampCol[${lamps.length}], camPos2; uniform float wet;
+      ` + sh.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
+      // the tarp's folds: its normal map in a frame built from the screen derivatives (no tangents)
+      vec3 n = normalize(vWN) * (gl_FrontFacing ? 1.0 : -1.0);
+      {
+        vec3 dp1 = dFdx(vWP), dp2 = dFdy(vWP); vec2 du1 = dFdx(vMapUv), du2 = dFdy(vMapUv);
+        vec3 t = cross(dp2, n) * du1.x + cross(n, dp1) * du2.x;
+        vec3 b = cross(dp2, n) * du1.y + cross(n, dp1) * du2.y;
+        float s = inversesqrt(max(max(dot(t, t), dot(b, b)), 1e-12));
+        vec3 tn = texture2D(norMap, vMapUv).xyz * 2.0 - 1.0;
+        n = normalize(t * s * tn.x + b * s * tn.y + n * tn.z);
+      }
+      vec3 v = normalize(camPos2 - vWP);
+      vec3 alb = diffuseColor.rgb * mix(1.0, 0.6, wet);
+      // night sky and the glow of the city from above, the dark deck from below
+      vec3 lit = mix(vec3(0.03, 0.025, 0.05), vec3(0.10, 0.09, 0.16), n.y * 0.5 + 0.5);
+      vec3 spec = vec3(0.0);
+      for (int i = 0; i < ${lamps.length}; i++) {
+        vec3 L = lampPos[i] - vWP; float d2 = dot(L, L); L *= inversesqrt(d2);
+        vec3 c = lampCol[i] * (60.0 / (d2 + 6.0));
+        lit += c * max(dot(n, L), 0.0);
+        // a wet tarp catches the lamps
+        spec += c * pow(max(dot(n, normalize(L + v)), 0.0), mix(12.0, 60.0, wet)) * mix(0.04, 0.5, wet);
+      }
+      diffuseColor.rgb = alb * lit + spec;`);
+  };
+  const inst = new THREE.InstancedMesh(geo, m, covered.length);
+  const o = new THREE.Object3D();
+  covered.forEach((c, i) => {
+    o.position.copy(V(c.x, c.y, 0));
+    // lengthways across the roof, nose to the court, as the bake had them
+    o.rotation.set(0, (c.face > 0 ? Math.PI / 2 : -Math.PI / 2) + (hash(c.k * 6.1) - 0.5) * 0.06, 0);
+    o.updateMatrix();
+    inst.setMatrixAt(i, o.matrix);
+  });
+  inst.computeBoundingSphere();
+  scene.add(inst);
+  return inst;
 }
 
 // towers round the horizon, windows as an emissive texture

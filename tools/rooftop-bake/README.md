@@ -59,3 +59,14 @@ those: a quarter of the GPU memory.
 ## skyline_city.png (the 3D themes' skyline)
 
 `models/rooftop/skyline_city.png` is cut from the **Shanghai Bund** HDRI on Poly Haven (https://polyhaven.com/a/shanghai_bund), licensed CC0, using its tonemapped 8K JPG. To remake it, run `skyline_city.py` from the folder that holds `shanghai_bund.jpg`. It keeps the same -4..14 degree, 4096 x 205 layout as `skyline.py`, so `loadSkyline` in js/render3d.js takes either file.
+
+## car.glb (the covered cars)
+
+The 3D themes park Poly Haven's scanned **Covered Car** (https://polyhaven.com/a/covered_car, CC0) in about a third of the bays (a hash pick); `props.glb` no longer holds the baked cars in those bays. To redo it after a new bake, download the 1k glTF and then run:
+
+```
+python3 covered_car.py <folder with covered_car_1k.gltf>   # car.glb, car.jpg (colour x AO), car_nor.jpg; strips those bays' cars from props.glb (run once per fresh props.glb)
+npm i meshoptimizer@0.21.0 && node car_lod.mjs 2000 160    # 12.6k -> ~4.1k triangles (cover, each wheel)
+```
+
+`loadCars` in js/render3d.js draws them as one instanced mesh, lit in its shader by the six lamps (the roof has no live lights).
