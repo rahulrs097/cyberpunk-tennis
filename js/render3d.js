@@ -121,27 +121,35 @@ export function create3d(r, R) {
 
   // dry or wet; when wet, what the puddles mirror this frame
   const tmpM = new THREE.Matrix4(), tmpQ = new THREE.Quaternion(), ONE = new THREE.Vector3(1, 1, 1), UP = new THREE.Vector3(0, 1, 0);
+  // Concrete 3D and Rain 3D share the scanned asphalt, worn lines, steel net
+  // posts and wire net once the bake has loaded; Rain adds water and glow
+  const look = {};
   function makeWet(on, now) {
     rain.visible = on;
     if (on) rain.material.uniforms.time.value = (now / 1000) % 1000, rain.material.uniforms.cam.value.copy(cam.position);
+    board.setWet(on);
     if (!baked) return;
-    if (on && !wet) {
-      const ground = wetGroundMaterial(baked.ground, baked.grain, R.LAMPS);
-      wet = { ground, lines: wetLines(court.mat, baked.grain, ground.uniforms.asphalt.value) };
+    const k = on ? 'wet' : 'dry';
+    if (!look[k]) {
+      const ground = groundMaterial(baked.ground, baked.grain, R.LAMPS, on);
+      look[k] = { ground, lines: wornLines(court.mat, baked.grain, ground.uniforms.asphalt.value, on), net: wireNetMaterial(C, on) };
     }
-    baked.deck.material = on ? wet.ground : baked.dry;
-    for (const m of court.meshes) m.material = on ? wet.lines : court.mat;
-    if (on && !wet.posts) wet.posts = buildMetalPosts(scene, C);
-    if (wet) wet.posts.visible = on;
-    for (const p of net.posts) p.visible = !on;
-    if (!on) return;
+    if (!look.posts) {
+      look.posts = buildMetalPosts(scene, C);
+      for (const p of net.posts) p.visible = false;
+    }
+    wet = look[k];
+    baked.deck.material = wet.ground;
+    for (const m of court.meshes) m.material = wet.lines;
+    net.mesh.material = wet.net;
     const u = wet.ground.uniforms;
     u.camPos.value.copy(cam.position);
+    if (!on) return;
     u.time.value = (now / 1000) % 1000;
     u.sky.value = skyTex; u.skyOn.value = skyTex ? 1 : 0;
     board.sign.updateWorldMatrix(true, false);
     u.board.value = board.tex; u.boardInv.value.copy(board.sign.matrixWorld).invert();
-    u.boardOn.value = board.on(); u.boardSize.value.set(R.BOARD.w, R.BOARD.h);
+    u.boardOn.value = board.on() * 1.6;   // (brighter in the rain: Rain's board is) u.boardSize.value.set(R.BOARD.w, R.BOARD.h);
     players.forEach((pl, i) => {
       const c = pl.card;
       u.cardOn.value[i] = c.visible ? 1 : 0;
@@ -345,7 +353,7 @@ async function loadBaked(scene, small) {
   const grain = concreteTex();
   grain.wrapS = grain.wrapT = THREE.RepeatWrapping;
   grain.anisotropy = 4;
-  // (the Rain theme's wet ground repeats this look: wetGroundMaterial)
+  // (shown until the scanned ground is ready: groundMaterial)
   const dry = bakedMaterial(ground, 0.85, 0, { map: grain, repeat: [(G.x1 - G.x0) / 2.5, (G.y1 - G.y0) / 2.5], amount: 0.4, desat: 0.15 });
   const deck = flat(new THREE.PlaneGeometry(G.x1 - G.x0, G.y1 - G.y0), dry, (G.x0 + G.x1) / 2, (G.y0 + G.y1) / 2, 0);
   // the roof beyond the baked part, dark
@@ -501,7 +509,8 @@ function buildNet(scene, C) {
   const grid = canvasTex(32, 32, (g) => { g.fillStyle = '#333'; g.fillRect(0, 0, 32, 32); g.strokeStyle = '#fff'; g.lineWidth = 4; g.strokeRect(0, 0, 32, 32); }, false);
   grid.wrapS = grid.wrapT = THREE.RepeatWrapping;
   grid.repeat.set(2 * X / 0.07, 1 / 0.07);
-  scene.add(new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: new THREE.Color(0.75, 0.78, 0.82), alphaMap: grid, transparent: true, opacity: 0.45, side: THREE.DoubleSide, depthWrite: false })));
+  const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: new THREE.Color(0.75, 0.78, 0.82), alphaMap: grid, transparent: true, opacity: 0.45, side: THREE.DoubleSide, depthWrite: false }));
+  scene.add(mesh);
   // the tape along the top and the posts
   const tapeMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.82, 0.86, 0.9) });   // white, like the lines
   const pts = [];
@@ -514,7 +523,7 @@ function buildNet(scene, C) {
     scene.add(p);
     posts.push(p);
   }
-  return { posts };
+  return { posts, mesh, dry: mesh.material };
 }
 
 function buildLamps(scene, LAMPS, lite) {
@@ -586,10 +595,61 @@ function buildBoard(scene, R) {
   const post = new THREE.Mesh(new THREE.BoxGeometry(0.5, B.z, 0.5), new THREE.MeshStandardMaterial({ color: 0x1c1b2a, roughness: 0.6 }));
   post.position.y = B.z / 2;
   grp.add(sign, post);
+  // a steel frame and legs (both 3D themes); in the rain, the neon's glow
+  // spilling round the sign and a haze of lit rain below it
+  const wetGrp = new THREE.Group();
+  wetGrp.visible = false;
+  grp.add(wetGrp);
+  let wetBuilt = false, wet = false;
+  const cy = B.z + B.h / 2;
+  const glowU = { map: { value: tex }, k: { value: 1 } };
+  {
+    const m = metalMat(), T = 0.22, D = 0.3;
+    for (const [w, h, x, y] of [[B.w + 2 * T, T, 0, B.z + B.h + T / 2], [B.w + 2 * T, T, 0, B.z - T / 2], [T, B.h, -(B.w + T) / 2, cy], [T, B.h, (B.w + T) / 2, cy],
+      [0.28, B.z, -B.w * 0.3, B.z / 2], [0.28, B.z, B.w * 0.3, B.z / 2]]) {
+      const bar = new THREE.Mesh(new THREE.BoxGeometry(w, h, D), m);
+      bar.position.set(x, y, -0.06);
+      grp.add(bar);
+    }
+    post.visible = false;   // (the legs hold it now)
+  }
+  function buildWet() {
+    wetBuilt = true;
+    // the glow: the sign's own picture, blurred (a low mip) and fading out
+    // past its edges, added behind it
+    const glow = (w, h, y, z, frag) => {
+      const q = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.ShaderMaterial({
+        uniforms: glowU, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false,
+        vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+        fragmentShader: `uniform sampler2D map; uniform float k; varying vec2 vUv; ${frag}`,
+      }));
+      q.position.set(0, y, z);
+      wetGrp.add(q);
+    };
+    const SX = 1.6, SY = 2.2;   // the halo's size against the sign's
+    glow(B.w * SX, B.h * SY, cy, -0.12, `void main() {
+      vec2 q = (vUv - 0.5) * vec2(${SX.toFixed(2)}, ${SY.toFixed(2)});
+      vec2 o = max(abs(q) - 0.5, 0.0) / vec2(${((SX - 1) / 2).toFixed(2)}, ${((SY - 1) / 2).toFixed(2)});
+      float f = pow(max(0.0, 1.0 - length(o)), 2.0);
+      vec3 c = textureLod(map, clamp(q + 0.5, 0.0, 1.0), 5.0).rgb;
+      gl_FragColor = vec4(c * f * 0.9 * k, 1.0);
+    }`);
+    // the haze below: the sign's lower edge colour, falling off towards the roof
+    glow(B.w * 1.2, B.z, B.z / 2, 0.4, `void main() {
+      vec3 c = textureLod(map, vec2(clamp((vUv.x - 0.5) * 1.2 + 0.5, 0.0, 1.0), 0.15), 6.0).rgb;
+      float f = pow(vUv.y, 1.6) * smoothstep(0.0, 0.25, min(vUv.x, 1.0 - vUv.x));
+      gl_FragColor = vec4(c * f * 0.35 * k, 1.0);
+    }`);
+  }
   scene.add(grp);
   let lastSrc = null, lastKey, lit = 1;
   return {
     sign, tex, on: () => lit,
+    setWet(on) {
+      if (on && !wetBuilt) buildWet();
+      wet = on;
+      wetGrp.visible = on;
+    },
     update(r, f) {
       grp.position.copy(V(f * B.x, f * B.y, 0));
       // the sign's left end is at (u = 0) and it turns by B.turn, far end to the right
@@ -599,7 +659,9 @@ function buildBoard(scene, R) {
         tex.image = src; tex.needsUpdate = true;
         lastSrc = src; lastKey = src.key;
       }
-      mat.color.setScalar(BOARD_DIM * on);
+      // brighter in the rain: neon on a wet night
+      mat.color.setScalar((wet ? 1.15 : BOARD_DIM) * on);
+      glowU.k.value = on;
       lit = on;
     },
   };
@@ -726,15 +788,16 @@ function buildBall(scene) {
   };
 }
 
-// ---------------- rain (Settings > Theme > Rain 3D) ----------------
-// The baked rooftop, wet. The ground's light is baked, so the wet look is
-// a shader on top of that bake: wet asphalt is darker and a little glossy,
+// ---------------- the scanned ground, dry or in the rain ----------------
+// The ground's light is baked, so the material look is a shader on top of
+// that bake: grit, bumps and gloss from a scanned asphalt (models/rain).
+// Dry (Concrete 3D) it is dull with a faint lamp sheen. In the rain (Rain
+// 3D) wet asphalt is darker and a little glossy,
 // and puddles are dark mirrors. What they mirror is traced in the shader,
 // not drawn twice: the baked city (by direction), the billboard and the
 // players (a ray to their flat cards), the ball (a ray to a sphere) and the
 // lamp lenses (a glossy highlight). Rain falls round the camera, and drops
 // ring the puddles.
-const WET = { N: 6, card: 2 };
 
 // where the puddles are: value noise over the baked ground, deep spots
 // above 0.5. Fewer and smaller on the court, so the ball stays easy to read.
@@ -769,7 +832,7 @@ function puddleTex(C) {
   return t;
 }
 
-function wetGroundMaterial(ground, grain, LAMPS) {
+function groundMaterial(ground, grain, LAMPS, wet) {
   const G = GROUND, C = CT.R2D.COURT;
   const lamps = LAMPS.map(([x, y]) => V(x * 0.75, y, 7.37));
   // the baked lamp colours: amber, and the pink and cyan paled half to white (scene.py)
@@ -794,7 +857,7 @@ function wetGroundMaterial(ground, grain, LAMPS) {
   } u.puddles = { value: puddleTex(CT.R2D.COURT) };
   const m = new THREE.ShaderMaterial({
     uniforms: u, fog: true,
-    defines: { DW: C.DW.toFixed(3), SW: C.SW.toFixed(3), HL: C.HL.toFixed(3), SL: C.SL.toFixed(3), NL: lamps.length, GX0: G.x0.toFixed(2), GW: (G.x1 - G.x0).toFixed(2), GY0: G.y0.toFixed(2), GH: (G.y1 - G.y0).toFixed(2),
+    defines: { WET: wet ? 1 : 0, DW: C.DW.toFixed(3), SW: C.SW.toFixed(3), HL: C.HL.toFixed(3), SL: C.SL.toFixed(3), NL: lamps.length, GX0: G.x0.toFixed(2), GW: (G.x1 - G.x0).toFixed(2), GY0: G.y0.toFixed(2), GH: (G.y1 - G.y0).toFixed(2),
       CW: CARD_W.toFixed(2), CUP: CARD_UP.toFixed(2), CDN: CARD_DOWN.toFixed(2), SKY_DIM: '0.55', BOARD_K: BOARD_DIM.toFixed(2) },
     vertexShader: `
       varying vec2 vUv; varying vec3 vW;
@@ -841,8 +904,8 @@ function wetGroundMaterial(ground, grain, LAMPS) {
         base = mix(base, vec3(dot(base, vec3(0.3, 0.59, 0.11))), 0.15);
         // how deep the water is here; the asphalt's low spots fill first
         float deep = texture2D(puddles, vUv).r - (as.b - 0.62) * 0.3;
-        float pud = smoothstep(0.64, 0.7, deep);
-        float damp = smoothstep(0.4, 0.66, deep);
+        float pud = WET > 0 ? smoothstep(0.64, 0.7, deep) : 0.0;
+        float damp = WET > 0 ? smoothstep(0.4, 0.66, deep) : 0.0;
         // the surface's tilt: the scan's normal map, flat water with rain rings
         // (a softer mip, so the grit doesn't sparkle and shimmer as the camera moves)
         vec3 tn = texture2D(asphaltN, aUv, 1.0).xyz * 2.0 - 1.0;
@@ -856,7 +919,8 @@ function wetGroundMaterial(ground, grain, LAMPS) {
         vec3 nw = normalize(vec3((f - off * 0.5).x / max(dr, 1e-3) * ring * 0.12, 1.0, (f - off * 0.5).y / max(dr, 1e-3) * ring * 0.12));
         n = normalize(mix(n, nw, pud));
         // water sits in the pits, so they are glossier than the stone tops
-        float rough = mix(mix(0.16, 0.36, smoothstep(0.5, 0.75, as.b)) * (0.8 + as.g * 0.25), 0.03, pud);
+        float rough = WET > 0 ? mix(mix(0.16, 0.36, smoothstep(0.5, 0.75, as.b)) * (0.8 + as.g * 0.25), 0.03, pud)
+          : 0.42 + as.g * 0.15;   // dry: a dull sheen, worn tops a little shinier
         // what the surface mirrors
         vec3 v = normalize(vW - camPos);
         vec3 rd = reflect(v, n);
@@ -864,18 +928,18 @@ function wetGroundMaterial(ground, grain, LAMPS) {
         float lod = rough * 9.0;
         // the night sky, and the baked city where the strip is (loadSkyline: -4..14 degrees)
         vec3 env = mix(vec3(0.02, 0.022, 0.05), vec3(0.09, 0.05, 0.11), exp(-rd.y * 6.0));
-        if (skyOn > 0.5) {
+        if (WET > 0 && skyOn > 0.5) {
           float lat = degrees(asin(rd.y));
           vec2 su = vec2(atan(rd.x, -rd.z) / (2.0 * PI) + 0.5, (lat + 4.0) / 18.0);
           if (su.y < 1.0) { vec4 s = textureLod(sky, su, lod); env = mix(env, s.rgb * SKY_DIM, s.a); }
         }
-        if (boardOn > 0.0) {
+        if (WET > 0 && boardOn > 0.0) {
           vec4 b = hitCard(boardInv, vW, rd, -boardSize * 0.5, boardSize * 0.5, board, lod);
           env = mix(env, b.rgb * BOARD_K * boardOn, b.a);
         }
-        if (cardOn[0] > 0.5) { vec4 c = hitCard(cardInv[0], vW, rd, vec2(-CW * 0.5, -CDN), vec2(CW * 0.5, CUP), card0, lod * 0.5); env = mix(env, c.rgb, c.a); }
-        if (cardOn[1] > 0.5) { vec4 c = hitCard(cardInv[1], vW, rd, vec2(-CW * 0.5, -CDN), vec2(CW * 0.5, CUP), card1, lod * 0.5); env = mix(env, c.rgb, c.a); }
-        if (ballOn > 0.5) {
+        if (WET > 0 && cardOn[0] > 0.5) { vec4 c = hitCard(cardInv[0], vW, rd, vec2(-CW * 0.5, -CDN), vec2(CW * 0.5, CUP), card0, lod * 0.5); env = mix(env, c.rgb, c.a); }
+        if (WET > 0 && cardOn[1] > 0.5) { vec4 c = hitCard(cardInv[1], vW, rd, vec2(-CW * 0.5, -CDN), vec2(CW * 0.5, CUP), card1, lod * 0.5); env = mix(env, c.rgb, c.a); }
+        if (WET > 0 && ballOn > 0.5) {
           vec3 oc = vW - ball.xyz;
           float bb = dot(oc, rd), cc = dot(oc, oc) - ball.w * ball.w * mix(4.0, 1.0, pud);
           if (bb < 0.0 && bb * bb > cc) env = vec3(0.95, 1.15, 0.3) * mix(0.6, 1.0, pud);
@@ -895,6 +959,12 @@ function wetGroundMaterial(ground, grain, LAMPS) {
         float fr = 0.02 + 0.98 * pow(1.0 - cosv, 5.0);
         float k = mix(0.12 + 0.45 * fr, 0.35 + 0.65 * fr, pud);
         vec3 col = base * mix(0.62, 0.22, pud) * mix(1.0, 0.8, damp) * (1.0 - k * 0.5) + env * k + spec * mix(0.1 + 0.3 * fr, 1.0, pud);
+        if (WET == 0) {
+          // dry: the bake's light, the scan's grit and shading from its bumps, a little lamp sheen
+          // (the grit pushed harder than wet: dry, nothing glints to show it)
+          float shade = 0.55 + 0.6 * dot(n, normalize(vec3(0.25, 1.0, 0.35)));
+          col = base * (1.0 + (as.r / 0.51 - 1.0) * 1.2) * shade + spec * 0.12;
+        }
         // the glowing court lines: a cyan halo on the wet ground round each
         // line, and a longer smear of it where the water mirrors it
         vec2 c = vec2(vW.x, -vW.z), a = abs(c);
@@ -905,7 +975,7 @@ function wetGroundMaterial(ground, grain, LAMPS) {
         d = min(d, max(abs(a.y - SL), a.x - SW));
         d = min(d, max(a.x, a.y - SL));
         d = max(d, 0.0);
-        col += LINE_GLOW * (exp(-d / 0.08) * 0.5 + exp(-d / 0.35) * 0.16) * mix(0.7, 1.6, max(pud, damp * 0.5));
+        if (WET > 0) col += LINE_GLOW * (exp(-d / 0.08) * 0.5 + exp(-d / 0.35) * 0.16) * mix(0.7, 1.6, max(pud, damp * 0.5));
         gl_FragColor = vec4(col, 1.0);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
@@ -915,10 +985,11 @@ function wetGroundMaterial(ground, grain, LAMPS) {
   return m;
 }
 
-// wet court lines: worn and patchy, the paint darker where the grain is deep
-function wetLines(mat, grain, asphalt) {
+// worn court lines: patchy paint with the asphalt's grit showing through;
+// in the rain they glow pale cyan
+function wornLines(mat, grain, asphalt, wet) {
   const m = mat.clone();
-  m.color = new THREE.Color(0.9, 1.5, 1.7);   // pale cyan, above white so the glow pass catches it
+  if (wet) m.color = new THREE.Color(0.9, 1.5, 1.7);   // pale cyan, above white so the glow pass catches it
   m.onBeforeCompile = (sh) => {
     sh.uniforms.grain = { value: grain };
     sh.uniforms.asphalt = { value: asphalt };
@@ -972,11 +1043,13 @@ function buildRain(scene) {
   return lines;
 }
 
-// the net posts in the rain: thick steel, worn grey paint over rust
-// (Poly Haven's Rusty Metal 04, CC0), a cap and a foot plate. The baked
-// rooftop has no live lights, so the shine is a painted matcap: amber from
-// the lamps above, cyan from the lines below.
-function buildMetalPosts(scene, C) {
+// Steel with worn grey paint over rust (Poly Haven's Rusty Metal 04, CC0),
+// for the net posts and the billboard's frame. The baked rooftop has no live
+// lights, so the shine is a painted matcap: amber from the lamps above, cyan
+// from the lines below.
+let metal = null;
+function metalMat() {
+  if (metal) return metal;
   const rust = new THREE.TextureLoader().load('models/rain/post_rust.jpg');
   rust.colorSpace = THREE.SRGBColorSpace;
   rust.wrapS = rust.wrapT = THREE.RepeatWrapping;
@@ -992,7 +1065,13 @@ function buildMetalPosts(scene, C) {
     hot(70, 116, 30, 'rgba(110,230,255,0.55)');  // the lines' glow from below
   });
   // (brighter than white: the rust map is dark, and the rooftop is dim)
-  const mat = new THREE.MeshMatcapMaterial({ matcap: cap, map: rust, color: new THREE.Color(2.6, 2.6, 2.6) });
+  metal = new THREE.MeshMatcapMaterial({ matcap: cap, map: rust, color: new THREE.Color(2.6, 2.6, 2.6) });
+  return metal;
+}
+
+// the net posts (both 3D themes): thick steel, a cap, a foot plate and a winder
+function buildMetalPosts(scene, C) {
+  const mat = metalMat();
   const grp = new THREE.Group();
   for (const x of [-C.POST_X, C.POST_X]) {
     const h = CT.netHeight(x) + 0.12;
@@ -1009,4 +1088,40 @@ function buildMetalPosts(scene, C) {
   }
   scene.add(grp);
   return grp;
+}
+
+// the net: dark steel wire in square cells, lit from above, with rust at
+// some joints and, in the rain, drops caught on it. One texture holds 4 x 4
+// cells (6 cm each) so they don't repeat cell by cell.
+function wireNetMaterial(C, wet) {
+  const CELL = 0.06, K = 4, P = 32;   // P pixels a cell
+  let seed = 5;
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  const tex = canvasTex(K * P, K * P, (g, w) => {
+    // a faint dark fill, so from afar the net still reads as a band
+    g.fillStyle = 'rgba(20,24,30,0.35)'; g.fillRect(0, 0, w, w);
+    for (let i = 0; i <= K; i++) {
+      const o = i * P;
+      // the horizontal wires: a bright top edge where the lamps catch them
+      g.fillStyle = '#3a3f46'; g.fillRect(0, o - 3.5, w, 7);
+      g.fillStyle = '#b8c2cc'; g.fillRect(0, o - 3.5, w, 2);
+      // the vertical wires: a lit stripe down one side
+      g.fillStyle = '#33373d'; g.fillRect(o - 3.5, 0, 7, w);
+      g.fillStyle = '#87909a'; g.fillRect(o - 2, 0, 1.6, w);
+    }
+    // rust at some joints, and drops hanging under the wires
+    for (let k = 0; k < 10; k++) {
+      const x = Math.floor(rnd() * K) * P, y = Math.floor(rnd() * K) * P;
+      g.fillStyle = 'rgba(120,62,30,0.8)'; g.fillRect(x - 3, y - 3, 6, 6);
+    }
+    for (let k = 0; k < (wet ? 7 : 0); k++) {
+      const x = rnd() * w, y = Math.floor(rnd() * K) * P + 3.5;
+      g.fillStyle = 'rgba(200,235,255,0.9)'; g.beginPath(); g.arc(x, y, 1.8, 0, Math.PI * 2); g.fill();
+    }
+  });
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.anisotropy = 4;
+  tex.repeat.set((2 * C.POST_X) / (CELL * K), 1 / (CELL * K));
+  // (the sheet's v runs 0..1 over its height, so one repeat a K-cell band)
+  return new THREE.MeshBasicMaterial({ map: tex, color: new THREE.Color(1.25, 1.3, 1.4), transparent: true, side: THREE.DoubleSide, depthWrite: false });
 }
