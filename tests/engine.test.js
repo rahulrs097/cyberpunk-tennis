@@ -517,17 +517,19 @@ test('pushing every ball back down the middle is no better than mixing it up aga
   assert.ok(games.push <= games.varied, JSON.stringify(games));
 });
 
-test('the two characters are a fair match as CPU opponents: each wins a fair share of the games at Club and Pro', () => {
+// (points, not games: over six sets the games won swing too much to tell a
+// real imbalance from a run of close games)
+test('the two characters are a fair match as CPU opponents: each wins a fair share of the points at Club and Pro', () => {
   for (const level of ['club', 'pro']) {
-    const games = { octopus: 0, philosopher: 0 };
+    const points = { octopus: 0, philosopher: 0 };
     for (let i = 0; i < 6; i++) {
       const CT = loadEngine(300 + i);
       const chars = i % 2 ? ['octopus', 'philosopher'] : ['philosopher', 'octopus'];
       const r = playSet(CT, { p0: chars[0], p1: chars[1], control: ['cpu', 'cpu'], extra: levelOpts(CT, level) });
-      games[chars[0]] += r.games[0]; games[chars[1]] += r.games[1];
+      for (const k in r.stats.endings) points[chars[+k.split(':')[1]]] += r.stats.endings[k];
     }
-    const share = games.octopus / (games.octopus + games.philosopher);
-    assert.ok(share > 0.4 && share < 0.6, level + ' ' + JSON.stringify(games));
+    const share = points.octopus / (points.octopus + points.philosopher);
+    assert.ok(share > 0.4 && share < 0.6, level + ' ' + JSON.stringify(points));
   }
 });
 
@@ -1302,4 +1304,32 @@ test('the engine says the moment a player runs past the yellow line', () => {
   assert.equal(parks[0].side, 1);
   assert.equal(parks[0].during, 3);
   assert.ok(Math.abs(parks[0].x) > CT.COURT.PARK);
+});
+
+// A full-pace smash from the net, aimed deep `lx` m to the side of a CPU
+// standing at the net (it passes the CPU about half as far to the side).
+// Does the CPU get a racket on it?
+function smashAtNetPlayer(level, lx) {
+  const CT = loadEngine(3);
+  let g = null;
+  const hits = [];
+  g = CT.createGame({ p0: 'philosopher', p1: 'octopus', control: ['human', 'cpu'], autoMove: [false, false], ...levelOpts(CT, level),
+    onEvent: (t, d) => { if (g && t === 'hit') hits.push(d.side); } });
+  g.phase = 'rally';
+  const h = g.players[0], c = g.players[1];
+  h.x = h.tx = 0; h.y = h.ty = -3;
+  c.atNet = true;
+  const s = CT._netCover(g, c); c.x = c.tx = s.x; c.y = c.ty = s.y;
+  const b = g.ball;
+  b.pos = { x: 0, y: -2.65, z: 2.8 }; b.vel = { x: 0, y: -1, z: -1 }; b.spin = 0; b.side = 0;
+  b.active = true; b.inFlight = true; b.bounces = 0; b.lastHitter = 1; b.isServe = false; b.netted = false;
+  CT._applyShot(g, h, CT._computeShot(g, h, { aim: 0, landX: c.x + lx, pace: 1, spinDir: 1, curve: 0, depth: 1 }, 0));
+  for (let i = 0; i < 120 && g.phase === 'rally' && !hits.includes(1); i++) CT.updateGame(g, 1 / 60);
+  return hits.includes(1);
+}
+
+test('a smash from the net beats a Pro CPU at the net unless it is hit at its body', () => {
+  assert.ok(!smashAtNetPlayer('pro', 3), 'no time to get the racket across to a smash 1.5 m away');
+  assert.ok(!smashAtNetPlayer('pro', -3));
+  assert.ok(smashAtNetPlayer('pro', 0.4), 'one at its body is blocked');
 });

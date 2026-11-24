@@ -12,6 +12,7 @@
       height: 1.98,
       speed: 5.0,          // top running speed, m/s
       reach: 2.1,          // lateral reach from the body
+      react: 0,            // added to the level's reaction time (s) when auto-moving
       overheadZ: 2.45,     // balls above this are smashed
       maxZ: 3.25,          // highest ball he can touch
       pace: { fh: 34, bh: 35 },      // speed caps, m/s
@@ -42,6 +43,7 @@
       height: 1.93,
       speed: 5.4,
       reach: 1.8,
+      react: -0.03,        // quick hands at the net
       overheadZ: 2.35,
       maxZ: 3.1,
       pace: { fh: 38, bh: 32 },
