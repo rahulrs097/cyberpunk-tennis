@@ -161,6 +161,23 @@
   .opts-sub { display: contents; }
   .opts-sub .lede { grid-column: 1 / 3; font-size: 13px; }
 
+  /* a new build downloading (or just in): a small pill just above the
+     menu's bottom bar that never takes a touch, and only on the menu (a
+     match carries on under it unseen, and the new build waits for the menu) */
+  #update { position: fixed; z-index: 40; left: 50%; transform: translateX(-50%); bottom: calc(env(safe-area-inset-bottom, 0px) + 84px);
+    display: grid; gap: 4px; min-width: 156px; padding: 6px 12px 7px; border-radius: 6px; pointer-events: none;
+    background: rgba(9, 7, 24, 0.92); border: 1px solid var(--cyan); box-shadow: 0 0 14px rgba(37, 217, 255, 0.28);
+    color: var(--ink); font: 700 11px var(--ui); letter-spacing: 0.14em; text-transform: uppercase; }
+  #update[hidden], body:has(#menu[hidden]) #update, body.vr #update { display: none; }
+  #update .row { display: flex; justify-content: space-between; gap: 12px; }
+  #update .pct { color: var(--cyan); font-variant-numeric: tabular-nums; }
+  #update .bar { height: 3px; border-radius: 2px; background: rgba(122, 92, 255, 0.25); overflow: hidden; }
+  #update .fill { height: 100%; width: 0; background: linear-gradient(90deg, var(--cyan), var(--pink)); box-shadow: 0 0 6px var(--cyan); transition: width 0.2s linear; }
+  #update.done { border-color: var(--ball); box-shadow: 0 0 14px rgba(228, 255, 74, 0.25); }
+  #update.done .pct { color: var(--ball); }
+  #update.done .fill { background: var(--ball); box-shadow: 0 0 6px var(--ball); }
+  @media (prefers-reduced-motion: reduce) { #update .fill { transition: none; } }
+
   .overlay {
     position: fixed; inset: 0;
     display: flex;
@@ -655,6 +672,11 @@
       <button class="btn" id="toMenu">Menu</button>
     </div>
   </div>
+</div>
+
+<div id="update" role="status" aria-live="polite" hidden>
+  <div class="row"><span class="what">Updating</span><span class="pct"></span></div>
+  <div class="bar"><div class="fill"></div></div>
 </div>
 
 <!-- three.js, for the 3D graphics level (js/render3d.js, loaded only when it's picked) -->

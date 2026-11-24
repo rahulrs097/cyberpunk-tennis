@@ -89,4 +89,66 @@ async function cachedFirst(req) {
   return res;
 }
 
+// A new build is live (the page asks: main.js checkBuild). Fetch every file
+// afresh into the cache, the page's own and the 3D files this phone has
+// used (so 3D still matches the rest offline), telling the page how far it
+// has got. The page reloads only once all of it is in, so the new build
+// opens at once and works offline. Any file failing (the connection gone)
+// stops it, and the old build carries on as it was.
+self.addEventListener('message', (e) => {
+  if (e.data && e.data.t === 'update') e.waitUntil(update(e.source));
+});
+
+async function update(client) {
+  const say = (m) => { if (client) client.postMessage(Object.assign({ t: 'update' }, m)); };
+  try {
+    const cache = await caches.open(VERSION);
+    const old = await cache.keys();
+    const urls = [...SHELL_URLS, ...old.map((r) => r.url).filter((u) => LAZY.test(new URL(u).pathname))];
+    // each file weighed by its old copy's size (a guess where there is none)
+    // so the bar moves with the bytes: the 3D textures dwarf the scripts
+    const weight = await Promise.all(urls.map(async (u) => {
+      const hit = await cache.match(u);
+      return Math.max(4e3, (hit && +hit.headers.get('content-length')) || 3e4);
+    }));
+    const total = weight.reduce((a, b) => a + b, 0), got = weight.map(() => 0);
+    let last = 0;
+    const tell = (force) => {
+      const now = Date.now();
+      if (!force && now - last < 100) return;
+      last = now;
+      say({ p: Math.min(1, got.reduce((a, b) => a + b, 0) / total) });
+    };
+    tell(true);
+    let next = 0;
+    const one = async (i) => {
+      const res = await fetch(urls[i], { cache: 'no-cache' });
+      if (!res.ok) throw new Error(urls[i] + ' ' + res.status);
+      const len = +res.headers.get('content-length') || 0, parts = [];
+      let n = 0;
+      if (res.body) {
+        const rd = res.body.getReader();
+        for (;;) {
+          const { done, value } = await rd.read();
+          if (done) break;
+          parts.push(value); n += value.length;
+          got[i] = Math.min(weight[i], weight[i] * n / (len || Math.max(n * 2, weight[i])));
+          tell();
+        }
+      }
+      // (the body is already unzipped, so it mustn't still say it's zipped)
+      const head = new Headers(res.headers);
+      head.delete('content-encoding'); head.delete('content-length');
+      await cache.put(urls[i], new Response(new Blob(parts), { status: res.status, statusText: res.statusText, headers: head }));
+      got[i] = weight[i];
+      tell();
+    };
+    // four at a time
+    await Promise.all([0, 1, 2, 3].map(async () => { while (next < urls.length) await one(next++); }));
+    say({ p: 1, done: true });
+  } catch (err) {
+    say({ failed: true });
+  }
+}
+
 function stripSearch(u) { const x = new URL(u); x.search = ''; x.hash = ''; return x.href; }

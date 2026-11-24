@@ -36,3 +36,12 @@ test('the manifest makes the game installable', () => {
   assert.ok(m.icons.some((i) => i.purpose === 'maskable'));
   for (const i of m.icons) assert.ok(shell().includes(i.src), `${i.src} is not in sw.js SHELL`);
 });
+
+test('a new build is downloaded before the reload, with a loader on the menu', () => {
+  const sw = read('sw.js'), main = read('js/main.js'), html = read('index.html');
+  assert.match(sw, /addEventListener\('message'[\s\S]*t === 'update'/, 'sw.js answers the page\'s update message');
+  assert.match(main, /postMessage\(\{ t: 'update' \}\)/, 'main.js asks the service worker to fetch the new build');
+  assert.match(main, /if \(!newBuild \|\| !fetched/, 'the page reloads only once the new build is in');
+  assert.match(html, /id="update"[^>]*role="status"/, 'the loader is announced');
+  assert.match(html, /#update \{[^}]*pointer-events: none/, 'the loader never blocks a touch');
+});

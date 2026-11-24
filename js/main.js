@@ -1691,12 +1691,15 @@
   // New builds. An installed app is rarely started afresh: the phone brings
   // the open page back from the background. So whenever it comes back (and
   // every few minutes it sits open) the page asks the server which build is
-  // live (/version, the Worker's deployment id). When that changes, it
-  // reloads, but only on the main menu with nothing else open, never in a
-  // match, a room or the pad; a match in progress gets the new build when it
-  // ends. Offline, or where there is no /version (a local server), nothing
-  // happens.
-  let build = null, newBuild = false;
+  // live (/version, the Worker's deployment id). When that changes, the
+  // service worker downloads all of it first (sw.js update), with a small
+  // pill on the menu counting up, and only then does the page reload, so
+  // the new build opens at once, 3D included, and works offline. The reload
+  // only happens on the main menu with nothing else open, never in a match,
+  // a room or the pad; a match in progress gets the new build when it ends.
+  // Nothing is ever blocked: the pill takes no touches, and offline, or
+  // where there is no /version (a local server), nothing happens.
+  let build = null, newBuild = false, fetched = false, stall = 0;
   async function checkBuild() {
     if (newBuild || !/^https?:$/.test(location.protocol)) return;
     try {
@@ -1705,15 +1708,65 @@
       const v = (await res.json()).v;
       if (!v) return;
       if (build === null) build = v;
-      else if (v !== build) { newBuild = true; reloadIfNewBuild(); }
+      else if (v !== build) { newBuild = true; fetchBuild(); }
     } catch (e) { /* offline: try again next time */ }
   }
+  function fetchBuild() {
+    const sw = navigator.serviceWorker && navigator.serviceWorker.controller;
+    // (no service worker in charge, so nothing kept offline: just reload)
+    if (!sw) { fetched = true; reloadIfNewBuild(); return; }
+    updatePill('Updating', 0);
+    sw.postMessage({ t: 'update' });
+    watchStall();
+  }
+  // (nothing heard for a while, say the worker was replaced mid-way: give
+  // up quietly and try again at the next check)
+  function watchStall() {
+    clearTimeout(stall);
+    stall = setTimeout(() => { if (newBuild && !fetched) buildFailed(); }, 30000);
+  }
+  function buildFailed() {
+    clearTimeout(stall);
+    newBuild = false;
+    $('update').hidden = true;
+  }
+  function onUpdateNote(m) {
+    if (!m || m.t !== 'update' || !newBuild || fetched) return;
+    if (m.failed) { buildFailed(); return; }
+    watchStall();
+    if (!m.done) { updatePill('Updating', m.p); return; }
+    clearTimeout(stall);
+    fetched = true;
+    updatePill('Update ready', 1, true);
+    // (a moment at 100% before the screen goes)
+    setTimeout(reloadIfNewBuild, 700);
+  }
+  function updatePill(what, p, done) {
+    const el = $('update');
+    el.querySelector('.what').textContent = what;
+    el.querySelector('.pct').textContent = p == null ? '' : Math.floor(p * 100) + '%';
+    el.querySelector('.fill').style.width = (p == null ? 0 : p * 100) + '%';
+    el.classList.toggle('done', !!done);
+    el.hidden = false;
+  }
   function reloadIfNewBuild() {
-    if (!newBuild || document.hidden) return;
+    if (!newBuild || !fetched || document.hidden) return;
     const quiet = ['lobby', 'pad', 'trophies', 'help', 'settings', 'end', 'pauseMenu'].every((id) => $(id).hidden);
     // (not while a name or room code is being typed)
     const el = document.activeElement, typing = !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA');
-    if (!$('menu').hidden && quiet && !typing) location.reload();
+    if ($('menu').hidden || !quiet || typing) return;
+    try { sessionStorage.setItem('ct.updated', '1'); } catch (e) { /* only for the note after */ }
+    updatePill('Restarting', null, true);
+    location.reload();
+  }
+  // just reloaded into a new build: say so for a moment
+  function sayUpdated() {
+    let was = null;
+    try { was = sessionStorage.getItem('ct.updated'); sessionStorage.removeItem('ct.updated'); } catch (e) { /* no note */ }
+    if (!was) return;
+    updatePill('Updated', 1, true);
+    $('update').querySelector('.pct').textContent = '✓';
+    setTimeout(() => { if (!newBuild) $('update').hidden = true; }, 2500);
   }
 
   // An online rematch starts once both players have asked for it. `side`
@@ -1892,6 +1945,7 @@
   function setupInstall() {
     if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
       navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(() => { /* plays fine without it */ });
+      navigator.serviceWorker.addEventListener('message', (e) => onUpdateNote(e.data));
     }
     const btn = $('installBtn'), hint = $('installHint');
     if (!btn || installed) return;
@@ -2148,6 +2202,7 @@
       if (document.hidden) { if ($('menu').hidden && $('lobby').hidden && $('pad').hidden) setPaused(true); if (audio) audio.suspend(); }
       else { if (audio) audio.resume(); checkBuild(); reloadIfNewBuild(); }
     });
+    sayUpdated();
     checkBuild();
     setInterval(() => { if (!document.hidden) checkBuild(); }, 5 * 60 * 1000);
     // closing the trophies or help sheet lands back on the menu
