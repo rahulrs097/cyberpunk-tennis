@@ -958,7 +958,7 @@ function groundMaterial(ground, grain, LAMPS, wet) {
         float cosv = max(dot(n, -v), 0.0);
         float fr = 0.02 + 0.98 * pow(1.0 - cosv, 5.0);
         float k = mix(0.12 + 0.45 * fr, 0.35 + 0.65 * fr, pud);
-        vec3 col = base * mix(0.62, 0.22, pud) * mix(1.0, 0.8, damp) * (1.0 - k * 0.5) + env * k + spec * mix(0.1 + 0.3 * fr, 1.0, pud);
+        vec3 col = base * mix(0.62, 0.22, pud) * mix(1.0, 0.8, damp) * (1.0 - k * 0.5) + env * k + spec * mix(0.07 + 0.22 * fr, 1.0, pud);
         if (WET == 0) {
           // dry: the bake's light, the scan's grit and shading from its bumps, a little lamp sheen
           // (the grit pushed harder than wet: dry, nothing glints to show it)
@@ -975,7 +975,7 @@ function groundMaterial(ground, grain, LAMPS, wet) {
         d = min(d, max(abs(a.y - SL), a.x - SW));
         d = min(d, max(a.x, a.y - SL));
         d = max(d, 0.0);
-        if (WET > 0) col += LINE_GLOW * (exp(-d / 0.08) * 0.5 + exp(-d / 0.35) * 0.16) * mix(0.7, 1.6, max(pud, damp * 0.5));
+        if (WET > 0) col += LINE_GLOW * (exp(-d / 0.05) * 0.3 + exp(-d / 0.2) * 0.04) * mix(0.8, 1.15, max(pud, damp * 0.5));
         gl_FragColor = vec4(col, 1.0);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
@@ -989,7 +989,7 @@ function groundMaterial(ground, grain, LAMPS, wet) {
 // in the rain they glow pale cyan
 function wornLines(mat, grain, asphalt, wet) {
   const m = mat.clone();
-  if (wet) m.color = new THREE.Color(0.9, 1.5, 1.7);   // pale cyan, above white so the glow pass catches it
+  if (wet) m.color = new THREE.Color(0.85, 1.12, 1.25);   // pale cyan, a little above white so the glow pass just catches it
   m.onBeforeCompile = (sh) => {
     sh.uniforms.grain = { value: grain };
     sh.uniforms.asphalt = { value: asphalt };
