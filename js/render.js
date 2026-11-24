@@ -381,9 +381,11 @@
   }
 
   // Theme: 'cyberpunk' is the flat neon view drawn here; 'concrete' is the
-  // 3D rooftop (js/render3d.js). Graphics levels apply to both.
+  // 3D rooftop (js/render3d.js); 'rain' is that rooftop wet, with puddles
+  // and falling rain. Graphics levels apply to all of them.
   function setTheme(r, theme) {
-    r.want3d = theme === 'concrete';
+    r.want3d = theme === 'concrete' || theme === 'rain';
+    r.wet = theme === 'rain';
     if (r.want3d) load3d(r);
   }
 
@@ -617,27 +619,32 @@
   function boardTexture(r, text, color) {
     const t = r.boardTex || (r.boardTex = document.createElement('canvas'));
     // rebuilt once the display font has loaded
-    const key = text + color + fontReady();
+    // the 3D themes show a real LED sign: a black panel in a steel frame
+    // (render3d draws the frame) and plain lit letters, no neon tube or halo
+    const led = !!r.want3d;
+    const key = text + color + fontReady() + led;
     if (t.key === key) return t;
     t.key = key;
     const W = BOARD_TEX.w, H = BOARD_TEX.h;
     t.width = W; t.height = H;
     const ctx = t.getContext('2d');
-    ctx.fillStyle = 'rgba(8,6,22,0.82)';
+    ctx.fillStyle = led ? '#050506' : 'rgba(8,6,22,0.82)';
     ctx.fillRect(0, 0, W, H);
-    ctx.strokeStyle = '#ff3fb4'; ctx.lineWidth = 6;
-    ctx.shadowColor = '#ff3fb4'; ctx.shadowBlur = 14;
-    ctx.strokeRect(8, 8, W - 16, H - 16);
+    if (!led) {
+      ctx.strokeStyle = '#ff3fb4'; ctx.lineWidth = 6;
+      ctx.shadowColor = '#ff3fb4'; ctx.shadowBlur = 14;
+      ctx.strokeRect(8, 8, W - 16, H - 16);
+    }
     let size = 104;
     ctx.font = `900 ${size}px Tektur, sans-serif`;
     const fit = (W - 70) / ctx.measureText(text).width;
     if (fit < 1) { size = Math.floor(size * fit); ctx.font = `900 ${size}px Tektur, sans-serif`; }
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.shadowColor = color; ctx.shadowBlur = 22;
+    ctx.shadowColor = color; ctx.shadowBlur = led ? 0 : 22;
     ctx.fillStyle = color;
     ctx.fillText(text, W / 2, H / 2 + 4);
     ctx.shadowBlur = 0;
-    ctx.fillStyle = 'rgba(255,255,255,0.75)';   // hot core of the neon
+    ctx.fillStyle = led ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.75)';   // hot core of the neon
     ctx.fillText(text, W / 2, H / 2 + 4);
     return t;
   }
@@ -658,12 +665,13 @@
 
   function drawBoardPhoto(ctx, r, now, cur) {
     const W = BOARD_TEX.w, H = BOARD_TEX.h, m = 12, img = cur.photo;
+    const led = !!r.want3d;   // (as boardTexture: a real LED sign in the 3D themes)
     ctx.clearRect(0, 0, W, H);
-    ctx.fillStyle = 'rgba(8,6,22,0.88)';
+    ctx.fillStyle = led ? '#050506' : 'rgba(8,6,22,0.88)';
     ctx.fillRect(0, 0, W, H);
     const side = cur.score ? -m : H - 2 * m;
-    ctx.strokeStyle = '#ff3fb4'; ctx.lineWidth = 6;
-    ctx.strokeRect(8, 8, W - 16, H - 16);
+    ctx.strokeStyle = led ? '#1c1d20' : '#ff3fb4'; ctx.lineWidth = 6;
+    if (!led) ctx.strokeRect(8, 8, W - 16, H - 16);
     if (!cur.score) {
       const sw = img.naturalWidth, sh = Math.min(img.naturalHeight, sw);
       // a player's 32×32 picture is blown up as crisp pixels
@@ -695,10 +703,10 @@
       ctx.fillStyle = PAL.ball; ctx.fill();
     }
     ctx.fillStyle = cur.color;
-    if (r.quality) { ctx.shadowColor = cur.color; ctx.shadowBlur = 18; }
+    if (r.quality && !led) { ctx.shadowColor = cur.color; ctx.shadowBlur = 18; }
     ctx.fillText(cur.text, cx, y, tw);
     ctx.shadowBlur = 0;
-    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.fillStyle = led ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.7)';
     ctx.fillText(cur.text, cx, y, tw);
   }
 
@@ -1111,7 +1119,7 @@
       // of the sign (about ten times a second). The line-call close-up zooms,
       // so it is drawn every frame.
       const pl = cur.ping, slide = cur.score ? -1 : photoStep(now, cur.photo);
-      const key = cur.score || cur.photo ? [slide, cur.photo ? cur.photo.src.length + cur.photo.src.slice(-24) : '', cur.text, cur.label, cur.server, cur.color, pl ? [pl.ms, pl.red, pl.slow, pl.direct].join() : '', r.quality, fontReady()].join('|') : null;
+      const key = cur.score || cur.photo ? [slide, cur.photo ? cur.photo.src.length + cur.photo.src.slice(-24) : '', cur.text, cur.label, cur.server, cur.color, pl ? [pl.ms, pl.red, pl.slow, pl.direct].join() : '', r.quality, fontReady(), !!r.want3d].join('|') : null;
       if (key === null || src.key !== key) {
         src.key = key;
         if (cur.photo || cur.score) drawBoardPhoto(src.getContext('2d'), r, now, cur);
