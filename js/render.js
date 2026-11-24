@@ -398,13 +398,15 @@
   // distance in metres (for the thunder's delay), or 0.
   function stormEvent(r, kind, near) {
     const s = r.storm || (r.storm = { clouds: 0, cover: 0, strikes: [], n: 0, rain: 1, pour: 1 });
-    // ('reset': a new match; near is 1 when it rains from the start, as with the storm off)
-    if (kind === 'reset') { s.clouds = 0; s.cover = 0; s.strikes.length = 0; s.rain = s.pour = near ? 1 : 0; return 0; }
+    // ('reset': a new match; near is 1 when it rains from the start, as behind the menu)
+    if (kind === 'reset') { s.clouds = 0; s.cover = 0; s.strikes.length = 0; s.rain = s.pour = near ? 1 : 0; s.rainFrom = 0; return 0; }
     s.clouds = Math.max(0, s.clouds - 0.08);
     if (kind !== 'strike') return 0;
     s.clouds = Math.min(1, s.clouds + 0.3);
-    s.rain = 1;   // the first winner's lightning brings the rain
     const dist = 700 - 550 * Math.max(0, Math.min(1, near));
+    // the first winner brings the rain, once its thunder has rolled in
+    // (render3d.js starts it at rainFrom; main.js the rain's sound)
+    if (!s.rain && !s.rainFrom) s.rainFrom = performance.now() / 1000 + 0.12 + dist / 343 + 1.5;
     s.strikes.push({ at: performance.now() / 1000 + 0.12, dist, n: s.n++ });
     return dist;
   }

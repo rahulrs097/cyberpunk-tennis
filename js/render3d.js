@@ -442,6 +442,7 @@ function buildStorm(scene, cam, hash) {
       lastT = t;
       // the clouds roll in (or drift off) over a few seconds
       s.cover += (s.clouds - s.cover) * Math.min(1, dt * 0.35);
+      if (s.rainFrom && t >= s.rainFrom) { s.rain = 1; s.rainFrom = 0; }
       s.pour += (s.rain - s.pour) * Math.min(1, dt * 0.45);   // the rain sets in over a few seconds
       u.cover.value = s.cover;
       u.drift.value = (t * 0.004) % 100;
