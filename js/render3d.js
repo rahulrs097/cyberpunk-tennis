@@ -1082,7 +1082,11 @@ const PPM = 80, CARD_W = 3.6, CARD_UP = 3.0, CARD_DOWN = 0.4;
 function buildPlayer(scene, LAMPS) {
   const cv = document.createElement('canvas');
   cv.width = Math.round(CARD_W * PPM); cv.height = Math.round((CARD_UP + CARD_DOWN) * PPM);
-  const ctx = cv.getContext('2d');
+  // (in ordinary memory, not on the graphics chip: Chrome on a phone can
+  // wipe a chip-held canvas while another app has the screen, and a lost
+  // one draws nothing, so the player vanished; it's sent to the chip as a
+  // texture every redraw anyway)
+  const ctx = cv.getContext('2d', { willReadFrequently: true });
   const tex = new THREE.CanvasTexture(cv);
   tex.colorSpace = THREE.SRGBColorSpace;
   const geo = new THREE.PlaneGeometry(CARD_W, CARD_UP + CARD_DOWN);

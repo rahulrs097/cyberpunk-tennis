@@ -871,6 +871,8 @@
     if (audio && audio.state === 'suspended') audio.resume();
     if (vr) { e.preventDefault(); vrPress(); return; }
     if (!game || paused || touch) return;
+    // (nothing to aim at while the rooftop loads)
+    if (CT.loading3d(renderer)) { e.preventDefault(); return; }
     try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* capture is optional: the swipe still works without it */ }
     touch = { id: e.pointerId, pts: [{ x: e.clientX, y: e.clientY, t: performance.now() }] };
     e.preventDefault();
@@ -1660,6 +1662,7 @@
     if (typeof note !== 'string') note = '';
     $('menuNote').textContent = note;
     $('menuNote').hidden = !note;
+    requestAnimationFrame(drawPortraits);
     // behind the menu it just rains (with the storm off, Rain 3D is dry: no rain at all)
     CT.stormEvent(renderer, 'reset', stormOn ? 1 : 0);
     updateRain();
@@ -1854,7 +1857,11 @@
     // It does stop while the link is too slow to play on.
     if (vr && game) vrFrame();
     // (in VR a match waits for its first press, except online, where it can't wait)
-    if (game && (!paused || net) && !(vr && vr.wait && !net) && !(vr && vr.home)) {
+    // (and while the rooftop loads behind its loading sky the match waits,
+    // as it does when paused; online it can't wait)
+    const loading = CT.loading3d(renderer);
+    if (loading) touch = null;
+    if (game && (!paused || net) && !(loading && !net) && !(vr && vr.wait && !net) && !(vr && vr.home)) {
       const held = !!(net && net.started && net.lag) && checkLag(now);
       if (!held) CT.updateGame(game, dt);
       if (net && net.started) {
@@ -2076,12 +2083,19 @@
   }
 
   // preview portraits on the menu cards
+  // (painted in ordinary memory, not on the graphics chip: a phone can wipe
+  // a chip-held canvas while another app has the screen, and a lost one
+  // draws nothing, so they went blank. Painted again on coming back, when
+  // the menu shows, and if the browser restores one)
   function drawPortraits() {
     document.querySelectorAll('canvas.portrait').forEach((cv) => {
+      // (not while the menu is hidden: it has no size then)
+      if (!cv.clientWidth) return;
+      if (!cv.dataset.watched) { cv.dataset.watched = '1'; cv.addEventListener('contextrestored', drawPortraits); }
       const dpr = Math.min(2, window.devicePixelRatio || 1);
-      const w = cv.clientWidth || 96, h = cv.clientHeight || 120;
+      const w = cv.clientWidth, h = cv.clientHeight;
       cv.width = w * dpr; cv.height = h * dpr;
-      const ctx = cv.getContext('2d');
+      const ctx = cv.getContext('2d', { willReadFrequently: true });
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, w, h);
       const s = h / 2.35;
