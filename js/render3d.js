@@ -179,10 +179,21 @@ export function create3d(r, R) {
     u.ball.value.set(ball.mesh.position.x, ball.mesh.position.y, ball.mesh.position.z, ball.mesh.scale.x);
   }
 
+  // back from another app: repaint the painted textures and send the
+  // billboard and players again (and once more if the chip's context was
+  // lost and comes back later)
+  function refresh() {
+    repaintAll();
+    board.refresh();
+    for (const p of players) p.refresh();
+  }
+  canvas.addEventListener('webglcontextlost', (e) => e.preventDefault());
+  canvas.addEventListener('webglcontextrestored', refresh);
+
   let level = null, levelKey = '';
   const key = (r) => `${r.quality}|${r.max}|${r.W}x${r.H}|${r.vr ? r.dpr : ''}`;
   const self = {
-    ready: true, canvas,
+    ready: true, canvas, refresh,
     // ?prof: what the last frame cost the GPU, roughly
     stats() {
       const i = gl.info;
@@ -232,12 +243,32 @@ function setCamera(cam, r) {
   cam.projectionMatrixInverse.copy(cam.projectionMatrix).invert();
 }
 
+// Every texture painted here keeps its painter, so it can be painted again.
+// On a phone, switching apps can lose the graphics chip's copy of everything
+// (three.js then uploads each texture again from its canvas) and Chrome can
+// also wipe GPU-backed 2D canvases, which left the felt ball solid black.
+// So these canvases are kept in ordinary memory (willReadFrequently), and
+// all of them are repainted and sent again when the page comes back.
+const PAINTED = new Set();
+function repaint(p) {
+  const ctx = p.cv.getContext('2d', { willReadFrequently: true });
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, p.cv.width, p.cv.height);
+  p.draw(ctx, p.cv.width, p.cv.height);
+  p.t.needsUpdate = true;
+}
+function repaintAll() { for (const p of PAINTED) repaint(p); }
+
 function canvasTex(w, h, draw, srgb = true) {
   const cv = document.createElement('canvas');
   cv.width = w; cv.height = h;
-  draw(cv.getContext('2d'), w, h);
+  draw(cv.getContext('2d', { willReadFrequently: true }), w, h);
   const t = new THREE.CanvasTexture(cv);
   if (srgb) t.colorSpace = THREE.SRGBColorSpace;
+  const p = { cv, draw, t };
+  PAINTED.add(p);
+  cv.addEventListener('contextrestored', () => repaint(p));
+  t.addEventListener('dispose', () => PAINTED.delete(p));
   return t;
 }
 
@@ -986,6 +1017,7 @@ function buildBoard(scene, R) {
   let lastSrc = null, lastKey, lit = 1;
   return {
     sign, tex, on: () => lit,
+    refresh() { lastSrc = null; },
     setWet(on) {
       if (on && !wetBuilt) buildWet();
       wet = on;
@@ -1048,6 +1080,7 @@ function buildPlayer(scene, LAMPS) {
   let drawn = -1e9;
   return {
     card, tex,
+    refresh() { drawn = -1e9; },
     update(r, g, p, hidden, cam) {
       card.visible = shadow.visible = ring.visible = casts[0].pivot.visible = casts[1].pivot.visible = !hidden;
       if (hidden) return;

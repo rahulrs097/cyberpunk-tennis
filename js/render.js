@@ -39,7 +39,7 @@
     smashFrom: 2.0, smashNear: 4 };
 
   function createRenderer(canvas) {
-    return {
+    const r = {
       canvas, ctx: canvas.getContext('2d', { alpha: false }),   // opaque: the sky covers every pixel, and the browser can skip blending the canvas
       view: 'chase',   // 'chase' or 'first'
       vr: null,        // Cardboard VR: { yaw, pitch, roll (the head), fov (degrees across one eye), lens (mm between the lenses), gfx, charge, prompt, sub }
@@ -55,6 +55,21 @@
       lastT: 0,
       anim: [],
     };
+    // Chrome can wipe a canvas the graphics chip held while another app had
+    // the screen; the screen canvas is redrawn every frame anyway, but what
+    // is painted once and kept (sky, glows, billboard) is painted again
+    canvas.addEventListener('contextrestored', () => refresh(r));
+    return r;
+  }
+
+  // Back from another app (or after a lost canvas): paint again everything
+  // that is painted once and kept, here and in the 3D view.
+  function refresh(r) {
+    r.glow = {};
+    if (r.boardTex) r.boardTex.key = undefined;
+    if (r.boardPhotoTex) r.boardPhotoTex.key = undefined;
+    if (r.W) buildSky(r);
+    if (r.three && r.three.refresh) r.three.refresh();
   }
 
   // ---------------- camera maths ----------------
@@ -2192,6 +2207,7 @@
 
   CT.createRenderer = createRenderer;
   CT.resizeRenderer = resize;
+  CT.refreshRenderer = refresh;
   CT.setView = setView;
   CT.setVR = setVR;
   CT.setQuality = setQuality;

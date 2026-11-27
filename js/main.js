@@ -2204,7 +2204,13 @@
     document.addEventListener('visibilitychange', () => {
       // (the CPU rally behind the menu isn't a match, so there's nothing to pause)
       if (document.hidden) { if ($('menu').hidden && $('lobby').hidden && $('pad').hidden) setPaused(true); if (audio) audio.suspend(); }
-      else { if (audio) audio.resume(); checkBuild(); reloadIfNewBuild(); }
+      else {
+        if (audio) audio.resume();
+        // the phone may have wiped what was painted once and kept (the 3D
+        // textures, the sky, the billboard, the menu portraits) while away
+        CT.refreshRenderer(renderer); drawPortraits();
+        checkBuild(); reloadIfNewBuild();
+      }
     });
     sayUpdated();
     checkBuild();
