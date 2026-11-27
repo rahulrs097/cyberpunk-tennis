@@ -32,6 +32,8 @@ const PLAIN = /[?&]3d=plain\b/.test(location.search);
 // The baked rooftop (made in Blender: art/rooftop-bake/). Its light is in
 // the textures, so it needs no live lights.
 const BAKED = 'models/rooftop/';
+// the longest the view waits for its files before showing what it has (ms)
+const LOAD_WAIT = 12000;
 // the ground picture's extent in game metres (bake.py GX0.. GY1)
 const GROUND = { x0: -30, x1: 30, y0: -21.8, y1: 17.8 };
 
@@ -85,19 +87,32 @@ export function create3d(r, R) {
   // swapped for wet ones once the bake has loaded
   const rain = buildRain(scene);
   let baked = null, skyTex = null, wet = null;
+  // Until the whole look has loaded (the baked rooftop, its cars, the city,
+  // the scanned asphalt and rust) the view isn't shown: render.js draws a
+  // plain night sky meanwhile, so the simple stand-in scenery and the flat
+  // theme never flash up before it (Rahul, 2026-11-27). After LOAD_WAIT
+  // it shows whatever has come, so a slow network still gets a picture.
+  const loads = [];
+  let complete = PLAIN, warm = false, self3dProgress = () => 1;
   if (!PLAIN) {
     // the lower graphics levels (and Auto on a modest phone) load the 2048 px bake: a quarter of the memory
     small = LITE || (!r.max && r.quality < 2);
-    loadBaked(scene, small, R).then((b) => {
+    loads.push(loadBaked(scene, small, R).then((b) => {
       baked = b;
       scene.remove(plain);
       dispose(plain);   // free its meshes and textures on the GPU too
       gl.shadowMap.enabled = false;
       if (scene.environment) scene.environment.dispose();
       scene.environment = null;   // (only the plain cars' paint used it)
-    }).catch((e) => console.warn('baked rooftop unavailable', e));
-    loadSkyline(scene).then((t) => { skyTex = t; scene.remove(skyline, moon); dispose(skyline); dispose(moon); })
-      .catch((e) => console.warn('baked skyline unavailable', e));
+    }).catch((e) => console.warn('baked rooftop unavailable', e)));
+    loads.push(loadSkyline(scene).then((t) => { skyTex = t; scene.remove(skyline, moon); dispose(skyline); dispose(moon); })
+      .catch((e) => console.warn('baked skyline unavailable', e)));
+    for (const f of ['asphalt.jpg', 'asphalt_nor.jpg', 'post_rust.jpg']) loads.push(fileTex('models/rain/' + f).loaded);
+    let left = loads.length;
+    for (const l of loads) l.then(() => { left--; });
+    const total = loads.length;
+    self3dProgress = () => 1 - left / total;
+    Promise.race([Promise.all(loads), new Promise((res) => setTimeout(res, LOAD_WAIT))]).then(() => { complete = true; });
   }
   const board = buildBoard(scene, R);
   const players = [0, 1].map(() => buildPlayer(scene, R.LAMPS));
@@ -194,6 +209,10 @@ export function create3d(r, R) {
   const key = (r) => `${r.quality}|${r.max}|${r.W}x${r.H}|${r.vr ? r.dpr : ''}`;
   const self = {
     ready: true, canvas, refresh,
+    // everything loaded, and drawn once out of sight (so the shaders are
+    // built before it is seen): render.js shows the view only then
+    loaded: () => complete && warm,
+    progress: () => (complete ? 1 : self3dProgress()),
     // ?prof: what the last frame cost the GPU, roughly
     stats() {
       const i = gl.info;
@@ -223,6 +242,7 @@ export function create3d(r, R) {
       makeWet(!!r.wet, now, r);
       storm.update(r, now, f, sky.stars, !!r.wet);
       if (composer) composer.render(); else gl.render(scene, cam);
+      if (complete) warm = true;
     },
   };
   self.resize(r);
@@ -241,6 +261,20 @@ function setCamera(cam, r) {
   const k = near / c.f;
   cam.projectionMatrix.makePerspective(-c.cx * k, (r.W - c.cx) * k, c.cy * k, -(r.H - c.cy) * k, near, far);
   cam.projectionMatrixInverse.copy(cam.projectionMatrix).invert();
+}
+
+// Image textures loaded once and shared; each one's load is tracked, so
+// the view can wait for them before it is first shown (see `complete`)
+const FILES = new Map();
+function fileTex(url) {
+  let f = FILES.get(url);
+  if (!f) {
+    let done;
+    const loaded = new Promise((res) => { done = res; });
+    const t = new THREE.TextureLoader().load(url, () => done(true), undefined, () => done(false));
+    FILES.set(url, f = { t, loaded });
+  }
+  return f;
 }
 
 // Every texture painted here keeps its painter, so it can be painted again.
@@ -594,8 +628,8 @@ async function loadBaked(scene, small, R) {
   gltf.scene.traverse((o) => { if (o.isMesh) o.material = mat; });
   scene.add(beyond, deck, gltf.scene);
   const out = { deck, dry, ground, grain, cars: null };
-  // (the cars come a moment later; the roof shows without them till then)
-  loadCars(scene, R, small).then((m) => { out.cars = m; }).catch((e) => console.warn('cars unavailable', e));
+  // (the roof is ready with or without the cars)
+  await loadCars(scene, R, small).then((m) => { out.cars = m; }).catch((e) => console.warn('cars unavailable', e));
   return out;
 }
 
@@ -1303,9 +1337,8 @@ function groundMaterial(ground, grain, LAMPS, wet) {
   }]);
   u.map = { value: ground }; u.grain = { value: grain };
   // the scanned asphalt: Poly Haven's Asphalt Floor (CC0), 1k (models/rain/README.md)
-  const tl = new THREE.TextureLoader();
   for (const [k, f] of [['asphalt', 'asphalt.jpg'], ['asphaltN', 'asphalt_nor.jpg']]) {
-    const t = tl.load('models/rain/' + f);
+    const t = fileTex('models/rain/' + f).t;
     t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 4;
     u[k] = { value: t };
   } u.puddles = { value: puddleTex(CT.R2D.COURT) };
@@ -1505,7 +1538,7 @@ function buildRain(scene) {
 let metal = null;
 function metalMat() {
   if (metal) return metal;
-  const rust = new THREE.TextureLoader().load('models/rain/post_rust.jpg');
+  const rust = fileTex('models/rain/post_rust.jpg').t;
   rust.colorSpace = THREE.SRGBColorSpace;
   rust.wrapS = rust.wrapT = THREE.RepeatWrapping;
   rust.repeat.set(0.6, 1.2);
