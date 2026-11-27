@@ -1897,7 +1897,7 @@
     show3d(r, !!d3);
     let out = ctx;
     if (r.vr) drawStereo(ctx, r, g, human, info, land);
-    else if (!d3 && r.want3d && !r.threeFailed) {
+    else if (loading3d(r)) {
       // the 3D theme is still loading: a plain night sky, not the flat theme
       // or the 3D view's stand-in scenery (render3d.js `complete`); the 3D
       // view draws out of sight meanwhile once it can, to build its shaders
@@ -1917,6 +1917,12 @@
     } else drawScene(ctx, r, g, human, info, land);
     if (SHOW_FPS) drawFps(out, r, dt, d3 || (r.vr && r.want3d && r.three && r.three.ready ? r.three : null));
     watchFrameRate(r, dt, (performance.now() - now) / 1000);
+  }
+
+  // true while the loading sky covers the court (main.js holds the match
+  // and ignores touches meanwhile, as nothing of it can be seen)
+  function loading3d(r) {
+    return !r.vr && !!r.want3d && !r.threeFailed && !(r.three && r.three.ready && r.three.loaded());
   }
 
   // what shows while the 3D theme loads: the night sky's colours and a thin
@@ -2233,6 +2239,7 @@
   CT.createRenderer = createRenderer;
   CT.resizeRenderer = resize;
   CT.refreshRenderer = refresh;
+  CT.loading3d = loading3d;
   CT.setView = setView;
   CT.setVR = setVR;
   CT.setQuality = setQuality;

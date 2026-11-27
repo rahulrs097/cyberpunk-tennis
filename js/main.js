@@ -871,6 +871,8 @@
     if (audio && audio.state === 'suspended') audio.resume();
     if (vr) { e.preventDefault(); vrPress(); return; }
     if (!game || paused || touch) return;
+    // (nothing to aim at while the rooftop loads)
+    if (CT.loading3d(renderer)) { e.preventDefault(); return; }
     try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* capture is optional: the swipe still works without it */ }
     touch = { id: e.pointerId, pts: [{ x: e.clientX, y: e.clientY, t: performance.now() }] };
     e.preventDefault();
@@ -1854,7 +1856,11 @@
     // It does stop while the link is too slow to play on.
     if (vr && game) vrFrame();
     // (in VR a match waits for its first press, except online, where it can't wait)
-    if (game && (!paused || net) && !(vr && vr.wait && !net) && !(vr && vr.home)) {
+    // (and while the rooftop loads behind its loading sky the match waits,
+    // as it does when paused; online it can't wait)
+    const loading = CT.loading3d(renderer);
+    if (loading) touch = null;
+    if (game && (!paused || net) && !(loading && !net) && !(vr && vr.wait && !net) && !(vr && vr.home)) {
       const held = !!(net && net.started && net.lag) && checkLag(now);
       if (!held) CT.updateGame(game, dt);
       if (net && net.started) {
