@@ -39,7 +39,7 @@
     smashFrom: 2.0, smashNear: 4 };
 
   function createRenderer(canvas) {
-    return {
+    const r = {
       canvas, ctx: canvas.getContext('2d', { alpha: false }),   // opaque: the sky covers every pixel, and the browser can skip blending the canvas
       view: 'chase',   // 'chase' or 'first'
       vr: null,        // Cardboard VR: { yaw, pitch, roll (the head), fov (degrees across one eye), lens (mm between the lenses), gfx, charge, prompt, sub }
@@ -55,6 +55,21 @@
       lastT: 0,
       anim: [],
     };
+    // Chrome can wipe a canvas the graphics chip held while another app had
+    // the screen; the screen canvas is redrawn every frame anyway, but what
+    // is painted once and kept (sky, glows, billboard) is painted again
+    canvas.addEventListener('contextrestored', () => refresh(r));
+    return r;
+  }
+
+  // Back from another app (or after a lost canvas): paint again everything
+  // that is painted once and kept, here and in the 3D view.
+  function refresh(r) {
+    r.glow = {};
+    if (r.boardTex) r.boardTex.key = undefined;
+    if (r.boardPhotoTex) r.boardPhotoTex.key = undefined;
+    if (r.W) buildSky(r);
+    if (r.three && r.three.refresh) r.three.refresh();
   }
 
   // ---------------- camera maths ----------------
@@ -1878,10 +1893,17 @@
 
     const ctx = r.ctx;
     ctx.setTransform(r.dpr, 0, 0, r.dpr, 0, 0);
-    const d3 = !r.vr && r.want3d && r.three && r.three.ready ? r.three : null;
+    const d3 = !r.vr && r.want3d && r.three && r.three.ready && r.three.loaded() ? r.three : null;
     show3d(r, !!d3);
     let out = ctx;
     if (r.vr) drawStereo(ctx, r, g, human, info, land);
+    else if (!d3 && r.want3d && !r.threeFailed) {
+      // the 3D theme is still loading: a plain night sky, not the flat theme
+      // or the 3D view's stand-in scenery (render3d.js `complete`); the 3D
+      // view draws out of sight meanwhile once it can, to build its shaders
+      if (r.three && r.three.ready) r.three.draw(r, g, human, now);
+      drawLoading(ctx, r, now);
+    }
     else if (d3) {
       // 3D (three.js, js/render3d.js): the world is drawn on its own WebGL
       // canvas, over this one, from the same camera, and the touch guides
@@ -1895,6 +1917,24 @@
     } else drawScene(ctx, r, g, human, info, land);
     if (SHOW_FPS) drawFps(out, r, dt, d3 || (r.vr && r.want3d && r.three && r.three.ready ? r.three : null));
     watchFrameRate(r, dt, (performance.now() - now) / 1000);
+  }
+
+  // what shows while the 3D theme loads: the night sky's colours and a thin
+  // bar along the horizon that fills as the files come in
+  function drawLoading(ctx, r, now) {
+    const W = r.W, H = r.H, hz = H * 0.62;
+    const sky = ctx.createLinearGradient(0, 0, 0, H);
+    sky.addColorStop(0, '#02030a'); sky.addColorStop(0.5, '#0a0d26'); sky.addColorStop(0.62, '#2b1645'); sky.addColorStop(1, '#07070b');
+    ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
+    const p = r.three && r.three.ready ? r.three.progress() : 0;
+    const bw = Math.min(220, W * 0.5), x = (W - bw) / 2;
+    ctx.fillStyle = 'rgba(255,255,255,0.12)'; ctx.fillRect(x, hz, bw, 2);
+    // (creeps on a little while a file is on its way, so it never looks stuck)
+    const shown = r.loadShown = Math.max(r.loadShown || 0, Math.min(p + 0.15, (r.loadShown || 0) + 0.002), p);
+    ctx.fillStyle = '#7ef9ff'; ctx.fillRect(x, hz, bw * Math.min(1, shown), 2);
+    ctx.font = '600 11px Tektur, sans-serif'; ctx.textAlign = 'center';
+    ctx.fillStyle = `rgba(200,220,255,${0.45 + 0.2 * Math.sin(now / 300)})`;
+    ctx.fillText('LOADING THE ROOFTOP', W / 2, hz - 10);
   }
 
   // ?fps: frames a second (averaged over the last second) in the corner
@@ -2192,6 +2232,7 @@
 
   CT.createRenderer = createRenderer;
   CT.resizeRenderer = resize;
+  CT.refreshRenderer = refresh;
   CT.setView = setView;
   CT.setVR = setVR;
   CT.setQuality = setQuality;
