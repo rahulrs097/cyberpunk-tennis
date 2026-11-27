@@ -656,6 +656,11 @@
     return fontLoaded ? 1 : 0;
   }
 
+  // the billboard's canvases live in ordinary memory, not on the graphics
+  // chip, which a phone can wipe while another app has the screen (the 3D
+  // view sends them to the chip as textures anyway)
+  const KEEP = { willReadFrequently: true };
+
   function boardTexture(r, text, color) {
     const t = r.boardTex || (r.boardTex = document.createElement('canvas'));
     // rebuilt once the display font has loaded
@@ -667,7 +672,7 @@
     t.key = key;
     const W = BOARD_TEX.w, H = BOARD_TEX.h;
     t.width = W; t.height = H;
-    const ctx = t.getContext('2d');
+    const ctx = t.getContext('2d', KEEP);
     ctx.fillStyle = led ? '#050506' : 'rgba(8,6,22,0.82)';
     ctx.fillRect(0, 0, W, H);
     if (!led) {
@@ -1218,9 +1223,9 @@
       const key = cur.score || cur.photo ? [slide, cur.photo ? cur.photo.src.length + cur.photo.src.slice(-24) : '', cur.text, cur.label, cur.server, cur.color, pl ? [pl.ms, pl.red, pl.slow, pl.direct].join() : '', r.quality, fontReady(), !!r.want3d].join('|') : null;
       if (key === null || src.key !== key) {
         src.key = key;
-        if (cur.photo || cur.score) drawBoardPhoto(src.getContext('2d'), r, now, cur);
-        else if (cur.anim) BOARD_ANIMS[cur.anim](src.getContext('2d'), r, age, cur.data);
-        else drawBoardCall(src.getContext('2d'), r, cur.call, age);
+        if (cur.photo || cur.score) drawBoardPhoto(src.getContext('2d', KEEP), r, now, cur);
+        else if (cur.anim) BOARD_ANIMS[cur.anim](src.getContext('2d', KEEP), r, age, cur.data);
+        else drawBoardCall(src.getContext('2d', KEEP), r, cur.call, age);
       }
     } else src = boardTexture(r, cur.text, cur.color);
     return { src, on };
